@@ -49,5 +49,28 @@
       diagnostics:()=>Object.freeze({cachedJobCount:filesByJobId.size,inFlightJobCount:loadingByJobId.size,persistent:false})
     });
   }
-  return Object.freeze({createCache});
+  function createPreviewCache(){
+    const previews=new Map();
+    const loading=new Map();
+    let downloadCount=0;
+    const keyFor=value=>JSON.stringify([value?.jobId,value?.fileId,value?.sha256].map(part=>String(part||"").trim()));
+    const normalize=(identity,value)=>Object.freeze({
+      key:keyFor(identity),jobId:String(identity?.jobId||""),fileId:String(identity?.fileId||""),sha256:String(identity?.sha256||""),
+      status:value?.previewData?"ready":(value?.status==="error"?"error":"unavailable"),
+      previewData:value?.previewData?String(value.previewData):"",
+      diagnostics:Object.freeze({completed:value?.completed===true,blockers:Object.freeze(Array.isArray(value?.blockers)?value.blockers.map(String):[]),previewRoute:String(value?.previewRoute||""),previewAvailable:value?.previewAvailable===true,previewDisplayed:value?.previewDisplayed===true,opened:value?.opened===true,error:value?.error?Object.freeze({code:String(value.error.code||""),message:String(value.error.message||"")}):null})
+    });
+    const peek=identity=>previews.get(keyFor(identity))||null;
+    const load=(identity,loader)=>{
+      const key=keyFor(identity);
+      if(!identity?.jobId||!identity?.fileId||!identity?.sha256)return Promise.resolve(null);
+      if(previews.has(key))return Promise.resolve(previews.get(key));
+      if(loading.has(key))return loading.get(key);
+      downloadCount+=1;
+      const request=Promise.resolve().then(()=>loader(identity)).then(value=>{const result=normalize(identity,value);previews.set(key,result);return result;},error=>{const result=normalize(identity,{status:"error",error:{code:String(error?.code||"previewFailure"),message:String(error?.message||error||"Preview failed.")}});previews.set(key,result);return result;}).finally(()=>loading.delete(key));
+      loading.set(key,request);return request;
+    };
+    return Object.freeze({peek,load,has:identity=>previews.has(keyFor(identity)),isLoading:identity=>loading.has(keyFor(identity)),clear:()=>previews.clear(),diagnostics:()=>Object.freeze({cachedPreviewCount:previews.size,inFlightPreviewCount:loading.size,downloadCount,persistent:false})});
+  }
+  return Object.freeze({createCache,createPreviewCache});
 });

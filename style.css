@@ -6442,3 +6442,12 @@ body.job-flow-lock-scroll {
   vertical-align:top;
   word-break:break-word;
 }
+
+/* Secure cloud previews are session-only presentation, bounded for the Files column. */
+.job-cloud-files { display: grid; gap: 5px; min-width: 0; margin-top: 5px; }
+.job-cloud-files select { width: 100%; max-width: 250px; margin-top: 3px; }
+.job-cloud-preview-target,
+.job-cloud-preview-unavailable { width: min(100%, 250px); min-height: 90px; display: grid; place-items: center; padding: 8px; border: 1px dashed #b9c3d2; border-radius: 6px; background: #f7f9fc; text-align: center; }
+.job-cloud-preview-button { width: min(100%, 250px); max-height: 170px; padding: 0; border: 1px solid #c8d1df; border-radius: 6px; background: #fff; overflow: hidden; cursor: zoom-in; }
+.job-cloud-preview-image { display: block; width: 100%; height: 100%; max-height: 168px; object-fit: contain; }
+.job-cloud-file-item { flex-wrap: wrap; }

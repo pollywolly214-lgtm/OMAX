@@ -2,14 +2,12 @@
 const assert=require("node:assert/strict"),fs=require("node:fs");
 const views=fs.readFileSync("js/views.js","utf8"),renderers=fs.readFileSync("js/renderers.js","utf8"),core=fs.readFileSync("js/core.js","utf8"),service=fs.readFileSync("js/cfr05CloudCuttingFiles.js","utf8");
 
-for(const token of [
-  "Attach from Reference Folder","Temporary local upload — not saved","Link OneDrive URL",
-  "Add from this computer OneDrive folder","OneDrive setup","data-job-file-add","data-upload-job",
-  "data-link-job-file","jobOneDriveLibraryAddBtn","data-job-onedrive-setup","data-open-local-file",
-  "data-preview-path-btn","data-remove-file","data-edit-file-link"
-]) assert.ok(views.includes(token),`current-main file workflow remains visible: ${token}`);
-assert.match(views,/id="jobSecureCloudFilesBtn">Upload secure cloud file/);
-assert.match(views,/data-cloud-files=/);assert.match(views,/data-cloud-file-upload=/);
+for(const token of ["Reference folder","OneDrive","data-open-local-file","data-preview-path-btn","data-remove-file","data-edit-file-link"])
+  assert.ok(views.includes(token),`legacy attachment remains readable: ${token}`);
+for(const obsoleteControl of ["Attach from Reference Folder","Temporary local upload — not saved","Link OneDrive URL","Add from this computer OneDrive folder","data-job-file-add=","data-upload-job=","data-link-job-file="])
+  assert.equal(views.includes(obsoleteControl),false,`normal attachment-creation control is hidden: ${obsoleteControl}`);
+assert.match(views,/id="jobSecureCloudFilesBtn">Upload file/);
+assert.match(views,/data-cloud-file-upload=/);
 
 for(const token of [
   "handleReferenceFolderAttachButtonClick","attachFromLocalOneDriveRoot","openLocalRootAttachment",

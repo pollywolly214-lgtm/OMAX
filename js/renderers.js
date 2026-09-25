@@ -7,6 +7,12 @@ if (!window.cfr05CloudPresentation && window.Cfr05CloudFilePresentation){
   window.cfr05CloudPresentation = window.Cfr05CloudFilePresentation.createCache();
 }
 const cfr05CloudPresentation = window.cfr05CloudPresentation;
+if (!window.cfr05CloudPreviewCache && window.Cfr05CloudFilePresentation){
+  window.cfr05CloudPreviewCache = window.Cfr05CloudFilePresentation.createPreviewCache();
+}
+if (!(window.cfr05CloudPreviewSelection instanceof Map)) window.cfr05CloudPreviewSelection = new Map();
+const cfr05CloudPreviewCache = window.cfr05CloudPreviewCache;
+const cfr05CloudPreviewSelection = window.cfr05CloudPreviewSelection;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
 const timeEfficiencyWidgets = [];
@@ -20104,8 +20110,8 @@ window.refreshCfr05CloudPresentation = refreshCfr05CloudPresentation;
 function hydrateVisibleCfr05CloudFiles(content){
   if (!content || !cfr05CloudPresentation || typeof window.listCfr05CloudFiles !== "function") return;
   const ids = new Set();
-  content.querySelectorAll("[data-cloud-files]").forEach(node=>{
-    const id = String(node.getAttribute("data-cloud-files") || "").trim();
+  content.querySelectorAll("[data-cfr05-cloud-job-id]").forEach(node=>{
+    const id = String(node.getAttribute("data-cfr05-cloud-job-id") || "").trim();
     if (id) ids.add(id);
   });
   const missing = [...ids].filter(id=>!cfr05CloudPresentation.has(id) && !cfr05CloudPresentation.isLoading(id));
@@ -20113,6 +20119,35 @@ function hydrateVisibleCfr05CloudFiles(content){
   Promise.allSettled(missing.map(id=>refreshCfr05CloudPresentation(id))).then(()=>{
     if (document.getElementById("content") === content && typeof renderJobs === "function") renderJobs();
   });
+}
+
+async function hydrateCfr05DxfPreview(target){
+  const identity={jobId:String(target?.dataset?.cfr05JobId||""),fileId:String(target?.dataset?.cfr05FileId||""),sha256:String(target?.dataset?.cfr05Sha256||"")};
+  if (!identity.jobId || !identity.fileId || !identity.sha256 || !cfr05CloudPreviewCache) return null;
+  return cfr05CloudPreviewCache.load(identity,async value=>{
+    let previewData="";
+    const outcome=await window.openCfr05CloudFile(value.jobId,value.fileId,{displayPreview:async preview=>{if(!/^data:image\/svg\+xml/i.test(preview))return false;previewData=preview;return true;}});
+    return {...outcome,previewData};
+  });
+}
+window.getCfr05CloudPreviewDiagnostics=()=>cfr05CloudPreviewCache?.diagnostics?.()||{cachedPreviewCount:0,inFlightPreviewCount:0,downloadCount:0,persistent:false};
+
+function setupCfr05InlinePreviewHydration(content){
+  if (!content || !cfr05CloudPreviewCache) return;
+  if (window.__cfr05PreviewObserver){window.__cfr05PreviewObserver.disconnect();window.__cfr05PreviewObserver=null;}
+  const activate=target=>{
+    const identity={jobId:target.dataset.cfr05JobId,fileId:target.dataset.cfr05FileId,sha256:target.dataset.cfr05Sha256};
+    if(cfr05CloudPreviewCache.has(identity)||cfr05CloudPreviewCache.isLoading(identity))return;
+    hydrateCfr05DxfPreview(target).then(()=>{if(document.getElementById("content")===content)renderJobs();});
+  };
+  const targets=Array.from(content.querySelectorAll("[data-cfr05-preview-target]"));
+  if(typeof window.IntersectionObserver==="function"){
+    const observer=new window.IntersectionObserver(entries=>entries.forEach(entry=>{if(!entry.isIntersecting)return;observer.unobserve(entry.target);activate(entry.target);}),{rootMargin:"160px 0px"});
+    targets.forEach(target=>observer.observe(target));window.__cfr05PreviewObserver=observer;
+  }else{
+    requestAnimationFrame(()=>targets.forEach(target=>{const rect=target.getBoundingClientRect();if(rect.bottom>=-160&&rect.top<=(window.innerHeight||document.documentElement.clientHeight)+160)activate(target);}));
+  }
+  content.querySelectorAll("[data-cfr05-dxf-select]").forEach(select=>select.addEventListener("change",()=>{cfr05CloudPreviewSelection.set(String(select.dataset.cfr05DxfSelect||""),String(select.value||""));renderJobs();}));
 }
 
 function renderJobs(){
@@ -20173,6 +20208,7 @@ function renderJobs(){
   content.innerHTML = viewJobs();
   setupJobLayout();
   hydrateVisibleCfr05CloudFiles(content);
+  setupCfr05InlinePreviewHydration(content);
 
   const inlineOneDriveModal = content.querySelector("#jobOneDriveModal");
   if (inlineOneDriveModal && inlineOneDriveModal.parentElement !== document.body){
@@ -23062,8 +23098,16 @@ function renderJobs(){
         if(outcome.stage==="completed"){toast(`Cloud file verified: ${file.name}`);try{const listing=await refreshCfr05CloudPresentation(jobId,{force:true});reportListing(listing);if(listing.error||listing.blockers?.length)toast("Upload succeeded; Cloud Files refresh failed. Do not upload the file again.");else{toast("Cloud Files refreshed.");renderJobs();}}catch(listingError){reportListing({jobId,error:{code:String(listingError?.code||"listingRefreshFailure"),message:String(listingError?.message||listingError)}});toast("Upload succeeded; Cloud Files refresh failed. Do not upload the file again.");}}
         else if(outcome.indeterminate)toast(`Cloud upload indeterminate; do not retry automatically. Manual inspection required${outcome.possibleOrphanPath?`: ${outcome.possibleOrphanPath}`:""}.`);
         else toast(`Cloud upload blocked/failed at ${outcome.stage}: ${outcome.error?.message||"Unknown error"}`);
-      }catch(err){const result={stage:"unexpected_failure",error:{code:String(err?.code||"unexpected"),message:String(err?.message||err)}};reportUpload(result);toast(`Secure cloud upload failed: ${result.error.message}`);}finally{input.remove();cloudUpload.disabled=false;cloudUpload.textContent="Upload secure cloud file";}} ,{once:true});
+      }catch(err){const result={stage:"unexpected_failure",error:{code:String(err?.code||"unexpected"),message:String(err?.message||err)}};reportUpload(result);toast(`Secure cloud upload failed: ${result.error.message}`);}finally{input.remove();cloudUpload.disabled=false;cloudUpload.textContent="Upload file";}} ,{once:true});
       input.click(); return true;
+    }
+    const enlargePreview=e.target.closest("[data-cfr05-enlarge-preview]");
+    if(enlargePreview){
+      e.preventDefault();e.stopPropagation();
+      const identity={jobId:String(enlargePreview.dataset.cfr05JobId||""),fileId:String(enlargePreview.dataset.cfr05EnlargePreview||""),sha256:String(enlargePreview.dataset.cfr05Sha256||"")};
+      const cached=cfr05CloudPreviewCache?.peek(identity);
+      if(!cached?.previewData){toast("Preview is not available in this browser session.");return true;}
+      const dialog=document.createElement("dialog");dialog.setAttribute("data-cfr05-enlarged-preview","");dialog.innerHTML=`<h3>DXF preview</h3><img src="${escapeHtml(cached.previewData)}" alt="Enlarged verified DXF preview" style="max-width:min(90vw,1000px);max-height:80vh"><button type="button">Close</button>`;dialog.querySelector("button").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();return true;
     }
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
     if (fileMenuAdd){
@@ -23088,7 +23132,7 @@ function renderJobs(){
   const handleRootFileActionClick = (e)=>{
     const target = e.target;
     if (!(target instanceof Element)) return;
-    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload], [data-cfr05-presented-open], [data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
+    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload], [data-cfr05-presented-open], [data-cfr05-enlarge-preview], [data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
     if (!fileAction || !content.contains(fileAction)) return;
     handleCuttingJobFileActionClick(e).catch(err => {
       console.error("Cutting job file action failed", err);

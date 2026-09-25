@@ -2972,20 +2972,37 @@ function viewJobs(){
   const cloudPresentationForJob = jobId => window.cfr05CloudPresentation?.peek?.(String(jobId || "")) || null;
   const buildCloudFileMarkup = jobId => {
     const state = cloudPresentationForJob(jobId);
+    const jobKey = String(jobId || "");
     if (!state){
-      return '<div class="job-cloud-files small muted" data-cloud-files-presentation>Checking secure cloud files…</div>';
+      return `<div class="job-cloud-files small muted" data-cloud-files-presentation data-cfr05-cloud-job-id="${esc(jobKey)}">Checking secure cloud files…</div>`;
     }
     if (state.error || state.blockers?.length){
-      return '<div class="job-cloud-files small muted" data-cloud-files-presentation>Secure cloud files unavailable — open Cloud files for details.</div>';
+      return `<div class="job-cloud-files small muted" data-cloud-files-presentation data-cfr05-cloud-job-id="${esc(jobKey)}">Secure cloud files unavailable.</div>`;
     }
-    if (!state.files?.length) return "";
-    const rows = state.files.map(file => {
-      const size = Number(file.sizeBytes) / 1024;
-      const sizeLabel = Number.isFinite(size) ? `${size.toFixed(1)} KB` : "size unavailable";
-      const actionLabel = file.extension === "dxf" ? "Preview/Open" : "Download/Open";
-      return `<li class="job-cloud-file-item"><button type="button" class="link" data-cfr05-presented-open="${esc(file.fileId)}" data-cfr05-job-id="${esc(jobId)}">${esc(file.originalName)}</button><span class="small muted"> — Secure cloud · ${esc(String(file.extension || "").toUpperCase())} · ${esc(sizeLabel)} · verified</span><button type="button" class="link" data-cfr05-presented-open="${esc(file.fileId)}" data-cfr05-job-id="${esc(jobId)}">${actionLabel}</button></li>`;
-    }).join("");
-    return `<div class="job-cloud-files" data-cloud-files-presentation><div class="job-file-source-badge">Secure cloud</div><ul class="job-file-list">${rows}</ul></div>`;
+    if (!state.files?.length) return `<div class="job-cloud-files" data-cloud-files-presentation data-cfr05-cloud-job-id="${esc(jobKey)}"></div>`;
+    const dxfFiles = state.files.filter(file=>file.extension === "dxf");
+    const otherFiles = state.files.filter(file=>file.extension !== "dxf");
+    const preferredId = window.cfr05CloudPreviewSelection?.get?.(jobKey);
+    const selected = dxfFiles.find(file=>file.fileId === preferredId) || dxfFiles[0] || null;
+    const selectedIdentity = selected ? {jobId:jobKey,fileId:selected.fileId,sha256:selected.sha256} : null;
+    const preview = selectedIdentity ? window.cfr05CloudPreviewCache?.peek?.(selectedIdentity) : null;
+    const selector = dxfFiles.length > 1
+      ? `<label class="small muted">DXF preview<select data-cfr05-dxf-select="${esc(jobKey)}">${dxfFiles.map(file=>`<option value="${esc(file.fileId)}" ${file.fileId===selected?.fileId?"selected":""}>${esc(file.originalName)}</option>`).join("")}</select></label>`
+      : "";
+    let previewMarkup = "";
+    if (selected){
+      const size = Number(selected.sizeBytes) / 1024;
+      const detail = `DXF · ${Number.isFinite(size)?`${size.toFixed(1)} KB`:"size unavailable"} · verified`;
+      if (preview?.status === "ready"){
+        previewMarkup = `<button type="button" class="job-cloud-preview-button" data-cfr05-enlarge-preview="${esc(selected.fileId)}" data-cfr05-job-id="${esc(jobKey)}" data-cfr05-sha256="${esc(selected.sha256)}" aria-label="Enlarge ${esc(selected.originalName)}"><img class="job-cloud-preview-image" src="${esc(preview.previewData)}" alt="Preview of ${esc(selected.originalName)}"></button><div class="job-file-preview-name">${esc(selected.originalName)}</div><div class="small muted">${esc(detail)}</div>`;
+      } else if (preview?.status === "unavailable" || preview?.status === "error"){
+        previewMarkup = `<div class="job-cloud-preview-unavailable">DXF browser preview unavailable</div><div class="job-file-preview-name">${esc(selected.originalName)}</div><div class="small muted">${esc(detail)}</div><button type="button" class="link" data-cfr05-presented-open="${esc(selected.fileId)}" data-cfr05-job-id="${esc(jobKey)}">Download/Open</button>`;
+      } else {
+        previewMarkup = `<div class="job-cloud-preview-target small muted" data-cfr05-preview-target data-cfr05-job-id="${esc(jobKey)}" data-cfr05-file-id="${esc(selected.fileId)}" data-cfr05-sha256="${esc(selected.sha256)}">DXF preview loads when visible…</div><div class="job-file-preview-name">${esc(selected.originalName)}</div><div class="small muted">${esc(detail)}</div>`;
+      }
+    }
+    const otherRows = otherFiles.map(file=>{const size=Number(file.sizeBytes)/1024;return `<li><span>${esc(file.originalName)}</span><span class="small muted">${esc(String(file.extension||"").toUpperCase())} · ${Number.isFinite(size)?`${size.toFixed(1)} KB`:"size unavailable"} · verified</span><button type="button" class="link" data-cfr05-presented-open="${esc(file.fileId)}" data-cfr05-job-id="${esc(jobKey)}">Download/Open</button></li>`;}).join("");
+    return `<div class="job-cloud-files" data-cloud-files-presentation data-cfr05-cloud-job-id="${esc(jobKey)}"><div class="job-file-source-badge">Secure cloud</div>${selector}${previewMarkup}${otherRows?`<ul class="job-file-list">${otherRows}</ul>`:""}</div>`;
   };
   const buildFileCellMarkup = (jobId, files)=>{
     const previews = (Array.isArray(files) ? files : []).map(filePreviewModel);
@@ -4045,7 +4062,7 @@ function viewJobs(){
             </div>
             <label class="job-edit-note">Notes<textarea data-history-field="notes" data-history-id="${job.id}" rows="3" placeholder="Notes...">${textEsc(job?.notes || "")}</textarea></label>
             <div class="job-edit-files">
-              <div class="job-edit-files-actions"><button type="button" data-cloud-files="${job.id}">Cloud files</button><button type="button" data-cloud-file-upload="${job.id}">Upload secure cloud file</button><button type="button" data-job-file-add="${job.id}" data-job-file-source="history">Attach from Reference Folder</button><button type="button" data-upload-job="${job.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${job.id}">Link OneDrive URL</button></div>
+              <div class="job-edit-files-actions"><button type="button" data-cloud-file-upload="${job.id}">Upload file</button></div>
               <input type="file" data-job-file-input="${job.id}" multiple style="display:none">
               <ul class="job-file-list">
                 ${jobFiles.length ? jobFiles.map((f, idx)=>{
@@ -4182,7 +4199,7 @@ function viewJobs(){
           return `<li class="job-file-menu-item"><a href="${href}" download="${safeName}" target="_blank" rel="noopener">${safeName}</a></li>`;
         }).join("")
       : "";
-    const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-cloud-files="${j.id}">Cloud files</button><button type="button" class="job-file-menu-action" data-cloud-file-upload="${j.id}">Upload secure cloud file</button><button type="button" class="job-file-menu-action" data-job-file-add="${j.id}">+ Add local reference</button></div>
+    const fileMenuActions = `<div class="job-file-menu-actions"><button type="button" class="job-file-menu-action" data-cloud-file-upload="${j.id}">Upload file</button></div>
     <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
       <div class="cost-receipt-backdrop" data-order-repair-close></div>
       <div class="cost-receipt-card" role="document">
@@ -4483,7 +4500,7 @@ function viewJobs(){
             </div>
               <label class="job-edit-note">Notes<textarea data-j="notes" data-id="${j.id}" rows="3" placeholder="Notes...">${j.notes||""}</textarea></label>
               <div class="job-edit-files">
-                <div class="job-edit-files-actions"><button type="button" data-cloud-files="${j.id}">Cloud files</button><button type="button" data-cloud-file-upload="${j.id}">Upload secure cloud file</button><button type="button" data-job-file-add="${j.id}" data-job-file-source="active">Attach from Reference Folder</button><button type="button" data-upload-job="${j.id}">Temporary local upload — not saved</button><button type="button" data-link-job-file="${j.id}">Link OneDrive URL</button></div>
+                <div class="job-edit-files-actions"><button type="button" data-cloud-file-upload="${j.id}">Upload file</button></div>
                 <input type="file" data-job-file-input="${j.id}" multiple style="display:none">
                 <ul class="job-file-list">
                   ${jobFiles.length ? jobFiles.map((f, idx)=>{
@@ -4650,9 +4667,7 @@ function viewJobs(){
           <button type="button" id="jobMaterialSettingsBtn">Material settings</button>
           </div>
           <div class="job-add-actions">
-            <button type="button" id="jobFilesBtn">Attach Files</button>
-            <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
-            <button type="button" id="jobSecureCloudFilesBtn">Upload secure cloud file</button>
+            <button type="button" id="jobSecureCloudFilesBtn">Upload file</button>
             <button type="submit">Add Job</button>
           </div>
           <input type="file" id="jobFiles" multiple style="display:none">

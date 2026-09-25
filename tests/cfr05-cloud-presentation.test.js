@@ -1,6 +1,6 @@
 "use strict";
 const assert=require("node:assert/strict"),fs=require("node:fs");
-const {createCache}=require("../js/cloudFilePresentation.js");
+const {createCache,createPreviewCache}=require("../js/cloudFilePresentation.js");
 
 (async()=>{
   const cache=createCache();
@@ -21,17 +21,38 @@ const {createCache}=require("../js/cloudFilePresentation.js");
   assert.equal(failed.error.code,"permission-denied");await cache.load("job_failed",async()=>{failedReads+=1;return{};});assert.equal(failedReads,1,"failed listing is cached to prevent a render-query loop");
   assert.equal(JSON.stringify(cache).includes("part.dxf"),false,"transient cache is not serializable into app state");
 
+  const previews=createPreviewCache(),identity={jobId:"job_1",fileId:"f1",sha256:"a".repeat(64)};
+  let downloads=0,finishPreview;
+  const previewLoader=()=>{downloads+=1;return new Promise(resolve=>{finishPreview=()=>resolve({completed:true,blockers:[],previewRoute:"dxf",previewAvailable:true,previewDisplayed:true,opened:false,previewData:"data:image/svg+xml,preview"});});};
+  const previewFirst=previews.load(identity,previewLoader),previewDuplicate=previews.load(identity,previewLoader);
+  assert.equal(previewFirst,previewDuplicate,"visible duplicate preview requests share one download");await Promise.resolve();assert.equal(downloads,1);finishPreview();await previewFirst;
+  assert.equal(previews.peek(identity).status,"ready");await previews.load(identity,previewLoader);assert.equal(downloads,1,"rerender/edit reuse the session preview");
+  assert.deepEqual(previews.diagnostics(),{cachedPreviewCount:1,inFlightPreviewCount:0,downloadCount:1,persistent:false});
+  assert.equal(JSON.stringify(previews).includes("data:image"),false,"preview cache cannot serialize its SVG data URL");
+  const alternate={jobId:"job_1",fileId:"f2",sha256:"b".repeat(64)};await previews.load(alternate,async()=>{downloads+=1;return{completed:true,previewRoute:"dxf",previewData:""};});assert.equal(downloads,2,"only a newly selected immutable DXF downloads");assert.equal(previews.peek(alternate).status,"unavailable");
+
   const views=fs.readFileSync("js/views.js","utf8"),renderers=fs.readFileSync("js/renderers.js","utf8"),core=fs.readFileSync("js/core.js","utf8");
-  assert.match(views,/Secure cloud · \$\{esc\(String\(file\.extension/);
-  assert.match(views,/data-cfr05-presented-open/);
+  assert.match(views,/data-cfr05-cloud-job-id/);
+  assert.match(views,/data-cfr05-preview-target/);assert.match(views,/data-cfr05-dxf-select/);assert.match(views,/data-cfr05-enlarge-preview/);
+  assert.match(views,/DXF browser preview unavailable/);assert.match(views,/Download\/Open/);
   assert.match(views,/cloudMarkup \|\| '<div class="job-file-preview-empty small muted">No files attached<\/div>'/);
   assert.match(views,/Reference folder/);assert.match(views,/OneDrive/);assert.match(views,/No local\/reference files attached/);
-  assert.match(renderers,/hydrateVisibleCfr05CloudFiles/);
+  assert.match(renderers,/hydrateVisibleCfr05CloudFiles/);assert.match(renderers,/querySelectorAll\("\[data-cfr05-cloud-job-id\]"\)/);
+  const metadataHydration=renderers.slice(renderers.indexOf("function hydrateVisibleCfr05CloudFiles"),renderers.indexOf("async function hydrateCfr05DxfPreview"));
+  assert.doesNotMatch(metadataHydration,/openCfr05CloudFile|hydrateCfr05DxfPreview/,"metadata hydration downloads no file bytes");
+  assert.match(renderers,/IntersectionObserver/);assert.match(renderers,/rootMargin:"160px 0px"/);
+  assert.match(renderers,/if\(!entry\.isIntersecting\)return/);assert.match(renderers,/observer\.unobserve\(entry\.target\);activate\(entry\.target\)/,"offscreen rows wait for observer activation");
+  assert.match(views,/state\.files\.filter\(file=>file\.extension === "dxf"\)/);assert.match(views,/state\.files\.filter\(file=>file\.extension !== "dxf"\)/,"ORD and OMX never enter the DXF preview target");
+  assert.match(renderers,/cfr05CloudPreviewSelection\.set/);assert.match(views,/dxfFiles\.find\(file=>file\.fileId === preferredId\) \|\| dxfFiles\[0\]/,"only selected DXF has a preview target");
+  assert.match(renderers,/hydrateCfr05DxfPreview/);assert.match(renderers,/displayPreview:async preview/);
+  const inlinePipeline=renderers.slice(renderers.indexOf("async function hydrateCfr05DxfPreview"),renderers.indexOf("window.getCfr05CloudPreviewDiagnostics"));
+  assert.doesNotMatch(inlinePipeline,/openObjectUrl/,"unsupported inline DXF never auto-downloads to the PC");
+  assert.match(renderers,/cfr05CloudPreviewCache\?\.peek\(identity\)/,"enlarge uses cached preview without download");
   assert.match(renderers,/!cfr05CloudPresentation\.has\(id\) && !cfr05CloudPresentation\.isLoading\(id\)/);
   assert.match(renderers,/refreshCfr05CloudPresentation\(jobId,\{force:true\}\)/,"successful existing-job upload refreshes only its exact job");
   assert.match(renderers,/refreshCfr05CloudPresentation\(newJob\.id,\{force:true\}\)/,"successful new-job uploads refresh only the new job");
-  assert.doesNotMatch(core,/cloudFilesByJobId|cfr05CloudPresentation/,"transient presentation cache is absent from core persistence");
-  for(const source of [views,renderers,core]) assert.doesNotMatch(source,/localStorage[^\n]*cfr05Cloud|snapshotState\([^\n]*cfr05Cloud/);
+  assert.doesNotMatch(core,/cloudFilesByJobId|cfr05CloudPresentation|cfr05CloudPreviewCache/,"transient presentation cache is absent from core persistence");
+  for(const source of [views,renderers,core]) assert.doesNotMatch(source,/localStorage[^\n]*cfr05Cloud|snapshotState\([^\n]*cfr05Cloud|saveCloudNow\([^\n]*cfr05Cloud/);
   assert.doesNotMatch(renderers,/job\.files\s*=\s*.*cloud|cuttingJobs.*cloudFile|completedCuttingJobs.*cloudFile/i);
   console.log("ok - CFR-05 transient cloud presentation is bounded, separate, and renderable");
 })().catch(error=>{console.error(error);process.exitCode=1;});
