@@ -27,11 +27,12 @@ const {createCache,createPreviewCache}=require("../js/cloudFilePresentation.js")
   const previewFirst=previews.load(identity,previewLoader),previewDuplicate=previews.load(identity,previewLoader);
   assert.equal(previewFirst,previewDuplicate,"visible duplicate preview requests share one download");await Promise.resolve();assert.equal(downloads,1);finishPreview();await previewFirst;
   assert.equal(previews.peek(identity).status,"ready");await previews.load(identity,previewLoader);assert.equal(downloads,1,"rerender/edit reuse the session preview");
+  const countBeforeEnlarge=previews.diagnostics().downloadCount;assert.equal(previews.peek(identity).previewData,"data:image/svg+xml,preview");assert.equal(previews.diagnostics().downloadCount,countBeforeEnlarge,"cached enlargement does not increment downloadCount");
   assert.deepEqual(previews.diagnostics(),{cachedPreviewCount:1,inFlightPreviewCount:0,downloadCount:1,persistent:false});
   assert.equal(JSON.stringify(previews).includes("data:image"),false,"preview cache cannot serialize its SVG data URL");
   const alternate={jobId:"job_1",fileId:"f2",sha256:"b".repeat(64)};await previews.load(alternate,async()=>{downloads+=1;return{completed:true,previewRoute:"dxf",previewData:""};});assert.equal(downloads,2,"only a newly selected immutable DXF downloads");assert.equal(previews.peek(alternate).status,"unavailable");
 
-  const views=fs.readFileSync("js/views.js","utf8"),renderers=fs.readFileSync("js/renderers.js","utf8"),core=fs.readFileSync("js/core.js","utf8");
+  const views=fs.readFileSync("js/views.js","utf8"),renderers=fs.readFileSync("js/renderers.js","utf8"),core=fs.readFileSync("js/core.js","utf8"),styles=fs.readFileSync("style.css","utf8");
   assert.match(views,/data-cfr05-cloud-job-id/);
   assert.match(views,/data-cfr05-preview-target/);assert.match(views,/data-cfr05-dxf-select/);assert.match(views,/data-cfr05-enlarge-preview/);
   assert.match(views,/DXF browser preview unavailable/);assert.match(views,/Download\/Open/);
@@ -48,6 +49,16 @@ const {createCache,createPreviewCache}=require("../js/cloudFilePresentation.js")
   const inlinePipeline=renderers.slice(renderers.indexOf("async function hydrateCfr05DxfPreview"),renderers.indexOf("window.getCfr05CloudPreviewDiagnostics"));
   assert.doesNotMatch(inlinePipeline,/openObjectUrl/,"unsupported inline DXF never auto-downloads to the PC");
   assert.match(renderers,/cfr05CloudPreviewCache\?\.peek\(identity\)/,"enlarge uses cached preview without download");
+  const enlargeHandler=renderers.slice(renderers.indexOf('const enlargePreview=e.target.closest("[data-cfr05-enlarge-preview]")'),renderers.indexOf('const fileMenuAdd =',renderers.indexOf('const enlargePreview=e.target.closest("[data-cfr05-enlarge-preview]")')));
+  assert.doesNotMatch(enlargeHandler,/openCfr05CloudFile|getDownloadURL|fetch\(|hydrateCfr05DxfPreview|\.load\(/,"enlargement is presentation-only");
+  assert.match(enlargeHandler,/cfr05-preview-dialog-header/);assert.match(enlargeHandler,/cfr05-preview-dialog-body/);assert.match(enlargeHandler,/dataset\.cfr05FileName/);assert.match(views,/data-cfr05-file-name/);
+  assert.match(styles,/button\.job-cloud-preview-button[^}]*background: transparent !important/);
+  assert.match(styles,/button\.job-cloud-preview-button[^}]*border: 0 !important/);assert.match(styles,/button\.job-cloud-preview-button[^}]*box-shadow: none !important/);
+  assert.match(styles,/job-cloud-preview-frame[^}]*min-height: 180px[^}]*max-height: 230px/);
+  assert.match(styles,/job-cloud-preview-image[^}]*max-height: 214px[^}]*object-fit: contain/);
+  assert.doesNotMatch(styles,/job-cloud-preview-button[^}]*250px|job-cloud-preview-button[^}]*170px/);
+  assert.match(styles,/cfr05-preview-dialog[^}]*width: min\(92vw, 1200px\)[^}]*max-height: 90vh/);
+  assert.match(styles,/cfr05-preview-dialog-image[^}]*max-width: 88vw[^}]*max-height: 80vh[^}]*object-fit: contain/);
   assert.match(renderers,/!cfr05CloudPresentation\.has\(id\) && !cfr05CloudPresentation\.isLoading\(id\)/);
   assert.match(renderers,/refreshCfr05CloudPresentation\(jobId,\{force:true\}\)/,"successful existing-job upload refreshes only its exact job");
   assert.match(renderers,/refreshCfr05CloudPresentation\(newJob\.id,\{force:true\}\)/,"successful new-job uploads refresh only the new job");

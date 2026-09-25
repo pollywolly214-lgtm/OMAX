@@ -6444,10 +6444,18 @@ body.job-flow-lock-scroll {
 }
 
 /* Secure cloud previews are session-only presentation, bounded for the Files column. */
-.job-cloud-files { display: grid; gap: 5px; min-width: 0; margin-top: 5px; }
-.job-cloud-files select { width: 100%; max-width: 250px; margin-top: 3px; }
+.job-col-files { width: 320px; min-width: 300px; }
+.job-cloud-files { display: grid; gap: 6px; min-width: 0; width: 100%; margin-top: 5px; }
+.job-cloud-files select { width: 100%; max-width: 340px; margin-top: 3px; }
 .job-cloud-preview-target,
-.job-cloud-preview-unavailable { width: min(100%, 250px); min-height: 90px; display: grid; place-items: center; padding: 8px; border: 1px dashed #b9c3d2; border-radius: 6px; background: #f7f9fc; text-align: center; }
-.job-cloud-preview-button { width: min(100%, 250px); max-height: 170px; padding: 0; border: 1px solid #c8d1df; border-radius: 6px; background: #fff; overflow: hidden; cursor: zoom-in; }
-.job-cloud-preview-image { display: block; width: 100%; height: 100%; max-height: 168px; object-fit: contain; }
+.job-cloud-preview-unavailable { width: min(100%, 340px); min-height: 180px; display: grid; place-items: center; padding: 10px; border: 1px dashed #b9c3d2; border-radius: 8px; background: #f7f9fc; text-align: center; }
+button.job-cloud-preview-button { display: block; width: min(100%, 340px); margin: 0; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; background-image: none !important; box-shadow: none !important; color: inherit; overflow: visible; cursor: zoom-in; appearance: none; }
+.job-cloud-preview-frame { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 180px; max-height: 230px; padding: 8px; overflow: hidden; border: 1px solid #c8d1df; border-radius: 8px; background: #fff; box-sizing: border-box; }
+.job-cloud-preview-image { display: block; width: 100%; height: 100%; max-height: 214px; object-fit: contain; object-position: center; }
 .job-cloud-file-item { flex-wrap: wrap; }
+.cfr05-preview-dialog { width: min(92vw, 1200px); max-width: 92vw; height: min(90vh, 900px); max-height: 90vh; padding: 0; overflow: hidden; border: 0; border-radius: 12px; background: #fff; box-shadow: 0 24px 70px rgba(15, 31, 55, 0.35); }
+.cfr05-preview-dialog::backdrop { background: rgba(10, 22, 40, 0.72); }
+.cfr05-preview-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; border-bottom: 1px solid #d9e1ec; }
+.cfr05-preview-dialog-header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cfr05-preview-dialog-body { display: flex; align-items: center; justify-content: center; width: 100%; height: calc(90vh - 62px); max-height: 82vh; padding: 12px; overflow: auto; background: #f7f9fc; box-sizing: border-box; }
+.cfr05-preview-dialog-image { display: block; width: auto; height: auto; max-width: 88vw; max-height: 80vh; object-fit: contain; background: #fff; }

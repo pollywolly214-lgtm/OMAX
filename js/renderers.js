@@ -23107,7 +23107,8 @@ function renderJobs(){
       const identity={jobId:String(enlargePreview.dataset.cfr05JobId||""),fileId:String(enlargePreview.dataset.cfr05EnlargePreview||""),sha256:String(enlargePreview.dataset.cfr05Sha256||"")};
       const cached=cfr05CloudPreviewCache?.peek(identity);
       if(!cached?.previewData){toast("Preview is not available in this browser session.");return true;}
-      const dialog=document.createElement("dialog");dialog.setAttribute("data-cfr05-enlarged-preview","");dialog.innerHTML=`<h3>DXF preview</h3><img src="${escapeHtml(cached.previewData)}" alt="Enlarged verified DXF preview" style="max-width:min(90vw,1000px);max-height:80vh"><button type="button">Close</button>`;dialog.querySelector("button").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();return true;
+      const fileName=String(enlargePreview.dataset.cfr05FileName||"Verified DXF preview");
+      const dialog=document.createElement("dialog");dialog.className="cfr05-preview-dialog";dialog.setAttribute("data-cfr05-enlarged-preview","");dialog.innerHTML=`<div class="cfr05-preview-dialog-header"><strong>${escapeHtml(fileName)}</strong><button type="button" data-cfr05-preview-close>Close</button></div><div class="cfr05-preview-dialog-body"><img class="cfr05-preview-dialog-image" src="${escapeHtml(cached.previewData)}" alt="Enlarged preview of ${escapeHtml(fileName)}"></div>`;dialog.querySelector("[data-cfr05-preview-close]").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();return true;
     }
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
     if (fileMenuAdd){
