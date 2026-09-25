@@ -1,14 +1,18 @@
 rules_version = '2';
 
-// CFR-05 production proposal. DO NOT DEPLOY until deployed Firestore rules prove
-// that ordinary clients cannot create, activate, or promote membership records.
+// CFR-05 reviewed production rules mirrored from the manually deployed ruleset.
 service firebase.storage {
   match /b/{bucket}/o {
+    function authorized() {
+      return request.auth != null
+        && request.auth.uid == 'GntsaU7i2tXdDf05ds8cws5dfi63';
+    }
     function member(workspaceId) {
       return firestore.get(/databases/(default)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid)).data;
     }
     function activeRole(workspaceId, roles) {
-      return request.auth != null
+      return authorized()
+        && workspaceId == 'github-prod'
         && firestore.exists(/databases/(default)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid))
         && member(workspaceId).uid == request.auth.uid
         && member(workspaceId).workspaceId == workspaceId
@@ -17,9 +21,15 @@ service firebase.storage {
         && member(workspaceId).role in roles;
     }
     function safeIds(workspaceId, jobId, fileId) {
-      return workspaceId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
-        && jobId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$')
-        && fileId.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$');
+      return workspaceId.size() >= 1
+        && workspaceId.size() <= 64
+        && workspaceId.matches('[A-Za-z0-9][A-Za-z0-9_-]*')
+        && jobId.size() >= 1
+        && jobId.size() <= 128
+        && jobId.matches('[A-Za-z0-9][A-Za-z0-9_-]*')
+        && fileId.size() >= 1
+        && fileId.size() <= 128
+        && fileId.matches('[A-Za-z0-9][A-Za-z0-9_-]*');
     }
     function allowedName(name) {
       return name.size() <= 120 && name.matches('^[A-Za-z0-9][A-Za-z0-9._-]*\\.(dxf|ord|omx)$');
@@ -43,8 +53,12 @@ service firebase.storage {
         && request.resource.metadata.contentType == request.resource.contentType
         && request.resource.metadata.sizeBytes == string(request.resource.size)
         && request.resource.metadata.storagePath == 'workspaces/' + workspaceId + '/cutting-jobs/' + jobId + '/files/' + fileId + '/' + safeFileName
-        && request.resource.metadata.sha256.matches('^[a-f0-9]{64}$') && request.resource.metadata.status == 'ready'
+        && request.resource.metadata.sha256.size() == 64
+        && request.resource.metadata.sha256.matches('[a-f0-9]*') && request.resource.metadata.status == 'ready'
         && request.resource.metadata.createdAtISO.size() <= 30
+        && request.resource.metadata.createdBy.size() >= 1
+        && request.resource.metadata.createdBy.size() <= 128
+        && request.resource.metadata.createdBy.matches('[A-Za-z0-9][A-Za-z0-9:_-]*')
         && request.resource.metadata.createdBy == request.auth.uid;
     }
     function validExisting(workspaceId, jobId, fileId, safeFileName) {
@@ -62,21 +76,28 @@ service firebase.storage {
         && resource.metadata.contentType == resource.contentType
         && resource.metadata.sizeBytes == string(resource.size)
         && resource.metadata.storagePath == 'workspaces/' + workspaceId + '/cutting-jobs/' + jobId + '/files/' + fileId + '/' + safeFileName
-        && resource.metadata.sha256.matches('^[a-f0-9]{64}$') && resource.metadata.status == 'ready'
+        && resource.metadata.sha256.size() == 64
+        && resource.metadata.sha256.matches('[a-f0-9]*') && resource.metadata.status == 'ready'
         && resource.metadata.createdAtISO.size() <= 30
-        && resource.metadata.createdBy.matches('^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$');
+        && resource.metadata.createdBy.size() >= 1
+        && resource.metadata.createdBy.size() <= 128
+        && resource.metadata.createdBy.matches('[A-Za-z0-9][A-Za-z0-9:_-]*');
     }
     match /workspaces/{workspaceId}/cutting-jobs/{jobId}/files/{fileId}/{safeFileName} {
       allow create: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
+        && resource == null
         && activeRole(workspaceId, ['owner','admin','operator'])
         && validCreate(workspaceId, jobId, fileId, safeFileName);
       allow get: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
         && activeRole(workspaceId, ['owner','admin','operator','viewer'])
-        && validExisting(workspaceId, jobId, fileId, safeFileName);
-      allow delete: if safeIds(workspaceId, jobId, fileId)
+        && (resource == null || validExisting(workspaceId, jobId, fileId, safeFileName));
+      // Client deletion exists only for immediate compensation of the uploader's
+      // own definitely failed upload. It is not a permanent deletion facility.
+      allow delete: if safeIds(workspaceId, jobId, fileId) && allowedName(safeFileName)
         && activeRole(workspaceId, ['owner','admin','operator'])
-        && (member(workspaceId).role in ['owner','admin'] || resource.metadata.createdBy == request.auth.uid)
-        && validExisting(workspaceId, jobId, fileId, safeFileName);
+        && resource.metadata.createdBy == request.auth.uid
+        && validExisting(workspaceId, jobId, fileId, safeFileName)
+        && request.time < resource.timeCreated + duration.value(15, 'm');
       allow update, list: if false;
     }
     match /{allPaths=**} { allow read, write: if false; }
