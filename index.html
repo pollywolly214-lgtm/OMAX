@@ -30,7 +30,7 @@
   <script src="https://js.live.net/v8.0/OneDrive.js"></script>
   <script>/* prevent bfcache for easier debug refresh */ window.onpageshow = e=>{ if(e.persisted) location.reload(); };</script>
 
-  <!-- Firebase project config (WJ TRACKER-V2 migration) -->
+  <!-- Firebase project config (correct values) -->
   <script>
     window.FIREBASE_CONFIG = {
       apiKey: "AIzaSyCyEyx8BmJ7W9LglvSueq8hWngYfc98ao0",
@@ -38,7 +38,8 @@
       projectId: "wj-tracker-v2",
       storageBucket: "wj-tracker-v2.firebasestorage.app",
       messagingSenderId: "954724944176",
-      appId: "1:954724944176:web:469af1bd9e3ed7c47e20f5"
+      appId: "1:954724944176:web:469af1bd9e3ed7c47e20f5",
+      measurementId: "G-D18BYT6CPE"
     };
   </script>
 
@@ -172,7 +173,7 @@
         <button type="submit" class="auth-button auth-button-primary">Sign In</button>
         <button type="button" id="authClose" class="auth-button auth-button-secondary">Cancel</button>
       </form>
-      <small class="auth-modal-hint">Use your authorized WJ TRACKER-V2 Firebase account.</small>
+      <small class="auth-modal-hint">First time with an email? The account will be created automatically.</small>
     </div>
   </div>
 

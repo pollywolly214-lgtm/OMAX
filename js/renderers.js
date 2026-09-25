@@ -1,6 +1,8 @@
 /* ====================== RENDERERS ========================= */
 if (!Array.isArray(window.pendingNewJobFiles)) window.pendingNewJobFiles = [];
 const pendingNewJobFiles = window.pendingNewJobFiles;
+if (!Array.isArray(window.pendingSecureCloudJobFiles)) window.pendingSecureCloudJobFiles = [];
+const pendingSecureCloudJobFiles = window.pendingSecureCloudJobFiles;
 if (!(window.orderPartialSelection instanceof Set)) window.orderPartialSelection = new Set();
 const orderPartialSelection = window.orderPartialSelection;
 const timeEfficiencyWidgets = [];
@@ -21221,6 +21223,24 @@ function renderJobs(){
   const addFormToggle = content.querySelector("[data-job-add-toggle]");
   const newFilesBtn = document.getElementById("jobFilesBtn");
   const newFilesInput = document.getElementById("jobFiles");
+  const secureCloudFilesInput = document.getElementById("jobSecureCloudFiles");
+  const secureCloudFilesBtn = document.getElementById("jobSecureCloudFilesBtn");
+  secureCloudFilesBtn?.addEventListener("click", ()=>secureCloudFilesInput?.click());
+  secureCloudFilesInput?.addEventListener("change", ()=>{
+    const accepted = [];
+    for (const file of Array.from(secureCloudFilesInput.files || [])){
+      const validation = window.cfr05CloudCuttingFiles?.validateLocalFile(file);
+      if (validation?.valid) accepted.push({ file, name:file.name, size:file.size, pending:true });
+      else toast(`${file.name}: not accepted (${(validation?.reasons || ["invalid file"]).join(", ")}).`);
+    }
+    pendingSecureCloudJobFiles.splice(0, pendingSecureCloudJobFiles.length, ...accepted.slice(0, 10));
+    secureCloudFilesInput.value = "";
+    toast(accepted.length
+      ? `${Math.min(accepted.length, 10)} secure cloud file${accepted.length === 1 ? "" : "s"} pending — not uploaded until Add Job succeeds.`
+      : "No secure cloud files pending.");
+    window.jobAddFormOpen = true;
+    renderJobs();
+  });
   const oneDriveSetupBtn = content.querySelector("[data-job-onedrive-setup]");
   const oneDriveModal = document.querySelector("#jobOneDriveModal");
   const oneDriveFolderHintInput = document.querySelector("#jobOneDriveFolderHint");
@@ -22565,7 +22585,7 @@ function renderJobs(){
   });
   refreshEstimateBreakdown(addJobEstHoursInput, addJobEstBreakdown);
 
-  document.getElementById("addJobForm")?.addEventListener("submit",(e)=>{
+  document.getElementById("addJobForm")?.addEventListener("submit",async (e)=>{
     e.preventDefault();
     recalcMaterialTotals();
     const name  = document.getElementById("jobName").value.trim();
@@ -22617,6 +22637,7 @@ function renderJobs(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
+    const pendingCloudFiles = pendingSecureCloudJobFiles.map(entry=>entry?.file).filter(file=>file && typeof file.arrayBuffer === "function");
     const thickness = fractionToNumber(document.getElementById("jobMaterialThickness")?.value);
     const pathLength = Number(document.getElementById("jobMaterialLengthFt")?.value);
     const pathWidth = Number(document.getElementById("jobMaterialWidthFt")?.value);
@@ -22627,10 +22648,39 @@ function renderJobs(){
     window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
+    window.jobCategoryFilter = previousCategoryFilter;
+    if (!pendingCloudFiles.length){
+      pendingNewJobFiles.length = 0;
+      window.jobAddDraft = {};
+      persistJobChanges();
+      renderCalendarPreservingScroll();
+      renderJobs();
+      return;
+    }
+    let saved;
+    try { saved = await saveCloudNow(); }
+    catch (error) { saved = { saved:false, error:String(error?.message || error) }; }
+    if (saved?.saved !== true || saved?.stateWriteCompleted !== true){
+      toast(`Job was not authoritatively saved; pending cloud files were not uploaded. ${saved?.error || ""}`.trim());
+      renderCalendarPreservingScroll();
+      renderJobs();
+      return;
+    }
     pendingNewJobFiles.length = 0;
     window.jobAddDraft = {};
-    window.jobCategoryFilter = previousCategoryFilter;
-    persistJobChanges();
+    const attachmentFailures = [];
+    for (const file of pendingCloudFiles){
+      const outcome = await window.uploadCfr05CuttingFile(newJob.id, file, stage=>toast(`${file.name}: ${stage.replaceAll("_", " ")}`));
+      if (outcome.stage !== "completed") attachmentFailures.push({ name:file.name, stage:outcome.stage, error:outcome.error, indeterminate:outcome.indeterminate, possibleOrphanPath:outcome.possibleOrphanPath });
+    }
+    pendingSecureCloudJobFiles.length = 0;
+    if (attachmentFailures.length){
+      const first = attachmentFailures[0];
+      toast(`Job created, but ${attachmentFailures.length} cloud file upload${attachmentFailures.length === 1 ? "" : "s"} failed at ${first.stage}${first.indeterminate ? " (indeterminate; do not retry automatically)" : ""}.`);
+      content.dataset.cfr05LastResult = JSON.stringify({ jobId:newJob.id, created:true, attachmentFailures:attachmentFailures.slice(0, 10) });
+    } else {
+      toast(`Job created and ${pendingCloudFiles.length} cloud file${pendingCloudFiles.length === 1 ? "" : "s"} verified.`);
+    }
     renderCalendarPreservingScroll();
     renderJobs();
   });
@@ -22875,16 +22925,27 @@ function renderJobs(){
     const cloudFiles = e.target.closest("[data-cloud-files]");
     if(cloudFiles){
       e.preventDefault(); e.stopPropagation(); const jobId=String(cloudFiles.getAttribute("data-cloud-files")||""); cloudFiles.disabled=true;
-      try{const result=await window.listCfr05CloudFiles(jobId),dialog=document.createElement("dialog");dialog.setAttribute("data-cfr05-cloud-dialog","");const rows=result.files.map(file=>`<li><strong>${escapeHtml(file.originalName)}</strong> · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-open="${escapeHtml(file.fileId)}">Preview/Open</button></li>`).join("");dialog.innerHTML=`<h3>Cloud files</h3><p>${result.cloudFileCount} verified; ${result.rejectedMetadataDocumentCount} rejected.</p><ul>${rows||"<li>No verified cloud files.</li>"}</ul><button type="button" data-cfr05-close>Close</button>`;document.body.appendChild(dialog);dialog.addEventListener("click",async event=>{if(event.target.closest("[data-cfr05-close]")){dialog.close();dialog.remove();return;}const download=event.target.closest("[data-cfr05-download]");if(download){download.disabled=true;try{await window.openCfr05CloudFile(jobId,download.getAttribute("data-cfr05-download"),{openObjectUrl:async(url,metadata)=>{const anchor=document.createElement("a");anchor.href=url;anchor.download=metadata.safeFileName;document.body.appendChild(anchor);anchor.click();anchor.remove();}});}catch(err){toast(err?.message||"Cloud file could not be downloaded.");}finally{download.disabled=false;}return;}const open=event.target.closest("[data-cfr05-open]");if(open){open.disabled=true;try{const fileId=open.getAttribute("data-cfr05-open"),outcome=await window.openCfr05CloudFile(jobId,fileId,{displayPreview:async preview=>{if(!/^data:image\/svg\+xml/i.test(preview))return false;let image=dialog.querySelector("[data-cfr05-preview]");if(!image){image=document.createElement("img");image.setAttribute("data-cfr05-preview","");image.alt="Verified DXF preview";image.style.maxWidth="100%";dialog.appendChild(image);}image.src=preview;return true;}});if(!outcome.previewAvailable){toast(`${outcome.previewRoute.toUpperCase()} browser preview unavailable; use explicit Download/Open.`);open.textContent="Download/Open";open.removeAttribute("data-cfr05-open");open.setAttribute("data-cfr05-download",fileId);}}catch(err){toast(err?.message||"Cloud file could not be opened.");}finally{open.disabled=false;}}});dialog.showModal();}
-      catch(err){toast(err?.message||"Cloud files are blocked or unavailable.");}finally{cloudFiles.disabled=false;}return true;
+      const listingHost=cloudFiles.closest("[data-job-edit-row], .job-edit, dialog")||content;
+      try{const result=await window.listCfr05CloudFiles(jobId),dialog=document.createElement("dialog");listingHost.dataset.cfr05LastListingResult=JSON.stringify(result);dialog.setAttribute("data-cfr05-cloud-dialog","");const rows=result.files.map(file=>`<li><strong>${escapeHtml(file.originalName)}</strong> · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-open="${escapeHtml(file.fileId)}">Preview/Open</button></li>`).join("");const listingError=result.error?`<p role="alert">Cloud Files listing failed: ${escapeHtml(result.error.message||result.error.code||"Unknown error")}</p>`:(result.blockers?.length?`<p role="alert">Cloud Files listing blocked: ${escapeHtml(result.blockers.join(", "))}</p>`:"");dialog.innerHTML=`<h3>Cloud files</h3>${listingError}<p>${result.cloudFileCount} verified; ${result.rejectedMetadataDocumentCount} rejected.</p><ul>${rows||"<li>No verified cloud files.</li>"}</ul><button type="button" data-cfr05-close>Close</button>`;document.body.appendChild(dialog);dialog.addEventListener("click",async event=>{if(event.target.closest("[data-cfr05-close]")){dialog.close();dialog.remove();return;}const download=event.target.closest("[data-cfr05-download]");if(download){download.disabled=true;try{await window.openCfr05CloudFile(jobId,download.getAttribute("data-cfr05-download"),{openObjectUrl:async(url,metadata)=>{const anchor=document.createElement("a");anchor.href=url;anchor.download=metadata.safeFileName;document.body.appendChild(anchor);anchor.click();anchor.remove();}});}catch(err){toast(err?.message||"Cloud file could not be downloaded.");}finally{download.disabled=false;}return;}const open=event.target.closest("[data-cfr05-open]");if(open){open.disabled=true;try{const fileId=open.getAttribute("data-cfr05-open"),outcome=await window.openCfr05CloudFile(jobId,fileId,{displayPreview:async preview=>{if(!/^data:image\/svg\+xml/i.test(preview))return false;let image=dialog.querySelector("[data-cfr05-preview]");if(!image){image=document.createElement("img");image.setAttribute("data-cfr05-preview","");image.alt="Verified DXF preview";image.style.maxWidth="100%";dialog.appendChild(image);}image.src=preview;return true;}});if(!outcome.previewAvailable){toast(`${outcome.previewRoute.toUpperCase()} browser preview unavailable; use explicit Download/Open.`);open.textContent="Download/Open";open.removeAttribute("data-cfr05-open");open.setAttribute("data-cfr05-download",fileId);}}catch(err){toast(err?.message||"Cloud file could not be opened.");}finally{open.disabled=false;}}});dialog.showModal();if(result.error||result.blockers?.length)toast("Cloud Files listing failed. See the Cloud Files dialog for details.");}
+      catch(err){const failure={jobId,error:{code:String(err?.code||"listingFailure"),message:String(err?.message||err)}};listingHost.dataset.cfr05LastListingResult=JSON.stringify(failure);const dialog=document.createElement("dialog");dialog.setAttribute("data-cfr05-cloud-dialog","");dialog.innerHTML=`<h3>Cloud files</h3><p role="alert">Cloud Files listing failed: ${escapeHtml(failure.error.message)}</p><button type="button">Close</button>`;dialog.querySelector("button").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();toast("Cloud Files listing failed. See the Cloud Files dialog for details.");}finally{cloudFiles.disabled=false;}return true;
     }
     const cloudUpload = e.target.closest("[data-cloud-file-upload]");
     if (cloudUpload){
       e.preventDefault(); e.stopPropagation();
       if (cloudUpload.disabled) return true;
       const jobId=String(cloudUpload.getAttribute("data-cloud-file-upload")||"");
-      const input=document.createElement("input"); input.type="file"; input.accept=".dxf,.ord,.omx";
-      input.onchange=async()=>{const file=input.files?.[0];if(!file)return;cloudUpload.disabled=true;cloudUpload.textContent="Validating and uploading…";try{const outcome=await window.uploadCfr05CuttingFile(jobId,file);if(outcome.stage==="completed"){toast(`Cloud file verified: ${file.name}`);await window.listCfr05CloudFiles(jobId);}else if(outcome.indeterminate)toast(`Cloud upload indeterminate; manual review required${outcome.possibleOrphanPath?`: ${outcome.possibleOrphanPath}`:""}.`);else toast(`Cloud upload blocked/failed at ${outcome.stage}: ${outcome.error?.message||"Unknown error"}`);}catch(err){toast(err?.message||"Secure cloud upload failed.");}finally{cloudUpload.disabled=false;cloudUpload.textContent="Upload secure cloud file";}};
+      if (!jobId || !findJobRecord(jobId)?.job){ toast("Secure cloud upload blocked: this job has no persistent immutable ID."); return true; }
+      const input=document.createElement("input"); input.type="file"; input.accept=".dxf,.ord,.omx"; input.hidden=true; document.body.appendChild(input);
+      const host=cloudUpload.closest("[data-job-edit-row], .job-edit, dialog")||content;
+      const reportUpload=(value)=>{try{const bounded=JSON.stringify(value);host.dataset.cfr05LastUploadResult=bounded;host.dataset.cfr05LastResult=bounded;}catch(_){host.dataset.cfr05LastUploadResult='{"error":"diagnostic serialization failed"}';}};const reportListing=(value)=>{try{host.dataset.cfr05LastListingResult=JSON.stringify(value);}catch(_){host.dataset.cfr05LastListingResult='{"error":"diagnostic serialization failed"}';}};
+      input.addEventListener("change",async()=>{const file=input.files?.[0];if(!file){input.remove();return;}cloudUpload.disabled=true;try{
+        const validation=window.cfr05CloudCuttingFiles?.validateLocalFile(file);if(!validation?.valid){const result={stage:"local_file_validation",error:{code:validation?.reasons?.[0]||"invalidFile",message:(validation?.reasons||[]).join(", ")}};reportUpload(result);toast(`Secure cloud upload blocked: ${result.error.message}.`);return;}
+        const labels={membership_validation:"Checking membership…",job_validation:"Checking job ID…",local_file_validation:"Validating…",sha256_calculation:"Hashing…",immutable_path_creation:"Finalizing path…",storage_upload:"Uploading…",uploaded_metadata_verification:"Verifying Storage metadata…",firestore_metadata_creation:"Finalizing metadata…",final_verification:"Verifying…",completed:"Complete"};
+        const outcome=await window.uploadCfr05CuttingFile(jobId,file,(stage,partial)=>{cloudUpload.textContent=labels[stage]||stage;reportUpload(partial);});reportUpload(outcome);
+        if(outcome.stage==="completed"){toast(`Cloud file verified: ${file.name}`);try{const listing=await window.listCfr05CloudFiles(jobId);reportListing(listing);if(listing.error||listing.blockers?.length)toast("Upload succeeded; Cloud Files refresh failed. Do not upload the file again.");else toast("Cloud Files refreshed.");}catch(listingError){reportListing({jobId,error:{code:String(listingError?.code||"listingRefreshFailure"),message:String(listingError?.message||listingError)}});toast("Upload succeeded; Cloud Files refresh failed. Do not upload the file again.");}}
+        else if(outcome.indeterminate)toast(`Cloud upload indeterminate; do not retry automatically. Manual inspection required${outcome.possibleOrphanPath?`: ${outcome.possibleOrphanPath}`:""}.`);
+        else toast(`Cloud upload blocked/failed at ${outcome.stage}: ${outcome.error?.message||"Unknown error"}`);
+      }catch(err){const result={stage:"unexpected_failure",error:{code:String(err?.code||"unexpected"),message:String(err?.message||err)}};reportUpload(result);toast(`Secure cloud upload failed: ${result.error.message}`);}finally{input.remove();cloudUpload.disabled=false;cloudUpload.textContent="Upload secure cloud file";}} ,{once:true});
       input.click(); return true;
     }
     const fileMenuAdd = e.target.closest("[data-job-file-add]");

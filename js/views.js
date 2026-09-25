@@ -4628,9 +4628,11 @@ function viewJobs(){
           <div class="job-add-actions">
             <button type="button" id="jobFilesBtn">Attach Files</button>
             <button type="button" id="jobOneDriveLibraryAddBtn">Add from this computer OneDrive folder</button>
+            <button type="button" id="jobSecureCloudFilesBtn">Upload secure cloud file</button>
             <button type="submit">Add Job</button>
           </div>
           <input type="file" id="jobFiles" multiple style="display:none">
+          <input type="file" id="jobSecureCloudFiles" accept=".dxf,.ord,.omx" multiple style="display:none">
           <datalist id="jobMaterialOptions">${materialInventoryOptionsMarkup}</datalist>
         </form>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
