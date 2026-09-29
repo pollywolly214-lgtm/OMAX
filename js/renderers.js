@@ -22989,6 +22989,37 @@ function renderJobs(){
     try { host.dataset.cfr05LastOpenResult = JSON.stringify(result); }
     catch (_) { host.dataset.cfr05LastOpenResult = '{"completed":false,"error":{"code":"diagnosticSerializationFailed","message":"Diagnostic serialization failed."}}'; }
   };
+  const cloudDownloadFailureMessage = result=>{
+    const reason=String(result?.blockers?.[0]||result?.error?.code||"");
+    if(reason==="downloadChecksumMismatch")return "checksum verification failed";
+    if(reason==="downloadSizeMismatch")return "file size verification failed";
+    if(reason==="storageMetadataMismatch")return "secure file metadata verification failed";
+    if(/auth|membership|role/i.test(reason))return "you are not authorized to download this file";
+    return result?.error?.message?safeCloudActionError(result.error.message):"secure file verification failed";
+  };
+  const downloadVerifiedCloudFile = async (button, jobId, fileId, host)=>{
+    if(button.disabled||button.dataset.cfr05DownloadActive==="true")return null;
+    const originalLabel=button.textContent;
+    button.disabled=true;button.dataset.cfr05DownloadActive="true";button.textContent="Downloading…";
+    try{
+      const outcome=await window.openCfr05CloudFile(jobId,fileId,{openObjectUrl:async(url,metadata)=>{
+        const anchor=document.createElement("a");
+        anchor.href=url;anchor.download=metadata.safeFileName;anchor.rel="noopener";
+        document.body.appendChild(anchor);anchor.click();anchor.remove();
+      }});
+      reportCloudOpenResult(host,outcome);
+      if(!outcome?.completed||!outcome?.opened){
+        const message=`Download failed: ${cloudDownloadFailureMessage(outcome)}.`;
+        toast(message);
+      }
+      return outcome;
+    }catch(error){
+      const failure={completed:false,blockers:[],opened:false,error:{code:String(error?.code||"cloudDownloadFailure"),message:safeCloudActionError(error)}};
+      reportCloudOpenResult(host,failure);toast(`Download failed: ${cloudDownloadFailureMessage(failure)}.`);return failure;
+    }finally{
+      button.disabled=false;delete button.dataset.cfr05DownloadActive;button.textContent=originalLabel||"Download";
+    }
+  };
   const openVerifiedCloudFile = async (jobId, fileId, dialog, host)=>{
     let status = dialog.querySelector("[data-cfr05-action-status]");
     if (!status){ status=document.createElement("p"); status.setAttribute("data-cfr05-action-status",""); status.setAttribute("role","status"); dialog.appendChild(status); }
@@ -23082,6 +23113,14 @@ function renderJobs(){
       finally { presentedCloudFile.disabled=false; }
       return true;
     }
+    const cloudDownload=e.target.closest("[data-cfr05-download]");
+    if(cloudDownload){
+      e.preventDefault();e.stopPropagation();
+      const jobId=String(cloudDownload.getAttribute("data-cfr05-job-id")||"");
+      const fileId=String(cloudDownload.getAttribute("data-cfr05-download")||"");
+      const host=cloudDownload.closest("[data-job-edit-row], [data-job-row], [data-history-row], dialog")||content;
+      await downloadVerifiedCloudFile(cloudDownload,jobId,fileId,host);return true;
+    }
     const cloudUpload = e.target.closest("[data-cloud-file-upload]");
     if (cloudUpload){
       e.preventDefault(); e.stopPropagation();
@@ -23108,7 +23147,7 @@ function renderJobs(){
       const cached=cfr05CloudPreviewCache?.peek(identity);
       if(!cached?.previewData){toast("Preview is not available in this browser session.");return true;}
       const fileName=String(enlargePreview.dataset.cfr05FileName||"Verified DXF preview");
-      const dialog=document.createElement("dialog");dialog.className="cfr05-preview-dialog";dialog.setAttribute("data-cfr05-enlarged-preview","");dialog.innerHTML=`<div class="cfr05-preview-dialog-header"><strong>${escapeHtml(fileName)}</strong><button type="button" data-cfr05-preview-close>Close</button></div><div class="cfr05-preview-dialog-body"><img class="cfr05-preview-dialog-image" src="${escapeHtml(cached.previewData)}" alt="Enlarged preview of ${escapeHtml(fileName)}"></div>`;dialog.querySelector("[data-cfr05-preview-close]").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();return true;
+      const dialog=document.createElement("dialog");dialog.className="cfr05-preview-dialog";dialog.setAttribute("data-cfr05-enlarged-preview","");dialog.innerHTML=`<div class="cfr05-preview-dialog-header"><strong>${escapeHtml(fileName)}</strong><div><button type="button" data-cfr05-download="${escapeHtml(identity.fileId)}" data-cfr05-job-id="${escapeHtml(identity.jobId)}">Download</button><button type="button" data-cfr05-preview-close>Close</button></div></div><div class="cfr05-preview-dialog-body"><img class="cfr05-preview-dialog-image" src="${escapeHtml(cached.previewData)}" alt="Enlarged preview of ${escapeHtml(fileName)}"></div>`;dialog.querySelector("[data-cfr05-download]").addEventListener("click",event=>downloadVerifiedCloudFile(event.currentTarget,identity.jobId,identity.fileId,dialog));dialog.querySelector("[data-cfr05-preview-close]").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();return true;
     }
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
     if (fileMenuAdd){
