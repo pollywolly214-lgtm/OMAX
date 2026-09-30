@@ -1,4 +1,5 @@
 (function(){
+  if (window.OMAXDevSafe?.active) return;
   async function graphFetch(path, { method = "GET", token, headers = {}, responseType = "json" } = {}){
     const authToken = token || await window.oneDriveAuth.getAccessToken(["User.Read", "Files.Read"]);
     const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {

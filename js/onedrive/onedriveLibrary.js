@@ -1,4 +1,5 @@
 (function(){
+  if (window.OMAXDevSafe?.active) return;
   const CACHE_KEY = "cutting_job_onedrive_shared_library_cache_v1";
 
   function extOf(name){
