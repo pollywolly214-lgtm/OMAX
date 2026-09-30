@@ -243,7 +243,12 @@ function parseDateLocal(value){
     const dateOnly = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s].*)?$/);
     if (dateOnly){
       const [y, m, d] = dateOnly[1].split("-").map(Number);
-      return new Date(y, m-1, d);
+      const parsed = new Date(y, m-1, d);
+      // The Date constructor silently rolls impossible calendar values (for
+      // example 2026-02-31) into the next month.  Reject those values instead
+      // of allowing a mistyped business date to be saved under another day.
+      if (parsed.getFullYear() !== y || parsed.getMonth() !== m - 1 || parsed.getDate() !== d) return null;
+      return parsed;
     }
   }
 
@@ -273,7 +278,10 @@ function normalizeDateISO(value){
   if (typeof value === "string"){
     const trimmed = value.trim();
     if (!trimmed) return null;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)){
+      const parsed = parseDateLocal(trimmed);
+      return parsed ? ymd(parsed) : null;
+    }
     const parsed = parseDateLocal(trimmed);
     if (parsed) return ymd(parsed);
     return null;
@@ -2379,15 +2387,12 @@ function persistLocalStateBackup(snapshot){
   } catch (err){
     console.warn("Local backup primary write failed", err, { bytes: estimatePayloadBytes(trimmed) });
     try {
-      window.localStorage.removeItem(LOCAL_STATE_BACKUP_KEY);
       const emergency = buildEmergencyBackup(trimmed);
       window.localStorage.setItem(LOCAL_STATE_BACKUP_KEY, JSON.stringify(emergency));
       console.warn("Local backup saved in emergency mode", { bytes: estimatePayloadBytes(emergency) });
     } catch (retryErr){
       console.error("Failed to persist local backup even in emergency mode", retryErr);
       try {
-        window.localStorage.removeItem(LOCAL_STATE_BACKUP_KEY);
-        ["omax_debug_cache","omax_sync_cache","omax_render_cache","omax_local_state_backup_v0"].forEach((k)=>window.localStorage.removeItem(k));
         const tiny = buildTinyCriticalBackup(trimmed);
         window.localStorage.setItem(LOCAL_STATE_BACKUP_KEY, JSON.stringify(tiny));
         console.warn("Local backup saved in tiny mode", { bytes: estimatePayloadBytes(tiny) });
