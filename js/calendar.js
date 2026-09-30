@@ -2265,7 +2265,7 @@ function showJobBubble(jobId, anchor){
       ? prioritySchedule.efficiencies
       : new Map();
     if (!active && !completed){
-      b.innerHTML = `<div class="bubble-title">Job</div><div class="bubble-kv"><span>Info:</span><span>Job not found (id: ${jobId})</span></div>`;
+      b.innerHTML = `<div class="bubble-title">Job</div><div class="bubble-kv"><span>Info:</span><span>Job not found (id: ${escapeHtml(jobId)})</span></div>`;
       return;
     }
     if (!active && completed){
@@ -2455,7 +2455,7 @@ function showJobBubble(jobId, anchor){
     b.querySelector("[data-bbl-edit-job]")?.addEventListener("click", ()=>{ hideBubble(); openJobsEditor(j.id); });
   }catch(err){
     console.error(err);
-    b.innerHTML = `<div class="bubble-title">Error</div><div class="bubble-kv"><span>Details:</span><span>${err.message||err}</span></div>`;
+    b.innerHTML = `<div class="bubble-title">Error</div><div class="bubble-kv"><span>Details:</span><span>${escapeHtml(err?.message || err)}</span></div>`;
   }
 }
 
