@@ -9516,16 +9516,22 @@ function captureMaintenanceHistoryImportManualHistory(){
   return snapshot;
 }
 
-function restoreMaintenanceHistoryImportManualHistory(snapshot){
-  (Array.isArray(snapshot) ? snapshot : []).forEach(item => {
-    if (item.hadManualHistory) item.task.manualHistory = cloneMaintenanceHistoryImportValue(item.manualHistory);
-    else delete item.task.manualHistory;
-  });
-  const mismatch = (Array.isArray(snapshot) ? snapshot : []).find(item => {
-    const hasProperty = Object.prototype.hasOwnProperty.call(item.task, "manualHistory");
-    return hasProperty !== item.hadManualHistory || maintenanceHistoryImportValueKey(item.task.manualHistory) !== maintenanceHistoryImportValueKey(item.manualHistory);
-  });
-  if (mismatch) throw new Error(`Rollback verification failed for ${mismatch.mode} task index ${mismatch.index}.`);
+function rollbackMaintenanceHistoryImportEntries(snapshot, touchedTasks){
+  const current=getMaintenanceHistoryImportTaskList(),removals=new Map();
+  // Validate the entire rollback before removing anything. Task replacement and
+  // unrelated history edits are allowed; ambiguous/moved/edited imports are not.
+  for(const [original,entries] of touchedTasks){
+    const owner=snapshot.find(item=>item.task===original);
+    const matches=current.filter(item=>item.mode===owner.mode&&(original.id?item.task.id===original.id:item.task===original));
+    if(matches.length!==1)throw Error("Imported task identity changed; manual verification is required.");
+    const task=matches[0].task;
+    for(const expected of entries){
+      const found=current.flatMap(item=>(Array.isArray(item.task.manualHistory)?item.task.manualHistory:[]).filter(entry=>entry?.import_event_id===expected.import_event_id).map(entry=>({task:item.task,entry})));
+      if(found.length!==1||found[0].task!==task||maintenanceHistoryImportValueKey(found[0].entry)!==maintenanceHistoryImportValueKey(expected))throw Error(`Imported history ${expected.import_event_id} changed or is ambiguous; manual verification is required.`);
+    }
+    removals.set(task,new Set(entries.map(entry=>entry.import_event_id)));
+  }
+  for(const [task,ids] of removals)task.manualHistory=task.manualHistory.filter(entry=>!ids.has(entry?.import_event_id));
 }
 
 function verifyMaintenanceHistoryImportMutation(historySnapshot, touchedTasks, plannedIds){
@@ -9664,13 +9670,22 @@ async function applyMaintenanceHistoryImportRowsInternal(previewRows, options = 
     };
     task.manualHistory.push(entry);
     if (!touchedTasks.has(task)) touchedTasks.set(task, []);
-    touchedTasks.get(task).push(entry);
+    touchedTasks.get(task).push(cloneMaintenanceHistoryImportValue(entry));
     stats.imported += 1;
     result.importedImportEventIds.push(item.eventId);
   });
   const after = countMaintenanceHistoryImportProtectedState();
   result.after = after;
   const drops = findMaintenanceHistoryImportDrops(before, after);
+  const rollback=()=>{
+    try { rollbackMaintenanceHistoryImportEntries(historySnapshot,touchedTasks);result.rolledBack=true; }
+    catch(error){
+      result.rollbackError=String(error?.message||error);result.rollbackReviewRequired=true;
+      result.saveError+=` ${result.rollbackError} Writes are suspended.`;
+      window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
+      if(typeof renderRecoveryDiagnosticsPanel==="function")renderRecoveryDiagnosticsPanel();
+    }
+  };
   try {
     if (drops.length) throw new Error(`Protected data count dropped unexpectedly: ${drops.join(", ")}`);
     verifyMaintenanceHistoryImportMutation(historySnapshot, touchedTasks, result.plannedImportEventIds);
@@ -9678,14 +9693,12 @@ async function applyMaintenanceHistoryImportRowsInternal(previewRows, options = 
     if(key(withoutManual(fullBefore))!==key(withoutManual(getCurrentAppStateForDiagnostics())))throw Error("Unrelated protected business fields changed during staging.");
   } catch (verificationError){
     result.saveError = String(verificationError?.message || verificationError);
-    try { restoreMaintenanceHistoryImportManualHistory(historySnapshot); result.rolledBack = true; }
-    catch (rollbackError){ result.rollbackError = String(rollbackError?.message || rollbackError); }
+    rollback();
     return result;
   }
   if (typeof saveCloudNow !== "function"){
     result.saveError = "Authoritative cloud save is unavailable.";
-    try { restoreMaintenanceHistoryImportManualHistory(historySnapshot); result.rolledBack = true; }
-    catch (rollbackError){ result.rollbackError = String(rollbackError?.message || rollbackError); }
+    rollback();
     return result;
   }
   result.saveAttempted = true;
@@ -9727,8 +9740,7 @@ async function applyMaintenanceHistoryImportRowsInternal(previewRows, options = 
     return result;
   }
   if (!result.saveError) result.saveError = "Authoritative Firestore state write was not completed.";
-  try { restoreMaintenanceHistoryImportManualHistory(historySnapshot); result.rolledBack = true; }
-  catch (rollbackError){ result.rollbackError = String(rollbackError?.message || rollbackError); }
+  rollback();
   return result;
 }
 

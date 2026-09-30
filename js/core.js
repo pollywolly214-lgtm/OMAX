@@ -4350,6 +4350,7 @@ window.cuttingJobImporter = window.CuttingJobImporter?.createApi({
   materials:()=>window.getLiveJobMaterialSettings?.().materials||[],
   materialSettings:()=>window.getLiveJobMaterialSettings?.()||{wasteFactor:NaN,materials:[]},
   createCategory:name=>addJobFolder(name,typeof window.JOB_ROOT_FOLDER_ID==="string"?window.JOB_ROOT_FOLDER_ID:"jobs_root"),
+  removeCategories:ids=>{const removed=new Set(ids);window.jobFolders=window.jobFolders.filter(category=>!removed.has(String(category.id)));jobFolders=window.jobFolders;},
   createMaterial:name=>{let settings;try{settings=JSON.parse(localStorage.getItem("job_material_pricing_v1")||"null");}catch(_){settings=null;}if(!settings||typeof settings!=="object")settings={wasteFactor:10,materials:[]};if(!Array.isArray(settings.materials))settings.materials=[];const material={name:String(name).trim(),density:0.1,pricePerLb:1};settings.materials.push(material);localStorage.setItem("job_material_pricing_v1",JSON.stringify(settings));return material;},
   captureDefinitionState:()=>({categories:structuredClone(window.jobFolders||[]),materialSettingsRaw:localStorage.getItem("job_material_pricing_v1")}),
   restoreDefinitionState:value=>{setJobFolders(value.categories);jobFolders=window.jobFolders;if(value.materialSettingsRaw==null)localStorage.removeItem("job_material_pricing_v1");else localStorage.setItem("job_material_pricing_v1",value.materialSettingsRaw);},

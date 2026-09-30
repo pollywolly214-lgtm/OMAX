@@ -64,12 +64,32 @@
   }
   const target=kind=>kind==="purchase"?"receiptTrackerWeeks":"pumpEff";
   const business=state=>Object.fromEntries(Object.entries(state).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
+  function selectiveRollback(kind,current,staged,before,ids){
+    const destination=target(kind),planned=new Set(ids);
+    if(kind==="purchase"?(!Array.isArray(current.receiptTrackerWeeks)||current.receiptTrackerWeeks.some(week=>!week||!Array.isArray(week.rows))):(!current.pumpEff||!Array.isArray(current.pumpEff.entries)))throw Error("Import destination shape changed; manual verification is required.");
+    for(const id of ids){
+      const expected=records(kind,staged).filter(row=>row?.import_event_id===id),actual=records(kind,current).filter(row=>row?.import_event_id===id);
+      if(expected.length!==1||actual.length!==1||canonical(actual[0])!==canonical(expected[0]))throw Error(`Imported record ${id} changed or is not uniquely identifiable; manual verification is required.`);
+    }
+    const next=clone(current[destination]);
+    if(kind==="pump")next.entries=next.entries.filter(row=>!planned.has(row?.import_event_id));
+    else {
+      next.forEach(week=>{week.rows=week.rows.filter(row=>!planned.has(row?.import_event_id));});
+      // Remove only a pristine empty container created by this import.
+      return next.filter(week=>{
+        if(week.rows.length||before.receiptTrackerWeeks.some(old=>old.key===week.key)||current.receiptTrackerWeeks.filter(item=>item.key===week.key).length!==1)return true;
+        const created=staged.receiptTrackerWeeks.filter(item=>item.key===week.key);
+        return created.length!==1||canonical({...created[0],rows:[]})!==canonical(week);
+      });
+    }
+    return next;
+  }
   function createApi(env){
     let busy=false;
     return Object.freeze({preview:(kind,rows)=>preview(kind,rows,env.state()),isBusy:()=>busy,async submit(kind,rows,{confirmed=false,reviewedPreview}={}){
       const result={saved:false,saveCompleted:false,verificationCompleted:false,indeterminate:false,rollbackCompleted:false,backupCreated:false,beforeCount:0,afterCount:0,importedIds:[],error:""};
       if(busy||!confirmed||!env.canWrite()){result.error="Explicit reviewed confirmation and a writable authoritative baseline are required.";return result;}
-      busy=true;let before=null,applied=false,committed=false;
+      busy=true;let before=null,staged=null,plannedIds=[],applied=false,committed=false;
       try {
         const current=env.state(),cloud=await env.readCloud();
         if(!cloud||cloud.syncMeta?.rev!==env.loadedRevision())throw Error("Latest authoritative baseline changed or is missing; reload before previewing.");
@@ -84,11 +104,12 @@
         result.backupCreated=true;
         if(canonical(business(env.state()))!==canonical(business(current)))throw Error("Local state changed during backup; review a fresh preview.");
         before=clone(current);const next=append(kind,current,ready),destination=target(kind);
+        staged=clone(next);plannedIds=ready.map(item=>item.import_event_id);
         env.apply(destination,clone(next[destination]));applied=true;
         const unrelated=value=>Object.fromEntries(Object.entries(business(value)).filter(([key])=>key!==destination));
         if(canonical(unrelated(before))!==canonical(unrelated(env.state())))throw Error("Unrelated protected fields changed during staging.");
         const saved=await env.save();committed=saved?.saved===true&&saved?.stateWriteCompleted===true;
-        result.indeterminate=saved?.indeterminate===true;
+        result.indeterminate=saved?.indeterminate===true||(!committed&&saved?.stateWriteAttempted===true&&saved?.definiteFailure!==true);
         if(result.indeterminate){result.error="Save outcome is indeterminate. Writes are suspended; read/verify before retrying.";env.suspend?.(result.error);return result;}
         if(!committed)throw Error(saved?.error||"Atomic save was rejected.");
         result.saveCompleted=true;
@@ -100,7 +121,17 @@
         result.saved=true;result.verificationCompleted=true;result.importedIds=expectedIds;return result;
       }catch(error){
         result.error=String(error?.message||error);
-        if(applied&&!committed&&!result.indeterminate){env.apply(target(kind),clone(before[target(kind)]));result.rollbackCompleted=canonical(env.state()[target(kind)])===canonical(before[target(kind)]);}
+        if(applied&&!committed&&!result.indeterminate){
+          try {
+            const destination=target(kind),rollback=selectiveRollback(kind,env.state(),staged,before,plannedIds);
+            env.apply(destination,rollback);
+            if(canonical(env.state()[destination])!==canonical(rollback))throw Error("Selective rollback could not be verified; manual verification is required.");
+            result.rollbackCompleted=true;result.afterCount=count(kind,env.state());
+          }catch(rollbackError){
+            result.rollbackReviewRequired=true;result.rollbackError=String(rollbackError?.message||rollbackError);
+            result.error+=` ${result.rollbackError} Writes are suspended.`;env.suspend?.(result.error);
+          }
+        }
         if(committed){result.indeterminate=true;env.suspend?.(result.error);}
         return result;
       }finally{busy=false;}
