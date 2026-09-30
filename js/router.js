@@ -120,6 +120,7 @@ function route(options = {}){
   }
 
   function renderByHash(norm){
+    if(typeof renderInventoryIdentityRecoveryData==="function"&&renderInventoryIdentityRecoveryData(norm))return;
     if (typeof teardownCostChartAutoResize === "function"){
       try { teardownCostChartAutoResize(); }
       catch (err){ console.warn(err); }

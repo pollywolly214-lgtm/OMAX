@@ -2728,6 +2728,10 @@ function startWorkspaceStateListener(){
     if (snap.metadata && snap.metadata.hasPendingWrites) return;
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
+    if(inspectInventoryIdentities(incoming.inventory||[],incoming.inventoryFolders||[]).length){
+      window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
+      loadFromCloud().then(refreshRouteSafely);return;
+    }
     const meta = incoming && typeof incoming.syncMeta === "object" ? incoming.syncMeta : null;
     const incomingRev = Number(meta?.rev || 0);
     if (!incomingRev) return;
@@ -3897,7 +3901,8 @@ window.defaultAsReqTasks = defaultAsReqTasks;
 
 (function patchAdoptState(){
   const orig = window.adoptState;
-  window.adoptState = function(data){
+  window.adoptState = function(data, options = {}){
+    if(options.preserveAuthoritative===true)return orig(data,options);
     const sanitized = (data && typeof data === "object") ? { ...data } : {};
     if (!Array.isArray(sanitized.tasksInterval) && Array.isArray(window.tasksInterval)) sanitized.tasksInterval = window.tasksInterval.slice();
     if (!Array.isArray(sanitized.tasksAsReq) && Array.isArray(window.tasksAsReq)) sanitized.tasksAsReq = window.tasksAsReq.slice();
@@ -4154,8 +4159,21 @@ function scanAuthoritativeCutFileContent(state, rootPath = "$"){
   return scanner(state, { rootPath });
 }
 
+const inventoryIdentityRepairAuthorizations=new Map();
+async function writeReviewedInventoryIdentityRepair(next,{source,expectedRevision}){
+  const api=window.OMAXInventoryIdentityRepair,plan=api.preview(source);
+  if(plan.blockers.length||plan.sourceRevision!==expectedRevision||stableStringify(api.repairedState(source,plan))!==stableStringify(next))throw Error("Exact inventory repair authorization was rejected.");
+  const token=Symbol("reviewed inventory identity repair");
+  inventoryIdentityRepairAuthorizations.set(token,{sourceKey:stableStringify(source),pendingKey:stableStringify(next),expectedRevision});
+  try{return await writeAuthoritativeStateSnapshot(next,{merge:true},{expectedRevision,inventoryIdentityRepairToken:token});}
+  finally{inventoryIdentityRepairAuthorizations.delete(token);}
+}
+
 async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true }, options = {}){
-  if (!canWriteCloud("authoritative transaction")) return { saved:false, blocked:true, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
+  const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
+  const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
+    &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
+  if (!identityAuthorized && !canWriteCloud("authoritative transaction")) return { saved:false, blocked:true, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
   const writer = window.OMAXAtomicPersistence?.save;
   if (typeof writer !== "function" || !window.CuttingFileContentFirewall){
     return { saved:false, blocked:true, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
@@ -4164,6 +4182,11 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
     expectedRevision:options.expectedRevision ?? Number(window.__loadedCloudRevisionForSaveGuard || 0),
     clientId:getCloudSyncClientId(), scan:scanAuthoritativeCutFileContent,
     prepare:(pending, remote)=>{
+      if(identityAuthorized){
+        if(stableStringify(remote)!==identityProof.sourceKey||stableStringify(pending)!==identityProof.pendingKey)throw Object.assign(new Error("Inventory repair source or exact authorized changes no longer match."),{definite:true,code:"inventory_repair_conflict"});
+        if(estimatePayloadBytes(pending)>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
+        return pending;
+      }
       const proof = options.repairProof;
       if (proof && !validateMaintenanceV2RepairRemoteBaseline(proof, remote)) throw Object.assign(new Error("Latest V2 state no longer matches the authorized repair baseline."), { definite:true, code:"repair_conflict" });
       const safetyRemote = proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote;
@@ -4189,6 +4212,32 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   }
   return result;
 }
+
+function getInventoryIdentityRepairLocalState(){
+  const source=window.__lastLoadedCloudState||{},live={};
+  const displayFields=new Set(window.__inventoryIdentityDisplayFields||[]);
+  Object.keys(source).forEach(name=>{live[name]=displayFields.has(name)?window[name]:window.__inventoryIdentityLocalEvidence?.[name];});
+  const bindings={totalHistory,tasksInterval,tasksAsReq,inventory,cuttingJobs,completedCuttingJobs,orderRequests,garnetCleanings,dailyCutHours,opportunityRollups,weeklyCostReports,receiptTrackerWeeks,maintenanceTasksV2,maintenanceCalendarInstancesV2,maintenanceOccurrencesV2,deletedItems,appConfig,jobFolders,orderRequestTab};
+  Object.keys(bindings).forEach(name=>{if(Object.prototype.hasOwnProperty.call(source,name))live[name]=bindings[name];});
+  return live;
+}
+const inventoryIdentityRepairApi=window.OMAXInventoryIdentityRepair?.createApi({
+  localState:getInventoryIdentityRepairLocalState,
+  loadedRevision:()=>window.__loadedCloudRevisionForSaveGuard,
+  readCloud:readCurrentCloudStateReadOnly,
+  canApply:()=>Boolean(FB.ready&&FB.user&&FB.docRef&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode),
+  backup:state=>exportJsonDownload(`omax-inventory-identity-pre-repair-${Date.now()}.json`,state),
+  write:writeReviewedInventoryIdentityRepair,
+  suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastInventoryIdentityRepairError=reason;renderRecoveryDiagnosticsPanel();},
+  adoptVerified:state=>{
+    window.__lastLoadedCloudState=cloneStructured(state);window.__loadedCloudRevisionForSaveGuard=state.syncMeta.rev;lastAppliedCloudRevision=state.syncMeta.rev;
+    adoptState(cloneStructured(state),{preserveAuthoritative:true});window.__inventoryIdentityIssues=inspectInventoryIdentities(state.inventory,state.inventoryFolders||[]);
+    window.__recoveryReason="Inventory identity repair was server-verified. Data remains read-only for review; ordinary saves are still disabled.";
+    renderRecoveryDiagnosticsPanel();if(typeof route==="function")route();
+  }
+});
+window.previewInventoryIdentityRepair=()=>inventoryIdentityRepairApi.preview();
+window.applyInventoryIdentityRepair=(reviewedPreview,options)=>inventoryIdentityRepairApi.apply(reviewedPreview,options);
 
 function inspectLocalJsonCache(key, rootPath, unavailable){
   try {
@@ -4304,6 +4353,7 @@ window.cfr05CloudCuttingFiles = window.Cfr05CloudCuttingFiles?.createApi(window,
   gates:cfr05SessionGates,
   environment:()=>({
     firebaseInitialized:Boolean(FB.app&&FB.db&&FB.storage),
+    readOnly:isRecoveryMode()||window.__autosaveDisabled===true,
     projectId:String(FB.app?.options?.projectId||window.FIREBASE_CONFIG?.projectId||""),
     bucket:String(FB.app?.options?.storageBucket||CUT_FILE_STORAGE_BUCKET||""),
     workspaceId:WORKSPACE_ID,
@@ -4312,6 +4362,7 @@ window.cfr05CloudCuttingFiles = window.Cfr05CloudCuttingFiles?.createApi(window,
   })
 });
 window.uploadCfr05CuttingFile = async function(jobId, file, onStage){
+  if(!canWriteCloud("cutting-file upload"))throw Error("Recovery/read-only mode blocks cutting-file uploads.");
   const uid=FB.user?.uid||"", workspaceId=WORKSPACE_ID, api=window.Cfr04WorkspaceMetadata;
   let membership={valid:false,active:false,role:null,path:null};
   if(uid&&FB.db&&api){
@@ -4548,6 +4599,7 @@ function topTasksInCat(folderId){
 
 /* Ensure every task carries a category tag used by calendar/explorer */
 function ensureTaskCategories(){
+  if(window.__inventoryIdentityRecoveryDisplay)return;
   tasksInterval.forEach(t => {
     if (!t) return;
     if (!t.cat) t.cat = "interval";
@@ -5124,6 +5176,7 @@ function runMaintenanceV2SafetyChecks(){
 window.runMaintenanceV2SafetyChecks = runMaintenanceV2SafetyChecks;
 
 function ensureJobCategories(){
+  if(window.__inventoryIdentityRecoveryDisplay)return;
   const folders = Array.isArray(window.jobFolders) ? window.jobFolders : defaultJobFolders();
   const rootId = folders.find(f => String(f.id) === JOB_ROOT_FOLDER_ID)
     ? JOB_ROOT_FOLDER_ID
@@ -5454,6 +5507,7 @@ function normalizeInventoryItem(raw){
 
 
 function ensureInventoryForAllMaintenanceTasks(){
+  if(window.__inventoryIdentityRecoveryDisplay)return false;
   if (!Array.isArray(inventory)) inventory = [];
   const lists = [Array.isArray(tasksInterval) ? tasksInterval : [], Array.isArray(tasksAsReq) ? tasksAsReq : []];
   let changed = false;
@@ -5596,7 +5650,68 @@ function setDailyCutHoursEntry(dateISO, hours, { source = "manual", preserveManu
   return true;
 }
 
-function adoptState(doc){
+function adoptAuthoritativeRecoveryState(doc){
+  // Recovery adoption is a display of cloned evidence, not normalization or
+  // provisioning. Never seed links, purge history or write browser caches here.
+  const data=cloneStructured(doc)||{};
+  const displayFields=["schema","syncMeta","saveMeta","syncProcessLog","totalHistory","tasksInterval","tasksAsReq","inventory","inventoryFolders","inventoryMaterials","inventoryTransactions","inventorySection","cuttingJobDatabase","cuttingJobs","completedCuttingJobs","orderRequests","garnetCleanings","dailyCutHours","opportunityRollups","weeklyCostReports","receiptTrackerWeeks","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","deletedItems","appConfig","jobFolders","orderRequestTab","settingsFolders","folders","dashboardLayout","costLayout","jobLayout","pumpEff","oneDriveJobConfig"];
+  // Unknown source fields remain evidence, never overwrite runtime write gates
+  // or browser globals. Live known fields and this evidence are checked at apply.
+  window.__inventoryIdentityLocalEvidence=data;window.__inventoryIdentityDisplayFields=displayFields;
+  displayFields.forEach(name=>{if(Object.prototype.hasOwnProperty.call(data,name))window[name]=data[name];});
+  totalHistory=Array.isArray(data.totalHistory)?data.totalHistory:[];
+  tasksInterval=Array.isArray(data.tasksInterval)?data.tasksInterval:[];
+  tasksAsReq=Array.isArray(data.tasksAsReq)?data.tasksAsReq:[];
+  inventory=Array.isArray(data.inventory)?data.inventory:[];
+  cuttingJobs=Array.isArray(data.cuttingJobs)?data.cuttingJobs:[];
+  completedCuttingJobs=Array.isArray(data.completedCuttingJobs)?data.completedCuttingJobs:[];
+  orderRequests=Array.isArray(data.orderRequests)?data.orderRequests:[];
+  garnetCleanings=Array.isArray(data.garnetCleanings)?data.garnetCleanings:[];
+  dailyCutHours=Array.isArray(data.dailyCutHours)?data.dailyCutHours:[];
+  opportunityRollups=Array.isArray(data.opportunityRollups)?data.opportunityRollups:[];
+  weeklyCostReports=Array.isArray(data.weeklyCostReports)?data.weeklyCostReports:[];
+  receiptTrackerWeeks=Array.isArray(data.receiptTrackerWeeks)?data.receiptTrackerWeeks:[];
+  maintenanceTasksV2=Array.isArray(data.maintenanceTasksV2)?data.maintenanceTasksV2:[];
+  maintenanceCalendarInstancesV2=Array.isArray(data.maintenanceCalendarInstancesV2)?data.maintenanceCalendarInstancesV2:[];
+  maintenanceOccurrencesV2=Array.isArray(data.maintenanceOccurrencesV2)?data.maintenanceOccurrencesV2:[];
+  deletedItems=Array.isArray(data.deletedItems)?data.deletedItems:[];
+  appConfig=data.appConfig||{};jobFolders=Array.isArray(data.jobFolders)?data.jobFolders:[];
+  orderRequestTab=data.orderRequestTab||"active";
+  Object.assign(window,{totalHistory,tasksInterval,tasksAsReq,inventory,cuttingJobs,completedCuttingJobs,orderRequests,garnetCleanings,dailyCutHours,opportunityRollups,weeklyCostReports,receiptTrackerWeeks,maintenanceTasksV2,maintenanceCalendarInstancesV2,maintenanceOccurrencesV2,deletedItems,appConfig,jobFolders,orderRequestTab});
+  window.cloudDashboardLayout=cloneStructured(data.dashboardLayout||{});window.cloudDashboardLayoutLoaded=true;
+  window.cloudCostLayout=cloneStructured(data.costLayout||{});window.cloudCostLayoutLoaded=true;
+  window.cloudJobLayout=cloneStructured(data.jobLayout||{});window.cloudJobLayoutLoaded=true;
+  window.__inventoryIdentityRecoveryDisplay=true;
+  window.__opportunityStateReady=false;
+  syncRenderTotalsFromHistory();
+}
+
+function renderInventoryIdentityRecoveryData(hash){
+  if(!window.__inventoryIdentityRecoveryDisplay)return false;
+  const content=document.getElementById("content");if(!content)return false;
+  const data=window.__lastLoadedCloudState||{};
+  const routes={"#/inventory":["inventory","inventoryFolders","inventoryMaterials"],"#/settings":["tasksInterval","tasksAsReq","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","settingsFolders"],"#/jobs":["cuttingJobs","completedCuttingJobs"],"#/costs":["receiptTrackerWeeks","dailyCutHours","weeklyCostReports","totalHistory","pumpEff","garnetCleanings"],"#/order-request":["orderRequests"],"#/deleted":["deletedItems"]};
+  const fields=routes[String(hash).split("?")[0]]||Object.keys(data).filter(name=>!["schema","syncMeta","saveMeta","syncProcessLog"].includes(name));
+  content.replaceChildren();
+  const heading=document.createElement("h2");heading.textContent="Authoritative cloud data — read-only recovery";content.appendChild(heading);
+  const notice=document.createElement("p");notice.textContent=window.__recoveryReason||"Inventory identity review is required. Writes and editing are disabled; all source records are preserved.";content.appendChild(notice);
+  for(const name of fields){
+    const section=document.createElement("section"),title=document.createElement("h3"),value=data[name];section.dataset.recoveryCollection=name;
+    title.textContent=`${name}: ${Array.isArray(value)?value.length:"authoritative value"}`;section.appendChild(title);
+    const records=Array.isArray(value)?value:[value??null];
+    records.forEach((record,index)=>{
+      const detail=document.createElement("details"),summary=document.createElement("summary"),body=document.createElement("pre");detail.dataset.evidenceRow=String(index);
+      summary.textContent=`${index}: ${record?.name||record?.id||record?.dateISO||"record"}`;
+      body.textContent=JSON.stringify(record,null,2);body.style.cssText="white-space:pre-wrap;overflow-wrap:anywhere";
+      detail.append(summary,body);section.appendChild(detail);
+    });
+    content.appendChild(section);
+  }
+  renderRecoveryDiagnosticsPanel();return true;
+}
+
+function adoptState(doc, options = {}){
+  if(options.preserveAuthoritative===true)return adoptAuthoritativeRecoveryState(doc);
   if (typeof window !== "undefined"){
     window.__opportunityStateReady = false;
   }
@@ -6614,12 +6729,16 @@ async function loadFromCloud(){
     const identityIssues=inspectInventoryIdentities(data.inventory ?? [], data.inventoryFolders ?? []);
     if(identityIssues.length){
       window.__inventoryIdentityIssues=identityIssues;
-      window.__lastLoadedCloudState=cloneStructured(data);
       window.__recoveryInspectMode=true;window.__autosaveDisabled=true;
-      setCloudLoadGate({loadComplete:true,adoptComplete:false});
+      window.__lastLoadedCloudState=cloneStructured(data);
+      window.__loadedCloudRevisionForSaveGuard=Number(data.syncMeta?.rev||0);
+      lastAppliedCloudRevision=window.__loadedCloudRevisionForSaveGuard;
+      window.__recoveryReason="Inventory has duplicate/missing IDs. Authoritative data is displayed read-only; no records or links were rewritten. Review the identity repair preview before any repair.";
+      adoptState(cloneStructured(data),{preserveAuthoritative:true});
+      setCloudLoadGate({loadComplete:true,adoptComplete:true});
       blockCloudSave("Inventory identity evidence requires review; no records were removed or rewritten.",identityIssues);
       renderRecoveryDiagnosticsPanel();
-      return {loaded:false,recovery:true,reason:"inventory_identity_review"};
+      return {loaded:true,recovery:true,reason:"inventory_identity_review"};
     }
     const localBackup = readLocalStateBackup();
     const cloudRev = Number(data.syncMeta?.rev || 0);
