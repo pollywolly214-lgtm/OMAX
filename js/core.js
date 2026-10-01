@@ -820,7 +820,7 @@ function isProtectedBusinessDataKey(key){
   return /(tasksinterval|tasksasreq|completeddates|manualhistory|calendardateiso|recurrence|removedoccurrences|occurrenceoverrides|maintenancetasksv2|maintenanceoccurrencesv2|maintenancecalendarinstancesv2|settingsfolders|folders|inventory|inventoryfolders|inventorymaterials|inventorytransactions|orderrequests|receipttrackerweeks|weeklycostreports|purchase|vendor|tolerance|inspection|quality|layout|dashboardlayout|costlayout|joblayout|tolerancelayout)/i.test(normalized);
 }
 
-function sanitizeValueForStorage(value, { dropHeavyHistory = false } = {}){
+function sanitizeValueForStorage(value, { dropHeavyHistory = false, provenanceScope = "" } = {}){
   if (Array.isArray(value)) return value.map(v => sanitizeValueForStorage(v, { dropHeavyHistory }));
   if (!value || typeof value !== "object"){
     if (typeof value === "string" && (value.startsWith("data:image") || value.length > 200000)) return "";
@@ -829,13 +829,21 @@ function sanitizeValueForStorage(value, { dropHeavyHistory = false } = {}){
   const out = {};
   for (const [k,v] of Object.entries(value)){
     const key = String(k || "");
-    if (/^(__|debug|cache|preview)/i.test(key)) continue;
+    // Workbook parser markers are immutable reviewed-source evidence here,
+    // not runtime caches. Keep only their bounded eligible forms, and only
+    // directly inside importProvenance.sourceRecord. Firewall rules still apply.
+    const sourceMarker = provenanceScope === "source" && (
+      (key === "__sourceRowNumber" && (v === null || (Number.isSafeInteger(v) && v > 0 && v <= 1048576)))
+      || (key === "__recoveryProblems" && Array.isArray(v) && v.length === 0)
+    );
+    if (/^(__|debug|cache|preview)/i.test(key) && !sourceMarker) continue;
     if (dropHeavyHistory && !isProtectedBusinessDataKey(key) && /(syncprocesslog|logs|deleteditems|reports|rollups|savelogs)/i.test(key)) continue;
     if (typeof v === "string" && (isLikelyEmbeddedFileContent(key, v) || v.length > 200000)){
       if (isSafeMetadataString(key, v)) out[key] = v;
       continue;
     }
-    out[k] = sanitizeValueForStorage(v, { dropHeavyHistory });
+    const nextScope = key === "importProvenance" ? "import" : (provenanceScope === "import" && key === "sourceRecord" ? "source" : "");
+    out[k] = sanitizeValueForStorage(v, { dropHeavyHistory, provenanceScope:nextScope });
   }
   return out;
 }
