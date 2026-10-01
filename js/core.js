@@ -2728,7 +2728,7 @@ function startWorkspaceStateListener(){
     if (snap.metadata && snap.metadata.hasPendingWrites) return;
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
-    if(inspectInventoryIdentities(incoming.inventory||[],incoming.inventoryFolders||[]).length){
+    if(!checkAuthoritativeIdentityIntegrity(incoming).valid){
       window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
       loadFromCloud().then(refreshRouteSafely);return;
     }
@@ -4160,9 +4160,21 @@ function scanAuthoritativeCutFileContent(state, rootPath = "$"){
 }
 
 const inventoryIdentityRepairAuthorizations=new Map();
+async function writeReviewedGlobalIdentityRepair(next,{source,expectedRevision}){
+  const api=window.OMAXGlobalIdentityRepair,plan=api.preview(source);
+  if(window.__lastIndeterminateSave||window.__globalIdentityVerificationPending||window.__lastImportVerificationError||window.__lastInventoryIdentityRepairError)throw Error("Unresolved write verification blocks identity repair.");
+  if(plan.blockers.length||plan.sourceRevision!==expectedRevision||stableStringify(api.repairedState(source,plan))!==stableStringify(next))throw Error("Exact global identity repair authorization was rejected.");
+  const integrity=checkAuthoritativeIdentityIntegrity(next);
+  if(!integrity.valid)throw Error("Proposed global repair fails the central integrity/protected gate: "+integrity.blockers.join(" "));
+  const token=Symbol("reviewed global identity repair");
+  inventoryIdentityRepairAuthorizations.set(token,{sourceKey:stableStringify(source),pendingKey:stableStringify(next),expectedRevision});
+  try{return await writeAuthoritativeStateSnapshot(next,{merge:true},{expectedRevision,inventoryIdentityRepairToken:token});}
+  finally{inventoryIdentityRepairAuthorizations.delete(token);}
+}
 async function writeReviewedInventoryIdentityRepair(next,{source,expectedRevision}){
   const api=window.OMAXInventoryIdentityRepair,plan=api.preview(source);
   if(plan.blockers.length||plan.sourceRevision!==expectedRevision||stableStringify(api.repairedState(source,plan))!==stableStringify(next))throw Error("Exact inventory repair authorization was rejected.");
+  if(window.OMAXGlobalIdentityRepair&&!window.OMAXGlobalIdentityRepair.integrity(next).valid)throw Error("Inventory-only repair cannot bypass unresolved global identities. Review the combined global plan.");
   const token=Symbol("reviewed inventory identity repair");
   inventoryIdentityRepairAuthorizations.set(token,{sourceKey:stableStringify(source),pendingKey:stableStringify(next),expectedRevision});
   try{return await writeAuthoritativeStateSnapshot(next,{merge:true},{expectedRevision,inventoryIdentityRepairToken:token});}
@@ -4237,7 +4249,26 @@ const inventoryIdentityRepairApi=window.OMAXInventoryIdentityRepair?.createApi({
   }
 });
 window.previewInventoryIdentityRepair=()=>inventoryIdentityRepairApi.preview();
-window.applyInventoryIdentityRepair=(reviewedPreview,options)=>inventoryIdentityRepairApi.apply(reviewedPreview,options);
+window.applyInventoryIdentityRepair=async()=>({saved:false,blocked:true,error:"Inventory-only apply is superseded by the separately reviewed global identity plan."});
+
+const globalIdentityRepairApi=window.OMAXGlobalIdentityRepair?.createApi({
+  localState:getInventoryIdentityRepairLocalState,
+  loadedRevision:()=>window.__loadedCloudRevisionForSaveGuard,
+  readCloud:readCurrentCloudStateReadOnly,
+  canApply:()=>Boolean(FB.ready&&FB.user&&FB.docRef&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode&&!window.__lastIndeterminateSave&&!window.__globalIdentityVerificationPending&&!window.__lastImportVerificationError&&!window.__lastInventoryIdentityRepairError&&!isVercelPreviewRuntime()&&!["recovery","readonly","diagnostics"].some(name=>new URLSearchParams(window.location?.search||"").get(name)==="1")),
+  backup:state=>exportJsonDownload(`omax-global-identity-pre-repair-${Date.now()}.json`,state),
+  write:writeReviewedGlobalIdentityRepair,
+  suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__globalIdentityVerificationPending=true;window.__recoveryReason=reason;renderRecoveryDiagnosticsPanel();},
+  adoptVerified:async state=>{
+    // This state is the API's fresh, exact, post-commit SERVER result. Adoption
+    // is synchronous so a second asynchronous load cannot erase a new edit.
+    const result=adoptIdentityCheckedAuthoritativeState(state);
+    if(!result?.loaded||result.recovery)throw Error("Server-verified repair still has recovery blockers: "+(window.__recoveryReason||result?.reason));
+    if(typeof route==="function")route();
+  }
+});
+window.previewGlobalIdentityRepair=()=>globalIdentityRepairApi.preview();
+window.applyGlobalIdentityRepair=(reviewedPreview,options)=>globalIdentityRepairApi.apply(reviewedPreview,options);
 
 function inspectLocalJsonCache(key, rootPath, unavailable){
   try {
@@ -4480,9 +4511,9 @@ function syncRenderTotalsFromHistory(){
   window.RENDER_DELTA = RENDER_DELTA;
 }
 
-function resetHistoryToCurrent(){
+function resetHistoryToCurrent(options={}){
   try {
-    currentSnapshotJSON = JSON.stringify(snapshotState());
+    currentSnapshotJSON = JSON.stringify(options.authoritativeState??snapshotState());
   } catch (err) {
     console.warn("Failed to seed history snapshot:", err);
     currentSnapshotJSON = null;
@@ -6716,6 +6747,75 @@ async function runRecoveryInspect(){
   return { cloudState, localBackup };
 }
 if (typeof window !== "undefined") window.recoveryInspect = runRecoveryInspect;
+function checkAuthoritativeIdentityIntegrity(data){
+  const check=window.OMAXGlobalIdentityRepair?.integrity(data)||{valid:false,blockers:["Global identity validator is unavailable."]};
+  const blockers=check.blockers.slice();
+  if(!stateHasMeaningfulData(data))blockers.push("Authoritative state is missing or empty.");
+  if(window.__lastIndeterminateSave)blockers.push("An indeterminate save requires separate server verification; writes remain suspended.");
+  if(window.__globalIdentityVerificationPending)blockers.push("A repair verification failure requires manual evidence review.");
+  if(window.__lastImportVerificationError||window.__lastInventoryIdentityRepairError)blockers.push("A previous import/repair verification failure requires manual evidence review.");
+  const params=new URLSearchParams(window.location?.search||"");
+  if(["recovery","readonly","diagnostics"].some(name=>params.get(name)==="1")||isVercelPreviewRuntime())blockers.push("This URL explicitly requests read-only inspection.");
+  if(window.__localBackupOnlyMode)blockers.push("Local-backup-only state has not been reconciled.");
+  for(const entry of PROTECTED_FIELD_REGISTRY){
+    if(entry.expectedShape==="nestedCount"||!Object.prototype.hasOwnProperty.call(data||{},entry.path))continue;
+    const value=data[entry.path],array=Array.isArray(value),object=value!==null&&typeof value==="object"&&!array;
+    if((entry.expectedShape==="array"&&!array)||(entry.expectedShape==="object"&&!object)||(entry.expectedShape==="arrayOrObject"&&!array&&!object))blockers.push(`Protected field ${entry.path} has invalid shape.`);
+  }
+  if(scanAuthoritativeCutFileContent(data).contaminated)blockers.push("Protected cutting-file content firewall rejected authoritative state.");
+  if(estimatePayloadBytes(data)>=FIRESTORE_BLOCK_BYTES)blockers.push("Protected authoritative payload exceeds the save limit.");
+  if(check.valid&&!blockers.length){
+    // Assess the authoritative document itself, without treating local caches
+    // as restore sources. This runs the existing registry/coverage/compaction
+    // checks while the ordinary runtime write gates remain closed.
+    const safety=validateProtectedSavePreflight({baselineState:data,pendingState:data,latestRemoteState:data,localBackupState:null,windowState:data,coverageReport:getSaveSchemaCoverageReport({pendingSnapshot:data}),reason:"authoritative identity adoption",allowFirstRun:false,skipRuntimeGates:true});
+    if(safety.blocked)blockers.push(...safety.reasons.map(reason=>reason.message));
+  }
+  return {valid:check.valid&&blockers.length===0,blockers,plan:check.plan};
+}
+
+function adoptIdentityCheckedAuthoritativeState(data){
+  const integrity=checkAuthoritativeIdentityIntegrity(data);
+  if(integrity.valid&&typeof readLocalStateBackup==="function"){
+    const localBackup=readLocalStateBackup(),cloudRev=Number(data.syncMeta?.rev||0),backupRev=Number(localBackup?.syncMeta?.rev||0);
+    if(stateHasMeaningfulData(localBackup)&&backupRev>cloudRev)showLocalBackupConflictWarning({cloudRev,backupRev,backupOnly:false});
+  }
+  window.__globalIdentityIssues=integrity.blockers;
+  window.__inventoryIdentityIssues=inspectInventoryIdentities(data.inventory??[],data.inventoryFolders??[]);
+  // Disable all writes before either evidence adoption or a clean adoption.
+  window.__recoveryInspectMode=true;window.__autosaveDisabled=true;
+  window.__lastLoadedCloudState=cloneStructured(data);
+  window.__loadedCloudRevisionForSaveGuard=Number(data.syncMeta?.rev||0);
+  lastAppliedCloudRevision=window.__loadedCloudRevisionForSaveGuard;
+  adoptState(cloneStructured(data),{preserveAuthoritative:true});
+  setCloudLoadGate({loadComplete:true,adoptComplete:true});
+  if(!integrity.valid){
+    window.__recoveryReason=integrity.blockers.join(" ");
+    blockCloudSave("Global identity/protected evidence requires review; authoritative data remains read-only.",integrity.blockers);
+    renderRecoveryDiagnosticsPanel();return {loaded:true,recovery:true,reason:"global_identity_review"};
+  }
+  // Existing protected-data reduction checks validate the actual adopted
+  // bindings against the server, including nested history, before unlocking.
+  const adopted=getInventoryIdentityRepairLocalState();
+  if(stableStringify(adopted)!==stableStringify(data)||detectDangerousProtectedFieldReduction(data,adopted).blocked){
+    window.__recoveryReason="Authoritative adoption did not preserve the exact protected state.";
+    window.__globalIdentityIssues.push(window.__recoveryReason);
+    renderRecoveryDiagnosticsPanel();return {loaded:true,recovery:true,reason:"protected_adoption_review"};
+  }
+  window.__inventoryIdentityRecoveryDisplay=false;
+  window.__missingAuthoritativeState=null;
+  window.__recoveryInspectMode=false;window.__autosaveDisabled=false;window.__recoveryReason="";
+  window.__lastCloudSaveBlock=null;
+  document.getElementById("recoveryModeBanner")?.remove();
+  document.getElementById("recoveryDiagnosticsPanel")?.remove();
+  try{if(typeof resetHistoryToCurrent==="function")resetHistoryToCurrent({authoritativeState:data});}
+  catch(error){window.__recoveryInspectMode=true;window.__autosaveDisabled=true;window.__inventoryIdentityRecoveryDisplay=true;window.__recoveryReason="Adoption history initialization failed: "+String(error?.message||error);renderRecoveryDiagnosticsPanel();return {loaded:true,recovery:true,reason:"adoption_initialization_failed"};}
+  window.__opportunityStateReady=true;
+  if(typeof refreshDerivedDailyHours==="function")refreshDerivedDailyHours();
+  if(typeof window.CustomEvent==="function")window.dispatchEvent(new window.CustomEvent("opportunity:data-ready",{detail:{timestamp:Date.now(),preserveAuthoritative:true}}));
+  return {loaded:true,recovery:false};
+}
+
 async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   setCloudLoadGate({ loadComplete:false, adoptComplete:false });
@@ -6726,34 +6826,7 @@ async function loadFromCloud(){
       enterMissingStateRecovery(data);
       return { loaded:false, recovery:true, reason:"authoritative_state_missing_or_empty" };
     }
-    const identityIssues=inspectInventoryIdentities(data.inventory ?? [], data.inventoryFolders ?? []);
-    if(identityIssues.length){
-      window.__inventoryIdentityIssues=identityIssues;
-      window.__recoveryInspectMode=true;window.__autosaveDisabled=true;
-      window.__lastLoadedCloudState=cloneStructured(data);
-      window.__loadedCloudRevisionForSaveGuard=Number(data.syncMeta?.rev||0);
-      lastAppliedCloudRevision=window.__loadedCloudRevisionForSaveGuard;
-      window.__recoveryReason="Inventory has duplicate/missing IDs. Authoritative data is displayed read-only; no records or links were rewritten. Review the identity repair preview before any repair.";
-      adoptState(cloneStructured(data),{preserveAuthoritative:true});
-      setCloudLoadGate({loadComplete:true,adoptComplete:true});
-      blockCloudSave("Inventory identity evidence requires review; no records were removed or rewritten.",identityIssues);
-      renderRecoveryDiagnosticsPanel();
-      return {loaded:true,recovery:true,reason:"inventory_identity_review"};
-    }
-    const localBackup = readLocalStateBackup();
-    const cloudRev = Number(data.syncMeta?.rev || 0);
-    const backupRev = Number(localBackup?.syncMeta?.rev || 0);
-    if (stateHasMeaningfulData(localBackup) && backupRev > cloudRev) showLocalBackupConflictWarning({ cloudRev, backupRev, backupOnly:false });
-    logMaintenanceHistoryDiagnostics("cloud-before-adopt", data);
-    logCoreBusinessDiagnostics("cloud-before-adopt", data);
-    adoptState(safeCleanupLoadedState(data));
-    window.__lastLoadedCloudState = cloneStructured(data);
-    window.__loadedCloudRevisionForSaveGuard = cloudRev;
-    lastAppliedCloudRevision = cloudRev;
-    if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
-    setCloudLoadGate({ loadComplete:true, adoptComplete:true });
-    renderRecoveryDiagnosticsPanel();
-    return { loaded:true };
+    return adoptIdentityCheckedAuthoritativeState(data);
   } catch (error){
     console.error("Cloud load failed:", error);
     setCloudLoadGate({ loadComplete:true, adoptComplete:false });

@@ -102,8 +102,16 @@
   let recomputePending = false;
   let recomputeActive = false;
 
-  function handleOpportunityStateReady(){
+  function handleOpportunityStateReady(event){
     opportunityDataReady = true;
+    // Identity-checked adoption must preserve the exact SERVER evidence. Mark
+    // calculations ready for the next user edit without rewriting rollups as
+    // a side effect of adopting a reviewed repair or a clean reload.
+    if(event?.detail?.preserveAuthoritative===true){
+      recomputeDeferredUntilReady=false;
+      recomputePending=false;
+      return;
+    }
     if (recomputeDeferredUntilReady){
       recomputeDeferredUntilReady = false;
       recomputePending = false;

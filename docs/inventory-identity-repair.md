@@ -2,6 +2,8 @@
 
 Date: 2026-09-30. Branch: production-readiness-import-prep. No production data was read or repaired during development. The shape below is user-provided evidence reproduced with synthetic fixture records.
 
+PH-06 supersedes the inventory-only execution and recovery-exit behavior described below. Use the [global identity review](global-identity-repair.md) for the current combined plan and centralized exit gate. The PH-05 inventory mapping remains part of that plan. Inventory-only browser apply now returns a blocked result; the historical PH-05 test results below remain unchanged.
+
 ## Evidence remains visible
 
 Meaningful authoritative state with duplicate/missing inventory identities first disables ordinary writes/autosave and enters Recovery Mode. Load retains an independent exact cloud snapshot and its revision, then adopts a cloned, unnormalized display state. It does not seed inventory, assign IDs, rewrite task links, purge history or replace recovery caches. Navigation displays read-only authoritative records, including duplicate inventory rows, with diagnostic exports available. This evidence view bypasses the normal editable renderers and their normalization/seeding. Secure-file uploads are blocked as well as ordinary app/state and workspace metadata writes.
@@ -13,7 +15,7 @@ Missing/empty/config-only authoritative state still fails closed without adoptin
 In F12 on the Vercel PR preview, run only:
 
 ```js
-await window.previewInventoryIdentityRepair()
+await window.previewGlobalIdentityRepair()
 ```
 
 This performs a server read and returns a plan; it does not download a backup, edit local business records or write to Firebase. Review the plan before considering any repair. No repair execution is requested by this document.

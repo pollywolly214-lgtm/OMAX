@@ -88,10 +88,10 @@
     if(!Number.isSafeInteger(actual.syncMeta?.rev)||actual.syncMeta.rev<=plan.sourceRevision||actual.syncMeta.rev!==expected.syncMeta?.rev)throw Error("Authorized transaction revision was not verified.");
     return true;
   }
-  function createApi(env){
+  function createApi(env,strategy={preview,repairedState,verify}){
     let busy=false;
     const currentPreview=source=>{
-      const plan=preview(source);
+      const plan=strategy.preview(source);
       if(key(business(env.localState()))!==key(business(source)))plan.blockers.push("Local business state differs from authoritative cloud state.");
       if(env.loadedRevision()!==plan.sourceRevision)plan.blockers.push("The displayed authoritative revision differs from the current server revision.");
       plan.noop=plan.noop&&!plan.blockers.length;return plan;
@@ -105,7 +105,7 @@
         if(!reviewedPreview||key(plan)!==key(reviewedPreview))throw Error("Reviewed source/plan or revision changed; generate a fresh read-only preview.");
         if(plan.blockers.length)throw Error(plan.blockers.join(" "));
         if(plan.noop){result.noop=true;return result;}
-        const next=repairedState(source,plan),pendingKey=key(next),localBefore=key(business(env.localState()));
+        const next=strategy.repairedState(source,plan),pendingKey=key(next),localBefore=key(business(env.localState()));
         if(await env.backup(clone(source))!==true)throw Error("Exact authoritative pre-repair backup download is required.");
         result.backupCreated=true;
         if(key(business(env.localState()))!==localBefore)throw Error("Local state changed during backup; review a fresh preview.");
@@ -119,9 +119,9 @@
         result.saved=true;result.committedState=clone(saved.committedState);
         // Only sync metadata can differ from our proposed state.
         if(key({...saved.committedState,syncMeta:source.syncMeta})!==pendingKey)throw Error("Transaction changed fields outside the authorized ID repair.");
-        const actual=await env.readCloud();verify(source,plan,saved.committedState,actual);
+        const actual=await env.readCloud();strategy.verify(source,plan,saved.committedState,actual);
         if(key(business(env.localState()))!==localBefore)throw Error("Local business state changed while repair was in flight; preserve evidence and verify manually.");
-        env.adoptVerified(clone(actual));result.verified=true;result.beforeCounts=plan.beforeCounts;result.afterCounts=counts(actual);result.repairedRows=plan.affectedRows.length;return result;
+        await env.adoptVerified(clone(actual));result.verified=true;result.beforeCounts=plan.beforeCounts;result.afterCounts=counts(actual);result.repairedRows=plan.affectedRows.length;return result;
       }catch(error){
         result.error=String(error?.message||error);
         if(committed||writePending){result.manualVerificationRequired=true;result.indeterminate=writePending;env.suspend(result.error);}
