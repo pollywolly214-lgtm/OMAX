@@ -18,14 +18,17 @@ function createHarness(saveCloudNow){
     settingsFolders:[{ id:"folder" }], inventory:[{ id:"stock" }], inventoryFolders:[],
     inventoryMaterials:[], receiptTrackerWeeks:[], orderRequests:[], dailyCutHours:[], garnetCleanings:[]
   };
+  window.syncMeta={rev:1};
+  window.__loadedCloudRevisionForSaveGuard=1;
+  const state=()=>structuredClone(Object.fromEntries(Object.entries(window).filter(([key])=>!key.startsWith("__"))));
   const context = {
     window, console, Date, Set, Map, JSON, Object, Array, String, Number, RegExp,
     structuredClone, saveCloudNow,
     exportJsonDownload:()=>true,
-    getCurrentAppStateForDiagnostics:()=>structuredClone(window)
+    getCurrentAppStateForDiagnostics:state,readCurrentCloudStateReadOnly:async()=>state()
   };
   vm.createContext(context);
-  vm.runInContext(rendererSource.slice(start, end) + "\nthis.api={applyMaintenanceHistoryImportRows,buildMaintenanceHistoryImportPreview,countMaintenanceHistoryImportProtectedState,findMaintenanceHistoryImportDrops,captureMaintenanceHistoryImportManualHistory,verifyMaintenanceHistoryImportMutation};", context);
+  vm.runInContext(rendererSource.slice(start, end) + "\nthis.api={applyMaintenanceHistoryImportRows:(rows,options={confirmed:true})=>applyMaintenanceHistoryImportRows(rows,options),buildMaintenanceHistoryImportPreview,countMaintenanceHistoryImportProtectedState,findMaintenanceHistoryImportDrops,captureMaintenanceHistoryImportManualHistory,verifyMaintenanceHistoryImportMutation};", context);
   return { window, api:context.api };
 }
 
@@ -76,12 +79,13 @@ async function run(){
   {
     const h = createHarness(async()=>({ saved:true, stateWriteCompleted:true }));
     h.window.maintenanceOccurrencesV2.push({ import_event_id:"existing-v2" });
-    const rows = [row("same"), row("same", "RO Micron Filter", "2025-02-04"), row("existing-v2")];
+    const rows = [row("same"), row("same", "RO Micron Filter", "2025-02-04"), row("existing-v2"),row("unique")];
     const preview = h.api.buildMaintenanceHistoryImportPreview(rows);
-    assert.deepEqual(Array.from(preview, item=>item.status), ["ready", "duplicate", "duplicate"]);
+    assert.deepEqual(Array.from(preview, item=>item.status), ["ambiguous", "ambiguous", "duplicate", "ready"]);
     const result = await h.api.applyMaintenanceHistoryImportRows(preview);
     assert.equal(result.stats.imported, 1);
-    assert.equal(result.stats.duplicate, 2);
+    assert.equal(result.stats.duplicate, 1);
+    assert.equal(result.stats.ambiguous, 2);
   }
   {
     const h = createHarness(async()=>({ saved:true, stateWriteCompleted:true }));
@@ -106,6 +110,21 @@ async function run(){
     const snapshot = h.api.captureMaintenanceHistoryImportManualHistory();
     h.window.tasksInterval.push({ id:"unexpected", name:"Pump Rebuild", interval:500, mode:"interval", manualHistory:[], completedDates:[] });
     assert.throws(()=>h.api.verifyMaintenanceHistoryImportMutation(snapshot, new Map(), []), /Unexpected task collection mutation/);
+  }
+  {
+    const h=createHarness(async()=>({saved:true,stateWriteCompleted:true}));
+    const result=await h.api.applyMaintenanceHistoryImportRows(h.api.buildMaintenanceHistoryImportPreview([row()]),{});
+    assert.equal(result.saveAttempted,false);
+    assert.match(result.saveError,/confirmation/);
+  }
+  {
+    const h=createHarness(async()=>({saved:true,stateWriteCompleted:true}));
+    h.window.tasksInterval.push({id:"inspection",name:"Inspect relief valve",manualHistory:[],completedDates:[]});
+    const purchase=h.api.buildMaintenanceHistoryImportPreview([{...row("evidence","Inspect relief valve"),source_kind:"purchase_evidence"}]);
+    assert.equal(purchase[0].status,"excluded");
+    const shop=h.api.buildMaintenanceHistoryImportPreview([{...row("shop","Inspect relief valve"),source_kind:"shop_log"}]);
+    assert.equal(shop[0].status,"ready");
+    assert.equal((await h.api.applyMaintenanceHistoryImportRows(shop)).verificationCompleted,true);
   }
   const wireSection = rendererSource.slice(rendererSource.indexOf("function wireMaintenanceHistoryImportTool"), rendererSource.indexOf("function renderSettings"));
   assert.match(wireSection, /if \(importRunning\) return;/, "concurrent import attempts are ignored");

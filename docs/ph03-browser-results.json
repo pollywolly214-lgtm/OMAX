@@ -1,0 +1,345 @@
+{
+  "auditDate": "2026-09-30",
+  "startingMain": "bcf6322a900c20fb9c98100e0c25e375dbf90e7a",
+  "branch": "production-readiness-import-prep",
+  "url": "http://localhost:8000/?devsafe=1",
+  "engine": "installed Edge via bundled Playwright",
+  "backend": "Isolated fixture IndexedDB + Web Locks; in-memory fixture Storage; no initialized Firebase app",
+  "passed": 49,
+  "failed": 0,
+  "checks": [
+    {
+      "name": "Disposable bootstrap and initial atomic save",
+      "passed": true
+    },
+    {
+      "name": "Dashboard hours UI create/save/rerender",
+      "passed": true
+    },
+    {
+      "name": "Pump RPM UI create/edit and merge",
+      "passed": true
+    },
+    {
+      "name": "Create/edit/save fixtures across protected areas",
+      "passed": true
+    },
+    {
+      "name": "Dashboard/Calendar/Garnet/Pump repeated navigation/rerender",
+      "passed": true
+    },
+    {
+      "name": "Maintenance Settings repeated navigation/rerender",
+      "passed": true
+    },
+    {
+      "name": "Cutting/Completed Jobs repeated navigation/rerender",
+      "passed": true
+    },
+    {
+      "name": "Inventory/folders/materials repeated navigation/rerender",
+      "passed": true
+    },
+    {
+      "name": "Order Requests repeated navigation/rerender",
+      "passed": true
+    },
+    {
+      "name": "Cost/Data/Purchase/Receipts repeated navigation/rerender",
+      "passed": true
+    },
+    {
+      "name": "Deleted Items repeated navigation/rerender",
+      "passed": true
+    },
+    {
+      "name": "Tolerance/Settings repeated navigation/rerender",
+      "passed": true
+    },
+    {
+      "name": "Calendar navigation/toggle controls",
+      "passed": true
+    },
+    {
+      "name": "Inventory add dialog creates one record",
+      "passed": true
+    },
+    {
+      "name": "Maintenance create/edit form persists exactly once",
+      "passed": true
+    },
+    {
+      "name": "Cutting job create/edit/manual log/completion/history UI",
+      "passed": true
+    },
+    {
+      "name": "Inventory quantity/folder and order controls persist",
+      "passed": true
+    },
+    {
+      "name": "Garnet cleaning dialog create and calendar rerender",
+      "passed": true
+    },
+    {
+      "name": "Hard reload preserves all fixture records",
+      "passed": true
+    },
+    {
+      "name": "Purchase UI preview/confirmation/backup/cloud verification/idempotence",
+      "passed": true
+    },
+    {
+      "name": "Pump compare-first append/provenance/reload",
+      "passed": true
+    },
+    {
+      "name": "Purchase editor retains IDs/provenance",
+      "passed": true
+    },
+    {
+      "name": "Secure DXF/ORD/OMX fixture upload/list/download/preview",
+      "passed": true
+    },
+    {
+      "name": "Secure file presentation lists fixtures and renders verified DXF",
+      "passed": true
+    },
+    {
+      "name": "Dashboard/cost/job layout edit/save/reload",
+      "passed": true
+    },
+    {
+      "name": "Maintenance shop-log fixture append/cloud verification/no-op",
+      "passed": true
+    },
+    {
+      "name": "Reviewed cutting-job CSV UI preview/backup/commit/cloud verification",
+      "passed": true
+    },
+    {
+      "name": "Fresh browser context restores persisted fixture profile",
+      "passed": true
+    },
+    {
+      "name": "Dashboard/Calendar/Garnet/Pump render at 1440px",
+      "passed": true
+    },
+    {
+      "name": "Maintenance Settings render at 1440px",
+      "passed": true
+    },
+    {
+      "name": "Cutting/Completed Jobs render at 1440px",
+      "passed": true
+    },
+    {
+      "name": "Inventory/folders/materials render at 1440px",
+      "passed": true
+    },
+    {
+      "name": "Order Requests render at 1440px",
+      "passed": true
+    },
+    {
+      "name": "Cost/Data/Purchase/Receipts render at 1440px",
+      "passed": true
+    },
+    {
+      "name": "Deleted Items render at 1440px",
+      "passed": true
+    },
+    {
+      "name": "Tolerance/Settings render at 1440px",
+      "passed": true
+    },
+    {
+      "name": "Dashboard/Calendar/Garnet/Pump render at 390px",
+      "passed": true
+    },
+    {
+      "name": "Maintenance Settings render at 390px",
+      "passed": true
+    },
+    {
+      "name": "Cutting/Completed Jobs render at 390px",
+      "passed": true
+    },
+    {
+      "name": "Inventory/folders/materials render at 390px",
+      "passed": true
+    },
+    {
+      "name": "Order Requests render at 390px",
+      "passed": true
+    },
+    {
+      "name": "Cost/Data/Purchase/Receipts render at 390px",
+      "passed": true
+    },
+    {
+      "name": "Deleted Items render at 390px",
+      "passed": true
+    },
+    {
+      "name": "Tolerance/Settings render at 390px",
+      "passed": true
+    },
+    {
+      "name": "Edits during an in-flight save remain pending and persist on next save",
+      "passed": true
+    },
+    {
+      "name": "Two real tabs same revision have exactly one atomic winner",
+      "passed": true
+    },
+    {
+      "name": "Browser quota failure preserves prior backup/evidence",
+      "passed": true
+    },
+    {
+      "name": "Missing state recovery/exports/no defaults/no autosave",
+      "passed": true
+    },
+    {
+      "name": "No unexpected console/rejection/production requests",
+      "passed": true
+    }
+  ],
+  "unexpectedErrors": [],
+  "expectedFailureLogCount": 2,
+  "requests": {
+    "total": 501,
+    "businessRequests": 0
+  },
+  "viewports": [
+    {
+      "name": "Dashboard/Calendar/Garnet/Pump",
+      "width": 1440,
+      "documentWidth": 1440
+    },
+    {
+      "name": "Maintenance Settings",
+      "width": 1440,
+      "documentWidth": 1440
+    },
+    {
+      "name": "Cutting/Completed Jobs",
+      "width": 1440,
+      "documentWidth": 1440
+    },
+    {
+      "name": "Inventory/folders/materials",
+      "width": 1440,
+      "documentWidth": 1440
+    },
+    {
+      "name": "Order Requests",
+      "width": 1440,
+      "documentWidth": 1440
+    },
+    {
+      "name": "Cost/Data/Purchase/Receipts",
+      "width": 1440,
+      "documentWidth": 1440
+    },
+    {
+      "name": "Deleted Items",
+      "width": 1440,
+      "documentWidth": 1440
+    },
+    {
+      "name": "Tolerance/Settings",
+      "width": 1440,
+      "documentWidth": 1440
+    },
+    {
+      "name": "Dashboard/Calendar/Garnet/Pump",
+      "width": 390,
+      "documentWidth": 390
+    },
+    {
+      "name": "Maintenance Settings",
+      "width": 390,
+      "documentWidth": 390
+    },
+    {
+      "name": "Cutting/Completed Jobs",
+      "width": 390,
+      "documentWidth": 390
+    },
+    {
+      "name": "Inventory/folders/materials",
+      "width": 390,
+      "documentWidth": 390
+    },
+    {
+      "name": "Order Requests",
+      "width": 390,
+      "documentWidth": 390
+    },
+    {
+      "name": "Cost/Data/Purchase/Receipts",
+      "width": 390,
+      "documentWidth": 390
+    },
+    {
+      "name": "Deleted Items",
+      "width": 390,
+      "documentWidth": 390
+    },
+    {
+      "name": "Tolerance/Settings",
+      "width": 390,
+      "documentWidth": 390
+    }
+  ],
+  "nodeSuite": {
+    "command": "node --test tests/*.test.js",
+    "tests": 58,
+    "passed": 58,
+    "failed": 0,
+    "skipped": 0
+  },
+  "targetedSuite": {
+    "command": "node --test tests/atomic-persistence.test.js tests/historical-import-readiness.test.js tests/cutting-job-import.test.js tests/maintenance-history-import.test.js tests/inventory-identity.test.js tests/completed-job-provenance.test.js",
+    "tests": 33,
+    "passed": 33,
+    "failed": 0,
+    "skipped": 0
+  },
+  "syntax": {
+    "checked": 20,
+    "passed": 20,
+    "failed": 0,
+    "files": [
+      "js/auth/msalClient.js",
+      "js/core.js",
+      "js/cuttingJobImporter.js",
+      "js/onedrive/graph.js",
+      "js/onedrive/onedriveLibrary.js",
+      "js/renderers.js",
+      "tests/cfr02-content-firewall.test.js",
+      "tests/cfr04-workspace-metadata.test.js",
+      "tests/cutting-job-import.test.js",
+      "tests/maintenance-history-import.test.js",
+      "js/atomicPersistence.js",
+      "js/devsafeMode.js",
+      "js/historicalImport.js",
+      "js/historicalImportUi.js",
+      "scripts/devsafe-server.js",
+      "scripts/ph03-browser-matrix.js",
+      "tests/atomic-persistence.test.js",
+      "tests/completed-job-provenance.test.js",
+      "tests/historical-import-readiness.test.js",
+      "tests/inventory-identity.test.js"
+    ]
+  },
+  "gitDiffCheck": "passed",
+  "conflictMarkers": 0,
+  "limitations": [
+    "Not a real authenticated Firebase backend/rules/CORS test.",
+    "Quota exception injection; not real storage-capacity measurement.",
+    "Fresh browser context uses copied fixture-only storage, including IndexedDB.",
+    "Broad model fixture roundtrips plus documented real controls; not exhaustive human usability testing of every business variant."
+  ]
+}

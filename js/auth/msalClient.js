@@ -1,4 +1,5 @@
 (function(){
+  if (window.OMAXDevSafe?.active) return;
   const DEFAULT_SCOPES = ["User.Read", "Files.Read"];
   const REDIRECT_URI = `${window.location.origin}${window.location.pathname}`;
   let app = null;

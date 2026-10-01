@@ -1474,6 +1474,7 @@ function getLocalDeviceNumber(){
 }
 
 function supportsLocalRootPicker(){
+  if (window.OMAXDevSafe?.active) return false;
   return typeof window !== "undefined"
     && typeof window.showDirectoryPicker === "function"
     && typeof window.showOpenFilePicker === "function"
@@ -1541,6 +1542,7 @@ function sanitizeJobFileReferenceForFirestore(fileRef){
 }
 
 function openOneDriveRootDb(){
+  if (window.OMAXDevSafe?.active) return Promise.resolve(null);
   return new Promise((resolve, reject)=>{
     try {
       const req = window.indexedDB.open(JOB_ONEDRIVE_LOCAL_ROOT_DB, 1);
@@ -9394,12 +9396,15 @@ function maintenanceHistoryImportHasDuplicate(importEventId){
 }
 
 function buildMaintenanceHistoryImportPreview(rows){
+  const sourceCounts = new Map();
+  for (const row of rows || []){ const id=String(row?.import_event_id||"").trim(); sourceCounts.set(id,(sourceCounts.get(id)||0)+1); }
   const seenImportEventIds = new Set();
   return (Array.isArray(rows) ? rows : []).map((row, index) => {
     const eventId = String(row?.import_event_id || "").trim();
     const dateISO = String(row?.scheduled_maintenance_date || "").trim();
     const taskName = String(row?.exact_website_task || "").trim();
     const normalizedTask = normalizeMaintenanceImportTaskName(taskName);
+    const shopLog = row?.source_kind === "shop_log";
     let status = "ready";
     let reason = "Ready to append legacy completed history.";
     let match = null;
@@ -9413,10 +9418,14 @@ function buildMaintenanceHistoryImportPreview(rows){
     }else if (!taskName){
       status = "invalid";
       reason = "Missing required exact_website_task.";
-    }else if (MAINTENANCE_HISTORY_IMPORT_EXCLUDED_TASKS.has(normalizedTask)){
+    }else if (sourceCounts.get(eventId)>1){
+      status = "ambiguous"; reason = "Repeated source ID requires review for every affected row.";
+    }else if (row?.source_kind && !["shop_log","purchase_evidence"].includes(row.source_kind)){
+      status = "invalid"; reason = "Unsupported source_kind; use reviewed shop_log or purchase_evidence.";
+    }else if (!shopLog && MAINTENANCE_HISTORY_IMPORT_EXCLUDED_TASKS.has(normalizedTask)){
       status = "excluded";
       reason = "Task is explicitly excluded from purchase-driven import.";
-    }else if (!MAINTENANCE_HISTORY_IMPORT_ALLOWED_TASKS.has(normalizedTask)){
+    }else if (!shopLog && !MAINTENANCE_HISTORY_IMPORT_ALLOWED_TASKS.has(normalizedTask)){
       status = "excluded";
       reason = "Task is not in the allowed purchase-proven import list.";
     }else{
@@ -9430,6 +9439,8 @@ function buildMaintenanceHistoryImportPreview(rows){
         }else if (maintenanceHistoryImportHasDuplicate(eventId)){
           status = "duplicate";
           reason = "An existing legacy manualHistory or V2 occurrence already has this import_event_id.";
+        }else if ((match.task.completedDates||[]).includes(dateISO)||(match.task.manualHistory||[]).some(entry=>entry?.dateISO===dateISO&&!entry.import_event_id)){
+          status="ambiguous";reason="Possible untagged existing completion; review before assigning source identity.";
         }
       }else if (resolved.status === "ambiguous"){
         status = "ambiguous";
@@ -9505,16 +9516,22 @@ function captureMaintenanceHistoryImportManualHistory(){
   return snapshot;
 }
 
-function restoreMaintenanceHistoryImportManualHistory(snapshot){
-  (Array.isArray(snapshot) ? snapshot : []).forEach(item => {
-    if (item.hadManualHistory) item.task.manualHistory = cloneMaintenanceHistoryImportValue(item.manualHistory);
-    else delete item.task.manualHistory;
-  });
-  const mismatch = (Array.isArray(snapshot) ? snapshot : []).find(item => {
-    const hasProperty = Object.prototype.hasOwnProperty.call(item.task, "manualHistory");
-    return hasProperty !== item.hadManualHistory || maintenanceHistoryImportValueKey(item.task.manualHistory) !== maintenanceHistoryImportValueKey(item.manualHistory);
-  });
-  if (mismatch) throw new Error(`Rollback verification failed for ${mismatch.mode} task index ${mismatch.index}.`);
+function rollbackMaintenanceHistoryImportEntries(snapshot, touchedTasks){
+  const current=getMaintenanceHistoryImportTaskList(),removals=new Map();
+  // Validate the entire rollback before removing anything. Task replacement and
+  // unrelated history edits are allowed; ambiguous/moved/edited imports are not.
+  for(const [original,entries] of touchedTasks){
+    const owner=snapshot.find(item=>item.task===original);
+    const matches=current.filter(item=>item.mode===owner.mode&&(original.id?item.task.id===original.id:item.task===original));
+    if(matches.length!==1)throw Error("Imported task identity changed; manual verification is required.");
+    const task=matches[0].task;
+    for(const expected of entries){
+      const found=current.flatMap(item=>(Array.isArray(item.task.manualHistory)?item.task.manualHistory:[]).filter(entry=>entry?.import_event_id===expected.import_event_id).map(entry=>({task:item.task,entry})));
+      if(found.length!==1||found[0].task!==task||maintenanceHistoryImportValueKey(found[0].entry)!==maintenanceHistoryImportValueKey(expected))throw Error(`Imported history ${expected.import_event_id} changed or is ambiguous; manual verification is required.`);
+    }
+    removals.set(task,new Set(entries.map(entry=>entry.import_event_id)));
+  }
+  for(const [task,ids] of removals)task.manualHistory=task.manualHistory.filter(entry=>!ids.has(entry?.import_event_id));
 }
 
 function verifyMaintenanceHistoryImportMutation(historySnapshot, touchedTasks, plannedIds){
@@ -9549,7 +9566,14 @@ function verifyMaintenanceHistoryImportMutation(historySnapshot, touchedTasks, p
   });
 }
 
-async function applyMaintenanceHistoryImportRows(previewRows){
+async function applyMaintenanceHistoryImportRows(previewRows, options = {}){
+  if(window.__maintenanceImportBusy)return {saveCompleted:false,saveError:"Maintenance import already in progress."};
+  window.__maintenanceImportBusy=true;
+  try{return await applyMaintenanceHistoryImportRowsInternal(previewRows,options);}
+  finally{window.__maintenanceImportBusy=false;}
+}
+
+async function applyMaintenanceHistoryImportRowsInternal(previewRows, options = {}){
   const savePathDefault = typeof WORKSPACE_ID !== "undefined" ? `workspaces/${WORKSPACE_ID}/app/state` : "workspaces/{workspaceId}/app/state";
   const result = {
     importAttempted:true, importCompleted:false, saveAttempted:false, saveCompleted:false,
@@ -9559,7 +9583,20 @@ async function applyMaintenanceHistoryImportRows(previewRows){
   };
   const stats = { imported: 0, duplicate: 0, unresolved: 0, ambiguous: 0, excluded: 0, invalid: 0, failed: 0 };
   result.stats = stats;
-  const submitted = Array.isArray(previewRows) ? previewRows : [];
+  if (options.confirmed !== true){ result.saveError="Explicit reviewed confirmation is required."; return result; }
+  if (typeof canWriteCloud === "function" && !canWriteCloud("maintenance history import")){ result.saveError="Cloud writes are blocked.";return result; }
+  if (typeof readCurrentCloudStateReadOnly !== "function"){result.saveError="Authoritative baseline reader is unavailable.";return result;}
+  let authoritativeBefore;
+  try { authoritativeBefore=await readCurrentCloudStateReadOnly(); }
+  catch(error){result.saveError=String(error?.message||error);return result;}
+  if (!authoritativeBefore || Number(authoritativeBefore.syncMeta?.rev||0)!==Number(window.__loadedCloudRevisionForSaveGuard||0)){ result.saveError="Authoritative baseline changed or is missing; reload before importing.";return result; }
+  const fullBefore=cloneMaintenanceHistoryImportValue(getCurrentAppStateForDiagnostics());
+  const businessOnly=value=>Object.fromEntries(Object.entries(value).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
+  const key=value=>typeof stableStringify==="function"?stableStringify(value):JSON.stringify(value);
+  if(key(businessOnly(fullBefore))!==key(businessOnly(authoritativeBefore))){result.saveError="Local business state differs from cloud; save/reload and preview again.";return result;}
+  const fresh=buildMaintenanceHistoryImportPreview((previewRows||[]).map(item=>item.raw||item));
+  if (key(fresh)!==key(previewRows)){result.saveError="Reviewed preview changed; generate and review a fresh preview.";return result;}
+  const submitted = fresh;
   const seen = new Set();
   const validRows = [];
   submitted.forEach(item => {
@@ -9577,7 +9614,7 @@ async function applyMaintenanceHistoryImportRows(previewRows){
     const taskName = String(raw?.exact_website_task || "").trim();
     const normalizedTask = normalizeMaintenanceImportTaskName(taskName);
     if (!eventId || !isCanonicalMaintenanceImportDateISO(dateISO) || !taskName){ stats.invalid += 1; return; }
-    if (MAINTENANCE_HISTORY_IMPORT_EXCLUDED_TASKS.has(normalizedTask) || !MAINTENANCE_HISTORY_IMPORT_ALLOWED_TASKS.has(normalizedTask)){ stats.excluded += 1; return; }
+    if (raw.source_kind !== "shop_log" && (MAINTENANCE_HISTORY_IMPORT_EXCLUDED_TASKS.has(normalizedTask) || !MAINTENANCE_HISTORY_IMPORT_ALLOWED_TASKS.has(normalizedTask))){ stats.excluded += 1; return; }
     const resolved = resolveMaintenanceHistoryImportTask(taskName);
     if (resolved.status === "ambiguous"){ stats.ambiguous += 1; return; }
     if (resolved.status !== "ready"){ stats.unresolved += 1; return; }
@@ -9596,6 +9633,7 @@ async function applyMaintenanceHistoryImportRows(previewRows){
     result.saveError = `Required backup failed: ${String(backupError?.message || backupError)}`;
     return result;
   }
+  if (key(businessOnly(getCurrentAppStateForDiagnostics()))!==key(businessOnly(fullBefore))){ result.saveError="Local state changed during backup; preview again.";return result; }
   const historySnapshot = captureMaintenanceHistoryImportManualHistory();
   const before = countMaintenanceHistoryImportProtectedState();
   result.before = before;
@@ -9612,12 +9650,14 @@ async function applyMaintenanceHistoryImportRows(previewRows){
       hoursAtEntry: null,
       estimatedDailyHours: null,
       import_event_id: item.eventId,
-      note: "Imported from reviewed purchase-proven maintenance history",
+      note: item.raw.source_kind === "shop_log" ? "Imported from reviewed shop-log maintenance evidence" : "Imported from reviewed purchase-proven replacement evidence",
       provenance: {
         import_event_id: item.eventId,
         matchedTaskName: item.taskName,
         matchedTaskId: String(task.id || ""),
-        source: "reviewed_purchase_history",
+        source: item.raw.source_kind === "shop_log" ? "reviewed_shop_log" : "reviewed_purchase_history",
+        originalSourceRecord:cloneMaintenanceHistoryImportValue(item.raw),
+        originalSourceDate:item.dateISO,
         sourcePurchaseDate: String(item.raw.source_purchase_date || ""),
         orderNumber: String(item.raw.order_number || ""),
         purchaseDescription: String(item.raw.purchase_description || ""),
@@ -9630,26 +9670,35 @@ async function applyMaintenanceHistoryImportRows(previewRows){
     };
     task.manualHistory.push(entry);
     if (!touchedTasks.has(task)) touchedTasks.set(task, []);
-    touchedTasks.get(task).push(entry);
+    touchedTasks.get(task).push(cloneMaintenanceHistoryImportValue(entry));
     stats.imported += 1;
     result.importedImportEventIds.push(item.eventId);
   });
   const after = countMaintenanceHistoryImportProtectedState();
   result.after = after;
   const drops = findMaintenanceHistoryImportDrops(before, after);
+  const rollback=()=>{
+    try { rollbackMaintenanceHistoryImportEntries(historySnapshot,touchedTasks);result.rolledBack=true; }
+    catch(error){
+      result.rollbackError=String(error?.message||error);result.rollbackReviewRequired=true;
+      result.saveError+=` ${result.rollbackError} Writes are suspended.`;
+      window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
+      if(typeof renderRecoveryDiagnosticsPanel==="function")renderRecoveryDiagnosticsPanel();
+    }
+  };
   try {
     if (drops.length) throw new Error(`Protected data count dropped unexpectedly: ${drops.join(", ")}`);
     verifyMaintenanceHistoryImportMutation(historySnapshot, touchedTasks, result.plannedImportEventIds);
+    const withoutManual=value=>{const copy=cloneMaintenanceHistoryImportValue(businessOnly(value));for(const field of ["tasksInterval","tasksAsReq"]){copy[field]=(copy[field]||[]).map(task=>{delete task.manualHistory;return task;});}return copy;};
+    if(key(withoutManual(fullBefore))!==key(withoutManual(getCurrentAppStateForDiagnostics())))throw Error("Unrelated protected business fields changed during staging.");
   } catch (verificationError){
     result.saveError = String(verificationError?.message || verificationError);
-    try { restoreMaintenanceHistoryImportManualHistory(historySnapshot); result.rolledBack = true; }
-    catch (rollbackError){ result.rollbackError = String(rollbackError?.message || rollbackError); }
+    rollback();
     return result;
   }
   if (typeof saveCloudNow !== "function"){
     result.saveError = "Authoritative cloud save is unavailable.";
-    try { restoreMaintenanceHistoryImportManualHistory(historySnapshot); result.rolledBack = true; }
-    catch (rollbackError){ result.rollbackError = String(rollbackError?.message || rollbackError); }
+    rollback();
     return result;
   }
   result.saveAttempted = true;
@@ -9663,23 +9712,41 @@ async function applyMaintenanceHistoryImportRows(previewRows){
   result.saveCompleted = saveResult?.saved === true && saveResult?.stateWriteCompleted === true;
   result.saveWarnings = Array.isArray(saveResult?.warnings) ? saveResult.warnings.slice() : [];
   result.saveError = String(saveResult?.error || "");
-  result.saveIndeterminate = !result.saveCompleted && saveResult?.indeterminate === true;
+  result.saveIndeterminate = !result.saveCompleted && (saveResult?.indeterminate === true || (saveResult?.stateWriteAttempted === true && saveResult?.definiteFailure !== true));
   if (result.saveCompleted){
+    try {
+      const cloud=await readCurrentCloudStateReadOnly();
+      const taskRecords=[...(cloud?.tasksInterval||[]),...(cloud?.tasksAsReq||[])];
+      const ids=taskRecords.flatMap(task=>task.manualHistory||[]).map(entry=>entry.import_event_id);
+      const expected=getCurrentAppStateForDiagnostics();
+      if(!cloud||result.plannedImportEventIds.some(id=>ids.filter(value=>value===id).length!==1)||key(cloud.tasksInterval)!==key(expected.tasksInterval)||key(cloud.tasksAsReq)!==key(expected.tasksAsReq))throw Error("Committed maintenance import did not pass exact cloud task/history/ID verification.");
+      const unrelated=value=>{const copy=cloneMaintenanceHistoryImportValue(businessOnly(value));delete copy.tasksInterval;delete copy.tasksAsReq;return copy;};
+      if(key(unrelated(cloud))!==key(unrelated(authoritativeBefore)))throw Error("Unrelated cloud fields changed during maintenance import; review before retrying.");
+      result.cloudAfter=countMaintenanceHistoryImportProtectedState();
+      result.verificationCompleted=true;
+    }catch(error){
+      result.authoritativeSaveCompleted=true;result.saveCompleted=false;result.saveIndeterminate=true;result.saveError=String(error?.message||error);
+      window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
+      if(typeof renderRecoveryDiagnosticsPanel==="function")renderRecoveryDiagnosticsPanel();
+      return result;
+    }
     result.importCompleted = true;
     return result;
   }
   if (result.saveIndeterminate){
     if (!result.saveError) result.saveError = "Cloud save completion is indeterminate; refresh and verify before retrying.";
+    window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
+    if(typeof renderRecoveryDiagnosticsPanel==="function")renderRecoveryDiagnosticsPanel();
     return result;
   }
   if (!result.saveError) result.saveError = "Authoritative Firestore state write was not completed.";
-  try { restoreMaintenanceHistoryImportManualHistory(historySnapshot); result.rolledBack = true; }
-  catch (rollbackError){ result.rollbackError = String(rollbackError?.message || rollbackError); }
+  rollback();
   return result;
 }
 
 
 function cleanupMi02cTinyMaintenanceImportRows(){
+  if (!window.OMAXDevSafe?.active) throw new Error("Legacy fixture cleanup is disabled outside the disposable workspace. Export and review evidence instead.");
   const fakeImportEventIds = new Set([
     "mi02c-tiny-001",
     "mi02c-tiny-002",
@@ -9859,7 +9926,7 @@ function wireMaintenanceHistoryImportTool(root){
     setImportControlsLocked(true);
     setStatus("Saving reviewed maintenance history…");
     try {
-      const result = await applyMaintenanceHistoryImportRows(previewRows);
+      const result = await applyMaintenanceHistoryImportRows(previewRows, {confirmed:true});
       const stats = result.stats || {};
       if (result.saveCompleted === true){
         const warningText = result.saveWarnings?.length ? ` Warning: ${result.saveWarnings.join(" ")}` : "";
@@ -10818,6 +10885,7 @@ function renderSettings(){
   const closeInventoryLinkBtn = inventoryLinkModal?.querySelector("[data-close-inventory-link]");
   const contextMenu = document.getElementById("maintenanceContextMenu");
   wireMaintenanceHistoryImportTool(root);
+  renderHistoricalReconciliationTool(root);
   let contextTarget = null;
   let occurrenceNotesTaskId = null;
   let inventoryLinkTask = null;
@@ -14070,6 +14138,7 @@ function renderCosts(){
       }
     };
     const normalizeRows = (rows)=> (Array.isArray(rows) ? rows : []).map(item => ({
+      ...item,
       date: toIsoDate(item?.date),
       purchased: String(item?.purchased || ""),
       cost: Number(item?.cost) || 0,
@@ -14290,6 +14359,7 @@ function renderCosts(){
         const entry = getWeekEntry(activeWeekKey);
         if (!(weekRowsBody instanceof HTMLElement)) return entry;
         const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).map(tr => ({
+          ...(entry.rows || [])[Number(tr.dataset.receiptRowIndex)],
           date: clampDateToWeek(tr.querySelector('[data-col=\"date\"]')?.value || "", entry),
           purchased: String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim(),
           cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
@@ -23957,63 +24027,18 @@ function renderInventory(){
     return false;
   };
 
-  window.inventoryFolders = Array.isArray(window.inventoryFolders) ? window.inventoryFolders : [];
-  const seenFolderIds = new Set();
-  window.inventoryFolders = window.inventoryFolders
-    .filter(folder => folder && folder.id != null)
-    .map(folder => ({
-      ...folder,
-      id: String(folder.id),
-      parent: folder.parent != null ? String(folder.parent) : null,
-      name: String(folder.name || "Folder")
-    }))
-    .filter(folder => {
-      if (seenFolderIds.has(folder.id)) return false;
-      seenFolderIds.add(folder.id);
-      return true;
-    })
-    .map(folder => ({
-      ...folder,
-      parent: (folder.parent && seenFolderIds.has(String(folder.parent)) && String(folder.parent) !== folder.id)
-        ? String(folder.parent)
-        : null
-    }));
-
-  const seenInventoryIds = new Set();
-  let inventoryMutated = false;
-  inventory = Array.isArray(inventory) ? inventory : [];
-  inventory = inventory
-    .filter(item => item && typeof item === "object")
-    .map(item => {
-      const rawId = item.id != null ? String(item.id) : "";
-      if (!rawId){
-        item.id = genId("inventory");
-        inventoryMutated = true;
-      } else {
-        item.id = rawId;
-      }
-      return item;
-    })
-    .filter(item => {
-      const id = String(item.id || "");
-      if (!id) return false;
-      if (seenInventoryIds.has(id)){
-        inventoryMutated = true;
-        return false;
-      }
-      seenInventoryIds.add(id);
-      return true;
-    })
-    .map(item => {
-      if (item.folderId != null) item.folderId = String(item.folderId);
-      if (item.folderId && !seenFolderIds.has(String(item.folderId))){
-        item.folderId = null;
-        inventoryMutated = true;
-      }
-      return item;
-    });
-  window.inventory = inventory;
-  if (inventoryMutated) saveCloudDebounced();
+  // Rendering must preserve legacy identity evidence rather than repair/drop records.
+  if (!window.__initialAdoptComplete) return;
+  const identityIssues = inspectInventoryIdentities(inventory, window.inventoryFolders);
+  window.__inventoryIdentityIssues = identityIssues;
+  if (identityIssues.length){
+    window.__recoveryInspectMode = true;
+    window.__autosaveDisabled = true;
+    window.__recoveryReason = "Inventory contains duplicate/missing identities; export and review before editing.";
+    renderRecoveryDiagnosticsPanel();
+    toast(window.__recoveryReason);
+    return;
+  }
 
   function syncLinkedTasksFromInventory(item, updates){
     if (!item) return false;

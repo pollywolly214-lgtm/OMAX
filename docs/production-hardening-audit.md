@@ -1,3 +1,48 @@
+# PH-03 production readiness update
+
+Audit date: 2026-09-30. Repository: C:\CodexProjects\OMAX. Fresh branch: production-readiness-import-prep. Starting merged main: bcf6322a900c20fb9c98100e0c25e375dbf90e7a (PR #484).
+
+**PH-001 and PH-002 are fixed in application code and verified locally. Historical production recovery remains BLOCKED by the integration/source-baseline gates in [historical-import-readiness.md](historical-import-readiness.md).** No production access or mutation, historical production import, recovery-evidence deletion, Firebase configuration/rules change, merge, or push occurred.
+
+The original PH-01 audit below is retained as a dated baseline; its OPEN status and browser limitations describe that earlier commit. This PH-03 section is the current result.
+
+## Current findings
+
+| Finding | Result and evidence |
+| --- | --- |
+| PH-001: non-atomic whole-state saves (P0) | FIXED. Firestore runTransaction reads authoritative state, checks the caller's immutable expected revision, repeats protected preflight/history merges/firewall/size checks and writes sync metadata atomically. SDK callback retry never changes expected N. Deterministic retry tests and two real local tabs prove one winner against N; the losing state stays local for review. |
+| PH-002: absent state seeds defaults (P1) | FIXED. Server-read missing/empty/config-only state enters Recovery Mode and blocks adoption/autosave; diagnostics and cloud/local exports remain available. Legacy migration is read-only evidence. Production provisioning was removed from this path. Disposable first-run provisioning has a separate marker; subsequent fixture document loss stays missing across reload. |
+| PH-003/004/005 | Previous backup-quota preservation, impossible-date rejection, and escaped calendar error rendering remain covered by the passing regression suite. Browser quota exceptions preserve the old backup and fixture document. |
+| PH-03-ID: Inventory render deletes duplicate IDs (P1) | FIXED. Millisecond-only genId produced collisions during bulk creation; renderInventory filtered duplicate records and scheduled a save. IDs now combine entropy with a monotonic final timestamp for existing ordering readers. Legacy duplicate/missing identities trigger read-only review without dropping, renumbering or repairing evidence. Startup validation waits for authoritative adoption. |
+| PH-03-SAVE: overlapping local saves / edits during save (P1) | FIXED. Serialize same-client save attempts. Preserve a monotonic mutation version so a change during an earlier save remains pending; the next save persists it. Background lifecycle handlers save only pending work. Two-client revision conflicts still fail closed. |
+| PH-03-CUT: normal completion drops project/source metadata (P1) | FIXED. buildCompletedJob preserves the original metadata before updating completion fields. Project 0000, permanent import ID, provenance, cost rate, file references and manual time remain intact. Actual browser creation/edit/log/completion/history and targeted regression pass. |
+| PH-03-IMPORT: missing purchase/pump reconciliation and verification gaps (P1) | FIXED foundation. Reviewed add-missing JSON importers added; existing maintenance/cutting importers hardened with source ambiguity, explicit reviewed confirmation, server baseline/backup checks, exact post-save verification, definite rollback and indeterminate suspension. Purchase editor and pump save merge retain IDs/provenance. See detailed source contracts and unsupported cases in the import document. |
+| PH-03-RESET: whole-workspace / legacy test cleanup (P1) | Production reset and legacy tiny-fixture cleanup disabled before local mutation/evidence deletion. Separate reviewed recovery is required. No destructive production test was run. |
+| PH-03-LAYOUT: wide tables / decoration / cost control overlap (P2) | Bounded CSS fixes constrain grids and wide tables, preserve cost control height, and keep decoration inside the viewport. All major routes render without page-wide overflow at 1440px and 390px. Narrow saved layouts stack readable cards without rewriting stored desktop positions. Wide data tables retain internal scrolling. |
+| PH-006/007: backend / human-browser coverage limitations | Real authenticated Firebase permissions, SDK transport/offline behavior, Storage CORS and every human business-workflow variant are not certified by local mocks. The exact remaining gates are documented; no speculative rules change or migration was made. |
+
+## Local verification and safety boundary
+
+Mutation URL: **http://localhost:8000/?devsafe=1**. The harness was created from current main without recovering any old branch. It namespaces storage, uses fixture-only IndexedDB/Web Locks and in-memory files, prevents Firebase/Graph/OneDrive business requests and real local-file root access, and initializes no Firebase SDK app. The local server binds 127.0.0.1 and denies dot paths. Old production-hardening and local/devsafe-test-harness branches were untouched.
+
+The browser matrix runs installed Edge through bundled Playwright with a fresh profile. It covers Dashboard, Maintenance Settings/Calendar, active/completed cutting jobs and manual history, inventory/folders/materials, orders, purchase/receipt/cost/Data Center, pump/RPM/efficiency, garnet, settings/recovery/deleted items, saved layouts and secure files. Model fixtures cover protected fields through save/rerender/navigation/reload; real controls cover task and job creation/editing, manual time/completion/history, inventory/order edits/export, garnet creation, purchase reconciliation/editor, reviewed cutting CSV import, and layout editing. Purchase/pump/cutting/maintenance imports use fixture rows only. A new context receives copied fixture storage; it does not use a real user's browser profile. DXF/ORD/OMX fixture uploads/listing/verified downloads and visible DXF presentation pass without embedding bytes in state.
+
+Injected quota exceptions are failure simulation, not a real device-capacity measurement. The two-tab backend is a committed IndexedDB simulation; deterministic Node tests additionally simulate Firestore optimistic callback retries. These do not replace authenticated disposable Firebase testing. Runtime exports, downloads, rejected-write logs and screenshots are fixture evidence only.
+
+Final command results and each browser check are recorded in docs/ph03-browser-results.json and the final validation section below. No package.json exists; no npm command was run. Firebase config, Firestore/Storage rules and vercel.json were not changed. This application's transaction design follows the Firebase transaction API: https://firebase.google.com/docs/firestore/manage-data/transactions.
+
+## PH-03 changed files
+
+- Application: index.html; js/core.js; js/atomicPersistence.js; js/devsafeMode.js; js/historicalImport.js; js/historicalImportUi.js; js/cuttingJobImporter.js; js/renderers.js; style.css.
+- Devsafe external-service guards: js/auth/msalClient.js; js/onedrive/graph.js; js/onedrive/onedriveLibrary.js.
+- Runnable local tooling: scripts/devsafe-server.js; scripts/ph03-browser-matrix.js.
+- Regression tests: tests/atomic-persistence.test.js; tests/historical-import-readiness.test.js; tests/inventory-identity.test.js; tests/completed-job-provenance.test.js; tests/cutting-job-import.test.js; tests/maintenance-history-import.test.js; tests/cfr02-content-firewall.test.js; tests/cfr04-workspace-metadata.test.js.
+- Durable reports: docs/production-hardening-audit.md; docs/historical-import-readiness.md; docs/ph03-browser-results.json.
+
+The CFR-02 static writer assertion now checks the atomic path/no direct authoritative set rather than counting removed seed/migration writes. The CFR-04 unchanged-config comparison normalizes Windows line endings. Assertions continue to cover the actual safety contract.
+
+---
+
 # PH-01 production-hardening audit
 
 **Audit date:** 2026-09-29  
@@ -185,3 +230,12 @@ Use a disposable authenticated workspace with DevTools preserving console/networ
 - `vercel.json` was inspected and already contains exactly `{ "cleanUrls": true }`; it was not modified.
 
 Commit SHAs and final branch HEAD are recorded in the final pull-request/report because they are produced after this document is staged.
+
+## PH-03 final validation
+
+- node --check on all 20 changed/new JavaScript files: 20 passed, 0 failed.
+- node --test tests/*.test.js: 58 Node runner tests passed, 0 failed, 0 skipped. Legacy test files contain additional assertions (cutting importer: 24 internal scenarios), counted as files by the Node runner.
+- Targeted atomic/import/inventory/completion command recorded in docs/ph03-browser-results.json: 33 passed, 0 failed, 0 skipped.
+- scripts/ph03-browser-matrix.js: 49 checks passed, 0 failed; 0 unexpected console/page errors and 0 production business requests. Desktop/narrow route assertions and saved layouts have no page-wide overflow.
+- git diff --check: passed. Conflict-marker search over application/tests/scripts/docs: 0 matches.
+- Earlier exploratory failures were corrected and the final suite was rerun; the durable JSON records only the final verified matrix, with its simulation limits.

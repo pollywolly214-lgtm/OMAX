@@ -15,6 +15,7 @@
 </head>
 <body>
   <!-- Firebase SDKs (v8 CDN for static sites) -->
+  <script src="js/devsafeMode.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
@@ -227,6 +228,10 @@
 
   <!-- Your app code (split into focused modules; order matters) -->
   <script src="js/cuttingFileContentFirewall.js"></script>
+  <script src="js/atomicPersistence.js"></script>
+  <script src="js/historicalImport.js"></script>
+  <script src="js/inventoryIdentityRepair.js"></script>
+  <script src="js/globalIdentityRepair.js"></script>
   <script src="js/core.js"></script>
   <script src="js/cfr03StorageRoundTrip.js"></script>
   <script src="js/auth/msalClient.js"></script>
@@ -240,6 +245,7 @@
   <script src="js/calendar.js"></script>
   <script src="js/views.js"></script>
   <script src="js/renderers.js"></script>
+  <script src="js/historicalImportUi.js"></script>
   <script src="js/trainer.js"></script>
   <script src="js/router.js"></script>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">

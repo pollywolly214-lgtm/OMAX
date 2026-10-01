@@ -83,7 +83,9 @@ test("diagnostics are read-only and helpers are exposed", ()=>{
 test("all state-document writes use shared firewall writer", ()=>{
   const core = fs.readFileSync(path.join(__dirname, "../js/core.js"), "utf8");
   assert.doesNotMatch(core, /FB\.docRef\.set\s*\(/);
-  assert.equal((core.match(/writeAuthoritativeStateSnapshot\(/g) || []).length >= 5, true);
+  assert.match(core,/window\.OMAXAtomicPersistence\?\.save/);
+  const loader=core.slice(core.indexOf("async function loadFromCloud"),core.indexOf("async function updateWorkspaceMetadata"));
+  assert.doesNotMatch(loader,/writeAuthoritativeStateSnapshot\(|\.set\(/);
 });
 
 (async()=>{
