@@ -18,4 +18,16 @@ function fixture(){
   occurrences.push({...occurrences[6],id:"repeat-completed",eventType:"completed",rootOccurrenceId:`repeat:${instances[6].id}:slot:2`,recordedAtISO:"2026-09-14T00:00:00.000Z"});
   return {schema:72,syncMeta:{rev:1790781035355,updatedBy:"synthetic"},inventory:legacyIds.map((id,i)=>({id:i?oldInventory:"inventory_msnpt6ic",linkedTaskId:id,name:i?"Same display name":"Pump Rebuild",qtyNew:i+1,qtyOld:2,note:"retain exactly",folderId:"inventory-root"})),inventoryFolders:[{id:"inventory-root",parent:null,name:"Inventory"}],tasksInterval:Array.from({length:15},(_,i)=>legacy(i)),tasksAsReq:Array.from({length:13},(_,i)=>legacy(i+15)),maintenanceTasksV2:tasks,maintenanceCalendarInstancesV2:instances,maintenanceOccurrencesV2:occurrences,settingsFolders:[{id:"maintenance-root",name:"Maintenance",parent:null}],jobFolders:[{id:"jobs_root",name:"Jobs",parent:null}],cuttingJobs:[{id:"active-job",name:"Keep",cat:"jobs_root",notes:"Keep"}],completedCuttingJobs:Array.from({length:67},(_,i)=>({id:`completed-job-${i}`,name:"Keep",cat:"jobs_root",manualLogs:[{hours:2}]})),dailyCutHours:Array.from({length:80},(_,i)=>({dateISO:day(i),hours:3})),totalHistory:Array.from({length:70},(_,i)=>({dateISO:day(i),hours:100+i})),receiptTrackerWeeks:[{key:"2026-W01",rows:[{date:"2026-01-01",purchased:"keep",qty:3,inventoryItemId:""}]}],pumpEff:{baselineRPM:3500,entries:[{rpm:3400,dateISO:"2026-01-01"}],notes:[{text:"Keep"}]},orderRequests:[],garnetCleanings:[],inventoryMaterials:[],inventoryTransactions:[],deletedItems:[],appConfig:{dailyHours:8},dashboardLayout:{x:1},costLayout:{x:2},jobLayout:{x:3},unknownEvidence:{note:"Same display name",custom:[1,2,3]}};
 }
-module.exports={fixture,legacyIds,oldInventory,oldTask,suffixes};
+function legacyInstanceCollisionFixture(){
+  const source=fixture(),first=source.maintenanceCalendarInstancesV2[0];
+  // Three old ID groups share the same semantics for each logical task. The
+  // former semantic-only planner produced six instance-ID collisions here.
+  for(const instance of source.maintenanceCalendarInstancesV2.slice(0,9)){
+    instance.startDateISO=first.startDateISO;
+    instance.instanceMode="repeat";
+    instance.repeatRule={enabled:true,basis:"calendar_week",every:1};
+  }
+  for(const occurrence of source.maintenanceOccurrencesV2.slice(0,9))occurrence.effectiveDateISO=first.startDateISO;
+  return source;
+}
+module.exports={fixture,legacyInstanceCollisionFixture,legacyIds,oldInventory,oldTask,suffixes};

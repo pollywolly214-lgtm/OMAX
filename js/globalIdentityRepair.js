@@ -86,12 +86,21 @@
       if(!changed)break;
     }
     for(const record of tasks)if(record.group&&record.logicalTask)record.proposedId=permanentId("task",[record.logicalTask]);
+    const instanceIdentityPairs=new Set();
     for(const record of instances){
       const row=record.row;
       if(!record.logicalTask)block(`Ambiguous instance task at ${pathText(record.path)}.`);
       if(!["one_time","repeat"].includes(row.instanceMode)||!/^\d{4}-\d{2}-\d{2}$/.test(row.startDateISO||""))block(`Instance mode/start date evidence is missing at ${pathText(record.path)}.`);
       record.semantic=[record.logicalTask,row.startDateISO,row.instanceMode,row.repeatRule??null];
-      if(record.group)record.proposedId=permanentId("instance",record.semantic);
+      if(record.group&&record.logicalTask){
+        // Distinct historical groups can share every semantic field. Preserve
+        // the original legacy ID with its resolved logical task as provenance;
+        // a repeated pair is ambiguous even when dates or recurrence differ.
+        const identity=[record.id,record.logicalTask],pair=key(identity);
+        if(instanceIdentityPairs.has(pair))block(`Ambiguous legacy instance identity pair at ${pathText(record.path)}: ${pair}.`);
+        instanceIdentityPairs.add(pair);
+        record.proposedId=permanentId("instance",identity);
+      }
     }
     const resolveInstance=record=>{
       let options=candidates(instanceCollection,record.row.instanceId,record.logicalTask);

@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),vm=require("node:vm");
 const repair=require("../js/globalIdentityRepair"),inventoryRepair=require("../js/inventoryIdentityRepair"),atomic=require("../js/atomicPersistence"),firewall=require("../js/cuttingFileContentFirewall");
-const {fixture,legacyIds,oldInventory,oldTask,suffixes}=require("./fixtures/global-identity"),clone=structuredClone,core=fs.readFileSync("js/core.js","utf8");
+const {fixture,legacyInstanceCollisionFixture,legacyIds,oldInventory,oldTask,suffixes}=require("./fixtures/global-identity"),clone=structuredClone,core=fs.readFileSync("js/core.js","utf8");
 function harness(options={}){
   let cloud=fixture(),local=clone(cloud),commits=0,backups=0,suspensions=0,adopts=0;
   const window={OMAXGlobalIdentityRepair:repair,OMAXInventoryIdentityRepair:inventoryRepair,OMAXAtomicPersistence:atomic,CuttingFileContentFirewall:firewall,__cloudLoadAttemptComplete:true,__initialAdoptComplete:true,__recoveryInspectMode:true,__autosaveDisabled:true};
@@ -12,7 +12,48 @@ function harness(options={}){
 }
 test("global preview is non-mutating and discovers every synthetic collision group",async()=>{const h=harness(),before=h.cloud,plan=await h.api.preview();assert.deepEqual(plan.blockers,[]);assert.deepEqual(h.cloud,before);assert.deepEqual(h.local,before);assert.equal(h.backups,0);assert.equal(h.commits,0);assert.equal(plan.duplicateGroups.length,8);assert.equal(plan.inventoryPlan.affectedRows.length,27);assert.equal(plan.inventoryPlan.v2Relinks.length,5);assert.equal(plan.inventoryPlan.remainingReferences.length,59);assert.equal(plan.sourceSignature,repair.key(before));assert.equal(plan.sourceRevision,1790781035355);assert.ok(plan.duplicateGroups.every(group=>group.repairProvable));});
 test("deterministic task mapping uses unique legacy identity, independent of names and indexes",()=>{const source=fixture(),plan=repair.preview(source),next=repair.repairedState(source,plan);for(let i=0;i<3;i++)assert.equal(next.maintenanceTasksV2[i].id,repair.permanentId("task",[legacyIds[i+1]]));const reversed=clone(source);reversed.maintenanceTasksV2.reverse();const repaired=repair.repairedState(reversed,repair.preview(reversed));assert.deepEqual(new Set(repaired.maintenanceTasksV2.map(row=>row.id)),new Set(next.maintenanceTasksV2.map(row=>row.id)));});
-test("deterministic instance mapping preserves logical task, mode, date and recurrence",()=>{const source=fixture(),plan=repair.preview(source),next=repair.repairedState(source,plan);for(let i=0;i<9;i++){const before=source.maintenanceCalendarInstancesV2[i],after=next.maintenanceCalendarInstancesV2[i];assert.equal(after.id,repair.permanentId("instance",[before.legacyTaskId,before.startDateISO,before.instanceMode,before.repeatRule]));assert.equal(after.taskId,next.maintenanceTasksV2[i%3].id);}assert.equal(new Set(next.maintenanceCalendarInstancesV2.map(row=>row.id)).size,80);});
+test("deterministic instance mapping preserves logical task, mode, date and recurrence",()=>{const source=fixture(),plan=repair.preview(source),next=repair.repairedState(source,plan);for(let i=0;i<9;i++){const before=source.maintenanceCalendarInstancesV2[i],after=next.maintenanceCalendarInstancesV2[i];assert.equal(after.id,repair.permanentId("instance",[before.id,before.legacyTaskId]));assert.equal(after.taskId,next.maintenanceTasksV2[i%3].id);}assert.equal(new Set(next.maintenanceCalendarInstancesV2.map(row=>row.id)).size,80);});
+test("PH-06A production-shaped evidence has exactly one record per old instance ID / logical task pair",()=>{
+  const source=legacyInstanceCollisionFixture(),pairs=source.maintenanceCalendarInstancesV2.map(row=>repair.key([row.id,row.legacyTaskId]));
+  assert.equal(source.maintenanceCalendarInstancesV2.length,80);assert.equal(new Set(pairs).size,80);
+  const formerIds=source.maintenanceCalendarInstancesV2.slice(0,9).map(row=>repair.permanentId("instance",[row.legacyTaskId,row.startDateISO,row.instanceMode,row.repeatRule]));
+  assert.equal(formerIds.length-new Set(formerIds).size,6,"reproduce the six former semantic-only instance plan collisions");
+  const before=clone(source),plan=repair.preview(source);assert.deepEqual(plan.blockers,[]);assert.deepEqual(plan.missingIds,[]);assert.deepEqual(plan.unknownReferences,[]);assert.deepEqual(source,before);
+});
+test("PH-06A different original legacy instance groups stay distinct with identical semantic tuples",()=>{
+  const source=legacyInstanceCollisionFixture(),plan=repair.preview(source),next=repair.repairedState(source,plan);
+  for(let logical=0;logical<3;logical++){
+    const indexes=[logical,logical+3,logical+6],rows=indexes.map(index=>source.maintenanceCalendarInstancesV2[index]);
+    const semantics=rows.map(row=>repair.key([row.legacyTaskId,row.startDateISO,row.instanceMode,row.repeatRule]));assert.equal(new Set(semantics).size,1);
+    assert.equal(new Set(rows.map(row=>row.id)).size,3);assert.equal(new Set(indexes.map(index=>next.maintenanceCalendarInstancesV2[index].id)).size,3);
+    for(const index of indexes){const row=source.maintenanceCalendarInstancesV2[index];assert.equal(next.maintenanceCalendarInstancesV2[index].id,repair.permanentId("instance",[row.id,row.legacyTaskId]));}
+  }
+});
+test("PH-06A one old instance ID shared by distinct logical tasks gets distinct permanent IDs",()=>{
+  const source=legacyInstanceCollisionFixture(),next=repair.repairedState(source,repair.preview(source));
+  for(let group=0;group<3;group++){const indexes=[group*3,group*3+1,group*3+2];assert.equal(new Set(indexes.map(index=>source.maintenanceCalendarInstancesV2[index].id)).size,1);assert.equal(new Set(indexes.map(index=>next.maintenanceCalendarInstancesV2[index].id)).size,3);}
+});
+test("PH-06A rerunning or reordering preview keeps the same permanent instance IDs",()=>{
+  const source=legacyInstanceCollisionFixture(),first=repair.preview(source);assert.deepEqual(repair.preview(source),first);
+  const reversed=clone(source);reversed.maintenanceCalendarInstancesV2.reverse();const second=repair.preview(reversed);assert.deepEqual(second.blockers,[]);
+  const ids=plan=>plan.duplicateGroups.filter(group=>group.collection==="maintenanceCalendarInstancesV2").flatMap(group=>group.proposedIds.map(row=>[group.id,row.logicalTask,row.id])).sort((a,b)=>repair.key(a).localeCompare(repair.key(b)));
+  assert.deepEqual(ids(first),ids(second));
+});
+test("PH-06A duplicate old instance ID / logical task pair blocks even with different semantics",()=>{
+  const source=legacyInstanceCollisionFixture();source.maintenanceCalendarInstancesV2[79]={...clone(source.maintenanceCalendarInstancesV2[0]),startDateISO:"2026-07-01",repeatRule:{enabled:true,basis:"calendar_week",every:2}};
+  const plan=repair.preview(source);assert.match(plan.blockers.join(" "),/Ambiguous legacy instance identity pair/);assert.throws(()=>repair.repairedState(source,plan),/blockers/);
+});
+test("PH-06A occurrences and event chains relink to the exact original instance group",()=>{
+  const source=legacyInstanceCollisionFixture(),plan=repair.preview(source),next=repair.repairedState(source,plan);
+  source.maintenanceOccurrencesV2.forEach((event,index)=>{const matches=source.maintenanceCalendarInstancesV2.map((row,instanceIndex)=>({row,instanceIndex})).filter(({row})=>row.id===event.instanceId&&row.legacyTaskId===event.legacyTaskId);assert.equal(matches.length,1);assert.equal(next.maintenanceOccurrencesV2[index].instanceId,next.maintenanceCalendarInstancesV2[matches[0].instanceIndex].id);});
+  const events=next.maintenanceOccurrencesV2;assert.equal(events[9].rootOccurrenceId,events[0].id);assert.equal(events[9].supersedesEventId,events[0].id);assert.equal(events[10].rootOccurrenceId,events[1].id);assert.equal(events[11].rootOccurrenceId,events[0].id);assert.equal(events[11].supersedesEventId,"moved-0");assert.equal(events[12].rootOccurrenceId,`repeat:${next.maintenanceCalendarInstancesV2[6].id}:slot:2`);
+});
+test("PH-06A keeps counts, unrelated data, occurrence ID strategy and the PH-06 field allowlist exact",()=>{
+  const source=legacyInstanceCollisionFixture(),plan=repair.preview(source),next=repair.repairedState(source,plan),restored=clone(next);assert.deepEqual(repair.counts(next),repair.counts(source));assert.deepEqual(plan.beforeCounts,plan.expectedAfterCounts);
+  for(let i=0;i<9;i++){const event=source.maintenanceOccurrencesV2[i],instance=source.maintenanceCalendarInstancesV2[i];assert.equal(next.maintenanceOccurrencesV2[i].id,repair.permanentId("occurrence",[[instance.legacyTaskId,instance.startDateISO,instance.instanceMode,instance.repeatRule],event.eventType,event.effectiveDateISO,event.recordedAtISO,event.rootOccurrenceId??null,event.supersedesEventId??null]));}
+  for(const change of plan.changes){assert.ok(["id","inventoryId","taskId","instanceId","rootOccurrenceId","supersedesEventId"].includes(change.path.at(-1)));const parent=change.path.slice(0,-1).reduce((value,part)=>value[part],restored);parent[change.path.at(-1)]=change.before;}
+  assert.equal(repair.key(restored),repair.key(source));assert.equal(repair.integrity(next).valid,true);
+});
 test("deterministic occurrence mapping preserves event provenance and distinct logical roots",()=>{const source=fixture(),plan=repair.preview(source),next=repair.repairedState(source,plan);assert.equal(new Set(next.maintenanceOccurrencesV2.map(row=>row.id)).size,13);for(let i=0;i<9;i++){assert.notEqual(next.maintenanceOccurrencesV2[i].id,source.maintenanceOccurrencesV2[i].id);assert.equal(next.maintenanceOccurrencesV2[i].instanceId,next.maintenanceCalendarInstancesV2[i].id);assert.equal(next.maintenanceOccurrencesV2[i].taskId,next.maintenanceTasksV2[i%3].id);}});
 test("moved, superseded and derived repeat-root chains retain exact endpoints",()=>{const source=fixture(),next=repair.repairedState(source,repair.preview(source)),events=next.maintenanceOccurrencesV2;assert.equal(events[9].rootOccurrenceId,events[0].id);assert.equal(events[9].supersedesEventId,events[0].id);assert.equal(events[10].rootOccurrenceId,events[1].id);assert.equal(events[11].rootOccurrenceId,events[0].id);assert.equal(events[11].supersedesEventId,"moved-0");assert.equal(events[12].rootOccurrenceId,`repeat:${next.maintenanceCalendarInstancesV2[6].id}:slot:2`);assert.equal(events[9].effectiveDateISO,source.maintenanceOccurrencesV2[9].effectiveDateISO);});
 test("inventory mapping remains the PH-05 mapping in the single combined plan",()=>{const source=fixture(),plan=repair.preview(source),next=repair.repairedState(source,plan);for(let i=1;i<28;i++)assert.equal(next.inventory[i].id,inventoryRepair.proposedId(legacyIds[i]));for(const task of next.maintenanceTasksV2)assert.equal(task.inventoryId,inventoryRepair.proposedId(task.legacyTaskId));});
