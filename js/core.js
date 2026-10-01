@@ -880,7 +880,7 @@ function compactStateForStorage(raw, { forBackup = false } = {}){
   snap.orderRequests = sanitizeValueForStorage(snap.orderRequests);
   snap.cuttingJobs = sanitizeValueForStorage(snap.cuttingJobs);
   snap.completedCuttingJobs = sanitizeValueForStorage(snap.completedCuttingJobs);
-  snap.totalHistory = Array.isArray(snap.totalHistory) ? snap.totalHistory.slice(-500) : [];
+  snap.totalHistory = Array.isArray(snap.totalHistory) ? snap.totalHistory.slice() : [];
   snap.dailyCutHours = Array.isArray(snap.dailyCutHours) ? snap.dailyCutHours.slice(-365) : [];
   if (forBackup){
     delete snap.deletedItems;
@@ -4361,7 +4361,7 @@ window.historicalImport = window.OMAXHistoricalImport.createApi({
   scan:scanAuthoritativeCutFileContent,
   backup:async state=>exportJsonDownload(`omax-pre-import-${Date.now()}.json`,{ state, integrity:buildDataIntegritySummary(state), syncMeta:state.syncMeta }),
   apply:(key,value)=>{window[key]=value;refreshGlobalCollections();},
-  save:()=>saveCloudNow(),
+  save:options=>saveCloudNow(options),
   suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastImportVerificationError=reason;renderRecoveryDiagnosticsPanel();}
 });
 window.getWorkspaceAuthorizationDiagnostics = function(){
@@ -4689,6 +4689,8 @@ function createMaintenanceCompatibilityRow(base){
     categoryId: base.categoryId || base.categoryRef || null,
     inventoryRef: base.inventoryRef || null,
     costRef: base.costRef ?? null,
+    calendarOnly: base.calendarOnly === true,
+    settingsTaskId: base.settingsTaskId || null,
     linkRef: base.linkRef || null,
     provenance: base.provenance && typeof base.provenance === "object" ? { ...base.provenance } : {}
   };
@@ -4883,6 +4885,8 @@ function buildMaintenanceCompatibilityStream(){
     let lifecycleStatus = "scheduled";
     let note = null;
     let loggedHours = null;
+    let partsCostSnapshot = null;
+    let recoveryProvenance = null;
     let isMoved = false;
     let isStoppedChain = inst && String(inst.status || "") === "stopped";
     let latestEventType = null;
@@ -4894,6 +4898,8 @@ function buildMaintenanceCompatibilityStream(){
       latestEventType = eventType || latestEventType;
       latestRecordedAtISO = event.recordedAtISO || latestRecordedAtISO;
       if (event.id != null) resolvedEventIds.push(String(event.id));
+      if (event.partsCostSnapshot != null && Number.isFinite(Number(event.partsCostSnapshot)) && Number(event.partsCostSnapshot) >= 0) partsCostSnapshot = Number(event.partsCostSnapshot);
+      if (event.importProvenance) recoveryProvenance = event.importProvenance;
 
       const nextOriginal = normalizeDateISO(event.originalDateISO || event.payload?.originalDateISO || "");
       if (nextOriginal) originalDateISO = nextOriginal;
@@ -4979,8 +4985,11 @@ function buildMaintenanceCompatibilityStream(){
       categoryRef: task && (task.categoryRef ?? task.folderId) != null ? String(task.categoryRef ?? task.folderId) : null,
       categoryId: task && (task.categoryId ?? task.cat) != null ? String(task.categoryId ?? task.cat) : null,
       inventoryRef: task && task.inventoryRef != null ? String(task.inventoryRef) : (task && task.inventoryId != null ? String(task.inventoryId) : null),
-      costRef: task && (task.cost ?? task.price ?? task.costProfileId) != null ? (task.cost ?? task.price ?? task.costProfileId) : null,
+      costRef: partsCostSnapshot ?? (task && (task.cost ?? task.price ?? task.costProfileId) != null ? (task.cost ?? task.price ?? task.costProfileId) : null),
+      calendarOnly: recoveryProvenance?.route === "calendar_only",
+      settingsTaskId: task?.legacyTaskId || null,
       provenance: {
+        importProvenance: recoveryProvenance,
         sourceArrays: ["maintenanceTasksV2", "maintenanceCalendarInstancesV2", "maintenanceOccurrencesV2"],
         sourceField: "maintenanceOccurrencesV2",
         taskId: taskId || null,
@@ -6189,7 +6198,7 @@ async function performCloudSave(saveOptions = {}){
     return;
   }
   try{
-    const expectedRevision = Number(window.__loadedCloudRevisionForSaveGuard || 0);
+    const expectedRevision = Number(saveOptions.expectedRevision ?? window.__loadedCloudRevisionForSaveGuard ?? 0);
     const mutationVersionAtSave = lastLocalMutationAt;
     const rawSnap = snapshotState();
     const rawFirewall = scanAuthoritativeCutFileContent(rawSnap);
@@ -6562,7 +6571,7 @@ function mergeTotalHistoryForSave(localList, remoteList){
       if (!key || !Number.isFinite(hours) || hours < 0) return;
       const prev = map.get(key);
       if (!prev || hours >= prev.hours){
-        map.set(key, { dateISO: key, hours });
+        map.set(key, { ...entry, dateISO: key, hours });
       }
     });
   };

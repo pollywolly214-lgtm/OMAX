@@ -1,5 +1,7 @@
 # PH-03 historical import and reconciliation readiness
 
+REC-01R (2026-10-01): [Recovery workbook contracts](recovery-import-contracts.md) extend this foundation with local XLSX purchase/RPM adapters, pump-hour reconciliation and completed one-time V2 maintenance. Reusable Maintenance Settings task setup is separate. The legacy maintenance tool described below remains available for its older JSON/CSV contract.
+
 Date: 2026-09-30. Starting merged main: `bcf6322a900c20fb9c98100e0c25e375dbf90e7a` (PR #484). Branch: `production-readiness-import-prep`.
 
 **Historical production recovery: BLOCKED.** The application has a tested reconciliation foundation. The authenticated disposable Firebase integration and the actual source/current-production reconciliation gates below must be completed before production imports. No production access, historical production import, backup restoration, configuration/rules change, or recovery-evidence deletion occurred in PH-03.
