@@ -952,19 +952,10 @@ function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supe
     guard += 1;
     id = `${baseId}_${guard}`;
   }
-  const next = {
-    id,
-    system: "v2",
-    schemaVersion: 2,
-    instanceId: base.instanceId,
-    taskId: base.taskId,
-    eventType,
-    effectiveDateISO: base.dateISO,
-    recordedAtISO: new Date().toISOString(),
-    supersedesEventId: supersedesEventId || null,
-    rootOccurrenceId: String(baseOccurrenceId),
-    payload: { ...(payload || {}) }
-  };
+  const next = window.OMAXMaintenanceRecoveryImport.lifecycleEvent(
+    { ...base, id:String(baseOccurrenceId) },
+    { eventId:id, eventType, payload:payload || {}, supersedesEventId:supersedesEventId || null }
+  );
   list.unshift(next);
   if (typeof window.recordMaintenanceV2MutationSource === "function"){
     window.recordMaintenanceV2MutationSource({
@@ -3341,7 +3332,9 @@ function renderCalendar(){
     const mapKey = `${occurrenceId}:${dateISO}`;
     if (seenV2ChipKeys.has(mapKey)) return;
     if (status === "removed" || status === "skipped") return;
-    const equivalentKey = makeV2CalendarEquivalentKey(["v2", "one_time", String(instance.legacyTaskId || event.legacyTaskId || instance.taskId || event.taskId || ""), name, resolvedDateISO, eventType]);
+    const equivalentKey = event.recoveryImportId
+      ? `recovery:${event.recoveryImportId}`
+      : makeV2CalendarEquivalentKey(["v2", "one_time", String(instance.legacyTaskId || event.legacyTaskId || instance.taskId || event.taskId || ""), name, resolvedDateISO, eventType]);
     if (seenV2ScheduledEquivalentKeys.has(equivalentKey)) return;
     seenV2ChipKeys.add(mapKey);
     seenV2ScheduledEquivalentKeys.add(equivalentKey);

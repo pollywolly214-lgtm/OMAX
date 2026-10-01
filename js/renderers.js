@@ -786,6 +786,9 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
     return { taskRecord, instance: equivalentInstance, occurrence: equivalentOccurrence };
   }
 
+  // The equivalent-record branch already returned. These records are new.
+  const reusedInstance = false;
+  const reusedOccurrence = false;
   const stableBaseId = `${createMaintenanceV2StablePart(legacyTaskId)}_${createMaintenanceV2StablePart(effectiveDateISO)}_${createMaintenanceV2StablePart(mode)}`;
   const instance = {
     id: `maintenance_instance_v2_${stableBaseId}`,
@@ -10798,7 +10801,7 @@ function renderSettings(){
           ${(window.settingsFolders.length === 0 && window.tasksInterval.length + window.tasksAsReq.length === 0) ? `<div class="empty">No tasks yet. Add one to get started.</div>` : ``}
         </div>
         <section class="history-import-admin" aria-labelledby="maintenanceHistoryImportTitle">
-          <h4 id="maintenanceHistoryImportTitle">Reviewed maintenance history import</h4>
+          <h4 id="maintenanceHistoryImportTitle">Legacy purchase-evidence maintenance history import (JSON/CSV)</h4>
           <p class="hint">Temporary admin tool. It previews reviewed JSON/CSV rows first, then appends legacy completed history only after confirmation. It does not alter prices, purchases, inventory, machine-hour anchors, recurrence settings, or V2 arrays.</p>
           <div class="history-import-controls">
             <input type="file" id="maintenanceHistoryImportFile" accept=".json,.csv,application/json,text/csv">
@@ -19129,7 +19132,7 @@ function computeCostModel(){
     const categoryPath = categoryRaw ? (resolveCategoryPath(categoryRaw) || categoryRaw) : "";
     const categoryId = `${modeTag}:${categoryRaw || "uncategorized"}`;
     const categoryLabel = categoryPath ? `${modeLabel} • ${categoryPath}` : `${modeLabel} • Uncategorized`;
-    const maintenanceHrs = Number.isFinite(Number(row.loggedHours)) ? Number(row.loggedHours) : 1;
+    const maintenanceHrs = row.loggedHours != null && Number.isFinite(Number(row.loggedHours)) ? Number(row.loggedHours) : 1;
     const partCostValue = Math.max(0, Number(row.costRef) || 0);
     const chargeRate = MAINTENANCE_LABOR_RATE_PER_HOUR;
     const laborCost = maintenanceHrs * chargeRate;
@@ -19161,7 +19164,7 @@ function computeCostModel(){
       totalCost,
       dateISO,
       cuttingHoursSince: null,
-      settingsLink: `#/settings?taskId=${encodeURIComponent(taskId)}`,
+      settingsLink: row.calendarOnly ? "" : `#/settings?taskId=${encodeURIComponent(row.settingsTaskId || taskId)}`,
       categoryId,
       categoryLabel,
       taskMode: modeTag,
@@ -19207,7 +19210,7 @@ function computeCostModel(){
       const parsedDate = parseDateLocal(row?.dateISO || "");
       const hasDate = parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime());
       const totalCost = Number(row?.totalCost);
-      return hasTask && hasSettingsLink && hasDate && Number.isFinite(totalCost) && totalCost >= 0;
+      return hasTask && (hasSettingsLink || row.sourceSystem === "v2") && hasDate && Number.isFinite(totalCost) && totalCost >= 0;
     })
     .map(row => {
       const occurredAt = parseDateLocal(row.dateISO);
@@ -19683,7 +19686,7 @@ function computeCostModel(){
 
   const maintenanceTrendRows = maintenanceDataTableRows.filter(row => {
     if (!row) return false;
-    if (!row.taskId || !row.settingsLink) return false;
+    if (!row.taskId || (!row.settingsLink && row.sourceSystem !== "v2")) return false;
     if (!toHistoryDateKey(row.dateISO)) return false;
     return Number.isFinite(Number(row.totalCost)) && Number(row.totalCost) >= 0;
   });

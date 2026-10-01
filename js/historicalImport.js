@@ -1,8 +1,8 @@
 (function(root,factory){
-  const api=factory();
+  const api=factory(typeof module==="object"&&module.exports?require("./maintenanceRecoveryImport"):root.OMAXMaintenanceRecoveryImport);
   if(typeof module==="object"&&module.exports)module.exports=api;
   if(root)root.OMAXHistoricalImport=api;
-})(typeof window==="undefined"?null:window,function(){
+})(typeof window==="undefined"?null:window,function(maintenance){
   "use strict";
   const STATUS=Object.freeze({present:"Already Present",missing:"Missing — Import",match:"Possible Match — Review",problem:"Source Problem — Review"});
   const clone=value=>JSON.parse(JSON.stringify(value));
@@ -13,10 +13,11 @@
     if(typeof row.source_id==="string"&&typeof row.source_record_id==="string"&&row.source_id.trim()&&row.source_record_id.trim())return JSON.stringify([row.source_id,row.source_record_id]);
     return "";
   }
-  const records=(kind,state)=>kind==="purchase"?(state.receiptTrackerWeeks||[]).flatMap(week=>week.rows||[]):state.pumpEff?.entries||[];
+  const records=(kind,state)=>kind==="purchase"?(state.receiptTrackerWeeks||[]).flatMap(week=>week.rows||[]):kind==="pump_hours"?state.totalHistory||[]:kind==="maintenance"?(state.maintenanceOccurrencesV2||[]).filter(row=>row.import_event_id):state.pumpEff?.entries||[];
   const count=(kind,state)=>records(kind,state).length;
   function preview(kind,rows,state){
-    if(!["purchase","pump"].includes(kind)||!Array.isArray(rows))throw Error("Choose purchase or pump and supply a JSON array of reviewed source rows.");
+    if(kind==="maintenance")return maintenance.preview(rows,state,STATUS);
+    if(!["purchase","pump","pump_hours"].includes(kind)||!Array.isArray(rows))throw Error("Choose a supported history and supply reviewed source rows.");
     const existing=records(kind,state),identities=new Map();
     rows.forEach(row=>{if(!row||typeof row!=="object")return;const id=identity(row);const group=identities.get(id)||[];group.push(row);identities.set(id,group);});
     return rows.map((source,index)=>{
@@ -24,17 +25,24 @@
       let status=STATUS.missing,reason="Stable source ID is absent from current history; eligible for reviewed append.";
       const bad=message=>{status=STATUS.problem;reason=message;};
       if(!id)bad("A permanent import_event_id or source_id + source_record_id is required.");
+      else if(raw.__recoveryProblems?.length)bad(raw.__recoveryProblems.join(" "));
+      else if(raw.review_status==="needs_review")bad("Source row still needs review.");
       else if(!validDate(raw.date))bad("date must be an unmodified real YYYY-MM-DD source date.");
       else if(kind==="purchase"&&(typeof raw.purchased!=="string"||!raw.purchased.trim()||typeof raw.qty!=="number"||!Number.isFinite(raw.qty)||raw.qty<=0||typeof raw.cost!=="number"||!Number.isFinite(raw.cost)||raw.cost<0))bad("Purchase requires description, numeric positive qty and nonnegative unit cost.");
       else if(kind==="pump"&&(!Number.isInteger(raw.rpm)||raw.rpm<=0||typeof raw.timeISO!=="string"||!/^([01]\d|2[0-3]):[0-5]\d$/.test(raw.timeISO)))bad("Pump requires a positive integer rpm and exact HH:MM time; suspicious values require review.");
+      else if(kind==="pump"&&raw.time_source==="unknown_source_time_placeholder_noon"&&raw.timeISO!=="12:00")bad("Unknown source time must retain the reviewed deterministic noon placeholder.");
+      else if(kind==="pump_hours"&&(typeof raw.hours!=="number"||!Number.isFinite(raw.hours)||raw.hours<0))bad("Pump hours must be a finite nonnegative number.");
       else if(["shipping","tax"].some(key=>raw[key]!=null&&(typeof raw[key]!=="number"||!Number.isFinite(raw[key])||raw[key]<0)))bad("Shipping/tax must be finite nonnegative numbers.");
       else if(identities.get(id).length>1)bad("Repeated source identity within this file requires review; no row with this ID will import.");
+      else if(raw.source_id&&raw.source_record_id&&rows.filter(row=>row?.source_id===raw.source_id&&row?.source_record_id===raw.source_record_id).length>1)bad("Repeated source_id + source_record_id requires review, even with distinct event IDs.");
       else {
         const same=existing.filter(item=>item.import_event_id===id);
         if(same.length===1){status=STATUS.present;reason="Permanent source ID already exists; no-op.";if(same[0].importProvenance?.sourceRecord&&canonical(same[0].importProvenance.sourceRecord)!==canonical(raw)){status=STATUS.match;reason="This source ID has different original source content; review the discrepancy.";}}
         else if(same.length>1){status=STATUS.match;reason="Current state contains repeated permanent IDs; review required.";}
-        else if(existing.some(item=>kind==="pump"?item.dateISO===raw.date:(item.date===raw.date&&String(item.purchased||"").toLowerCase()===raw.purchased.toLowerCase()))){status=STATUS.match;reason=kind==="pump"?"Current pump model stores one measurement per day; an existing day must be reviewed, never replaced.":"Similar dated description exists without this source identity; review before assigning identity.";}
+        else if(existing.some(item=>raw.source_id&&raw.source_record_id&&item.importProvenance?.sourceId===raw.source_id&&item.importProvenance?.sourceRecordId===raw.source_record_id)){status=STATUS.match;reason="Existing source identity has a different permanent event ID; review required.";}
+        else if(existing.some(item=>kind!=="purchase"?item.dateISO===raw.date:(item.date===raw.date&&String(item.purchased||"").toLowerCase()===raw.purchased.toLowerCase()))){status=STATUS.match;reason=kind==="pump"?"Current pump model stores one measurement per day; an existing day must be reviewed, never replaced.":kind==="pump_hours"?"Existing same-date pump hours (same or different value) require possible-match/conflict review; never replaced.":"Similar dated description exists without this source identity; review before assigning identity.";}
         else if(kind==="pump"&&rows.some((other,i)=>i!==index&&other?.date===raw.date)){status=STATUS.match;reason="Multiple source measurements on one day exceed the current daily pump model; review required.";}
+        else if(kind==="pump_hours"&&rows.some((other,i)=>i!==index&&other?.date===raw.date)){status=STATUS.match;reason="Multiple source hour totals on the same date require review.";}
       }
       return{index,raw,import_event_id:id,status,reason};
     });
@@ -47,6 +55,7 @@
     return{key:`${year}-W${String(week).padStart(2,"0")}`,year,week,startISO:monday.toISOString().slice(0,10),endISO:end.toISOString().slice(0,10),rows:[]};
   }
   function append(kind,state,candidates){
+    if(kind==="maintenance")return maintenance.append(state,candidates);
     const next=clone(state);
     for(const item of candidates){
       const raw=item.raw,provenance={sourceRecord:clone(raw),originalSourceDate:raw.date,sourceId:raw.source_id||"",sourceRecordId:raw.source_record_id||"",importedAtISO:new Date().toISOString()};
@@ -54,7 +63,11 @@
         const meta=weekFor(raw.date);let week=next.receiptTrackerWeeks.find(week=>week.key===meta.key);
         if(!week){week=meta;next.receiptTrackerWeeks.push(week);}
         week.rows.push({date:raw.date,purchased:raw.purchased,cost:raw.cost,qty:raw.qty,partNumber:String(raw.partNumber||""),shipping:raw.shipping||0,tax:raw.tax||0,inventoryItemId:"",import_event_id:item.import_event_id,importProvenance:provenance});
+      }else if(kind==="pump_hours"){
+        next.totalHistory.push({dateISO:raw.date,hours:raw.hours,import_event_id:item.import_event_id,importProvenance:provenance});
+        next.totalHistory.sort((a,b)=>String(a.dateISO).localeCompare(String(b.dateISO)));
       }else {
+        if(raw.time_source){provenance.timeSource=raw.time_source;provenance.sourceTimeKnown=raw.time_source!=="unknown_source_time_placeholder_noon";}
         const entry={dateISO:raw.date,rpm:raw.rpm,timeISO:raw.timeISO,import_event_id:item.import_event_id,importProvenance:provenance};
         const index=next.pumpEff.entries.findIndex(existing=>existing.dateISO>entry.dateISO);
         if(index<0)next.pumpEff.entries.push(entry);else next.pumpEff.entries.splice(index,0,entry);
@@ -62,16 +75,18 @@
     }
     return next;
   }
-  const target=kind=>kind==="purchase"?"receiptTrackerWeeks":"pumpEff";
+  const target=kind=>kind==="purchase"?"receiptTrackerWeeks":kind==="pump_hours"?"totalHistory":"pumpEff";
+  const targets=kind=>kind==="maintenance"?maintenance.keys:[target(kind)];
   const business=state=>Object.fromEntries(Object.entries(state).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
   function selectiveRollback(kind,current,staged,before,ids){
     const destination=target(kind),planned=new Set(ids);
-    if(kind==="purchase"?(!Array.isArray(current.receiptTrackerWeeks)||current.receiptTrackerWeeks.some(week=>!week||!Array.isArray(week.rows))):(!current.pumpEff||!Array.isArray(current.pumpEff.entries)))throw Error("Import destination shape changed; manual verification is required.");
+    if(kind==="purchase"?(!Array.isArray(current.receiptTrackerWeeks)||current.receiptTrackerWeeks.some(week=>!week||!Array.isArray(week.rows))):kind==="pump_hours"?!Array.isArray(current.totalHistory):(!current.pumpEff||!Array.isArray(current.pumpEff.entries)))throw Error("Import destination shape changed; manual verification is required.");
     for(const id of ids){
       const expected=records(kind,staged).filter(row=>row?.import_event_id===id),actual=records(kind,current).filter(row=>row?.import_event_id===id);
       if(expected.length!==1||actual.length!==1||canonical(actual[0])!==canonical(expected[0]))throw Error(`Imported record ${id} changed or is not uniquely identifiable; manual verification is required.`);
     }
     const next=clone(current[destination]);
+    if(kind==="pump_hours")return next.filter(row=>!planned.has(row?.import_event_id));
     if(kind==="pump")next.entries=next.entries.filter(row=>!planned.has(row?.import_event_id));
     else {
       next.forEach(week=>{week.rows=week.rows.filter(row=>!planned.has(row?.import_event_id));});
@@ -103,12 +118,15 @@
         if(await env.backup(cloud)!==true)throw Error("Downloadable exact cloud pre-import backup is required.");
         result.backupCreated=true;
         if(canonical(business(env.state()))!==canonical(business(current)))throw Error("Local state changed during backup; review a fresh preview.");
-        before=clone(current);const next=append(kind,current,ready),destination=target(kind);
+        if(env.loadedRevision()!==cloud.syncMeta.rev||!env.canWrite())throw Error("Authoritative revision or write gate changed during backup; review a fresh preview.");
+        before=clone(current);const next=append(kind,current,ready),destinations=targets(kind);
         staged=clone(next);plannedIds=ready.map(item=>item.import_event_id);
-        env.apply(destination,clone(next[destination]));applied=true;
-        const unrelated=value=>Object.fromEntries(Object.entries(business(value)).filter(([key])=>key!==destination));
+        applied=true;for(const destination of destinations)env.apply(destination,clone(next[destination]));
+        const unrelated=value=>Object.fromEntries(Object.entries(business(value)).filter(([key])=>!destinations.includes(key)));
+        if(destinations.some(key=>canonical(env.state()[key])!==canonical(next[key])))throw Error("Staged destinations differ from the approved plan.");
         if(canonical(unrelated(before))!==canonical(unrelated(env.state())))throw Error("Unrelated protected fields changed during staging.");
-        const saved=await env.save();committed=saved?.saved===true&&saved?.stateWriteCompleted===true;
+        let saved;try{saved=await env.save({expectedRevision:cloud.syncMeta.rev});}catch(error){result.indeterminate=true;result.error="Save threw without a definite write outcome: "+String(error?.message||error)+". Writes are suspended; verify before retrying.";env.suspend?.(result.error);return result;}
+        committed=saved?.saved===true&&saved?.stateWriteCompleted===true;
         result.indeterminate=saved?.indeterminate===true||(!committed&&saved?.stateWriteAttempted===true&&saved?.definiteFailure!==true);
         if(result.indeterminate){result.error="Save outcome is indeterminate. Writes are suspended; read/verify before retrying.";env.suspend?.(result.error);return result;}
         if(!committed)throw Error(saved?.error||"Atomic save was rejected.");
@@ -117,15 +135,16 @@
         const verified=await env.readCloud();
         result.afterCount=count(kind,verified||{});
         const expectedIds=ready.map(item=>item.import_event_id);
-        if(result.afterCount!==result.beforeCount+ready.length||canonical(verified?.[destination])!==canonical(next[destination])||canonical(unrelated(verified||{}))!==canonical(unrelated(cloud))||expectedIds.some(id=>records(kind,verified||{}).filter(item=>item.import_event_id===id).length!==1))throw Error("Committed save did not pass exact cloud IDs/counts/protected-field verification; review before retrying.");
+        if(result.afterCount!==result.beforeCount+ready.length||destinations.some(key=>canonical(verified?.[key])!==canonical(next[key]))||canonical(unrelated(verified||{}))!==canonical(unrelated(cloud))||expectedIds.some(id=>records(kind,verified||{}).filter(item=>item.import_event_id===id).length!==1))throw Error("Committed save did not pass exact cloud IDs/counts/protected-field verification; review before retrying.");
+        if(kind==="maintenance")result.maintenanceCounts={instancesAdded:ready.length,scheduledAdded:ready.length,completedAdded:ready.length,descriptorsAdded:next.maintenanceTasksV2.length-before.maintenanceTasksV2.length,reusableTasksAdded:0,repeatChainsAdded:0,futureProjectionsAdded:0};
         result.saved=true;result.verificationCompleted=true;result.importedIds=expectedIds;return result;
       }catch(error){
         result.error=String(error?.message||error);
         if(applied&&!committed&&!result.indeterminate){
           try {
-            const destination=target(kind),rollback=selectiveRollback(kind,env.state(),staged,before,plannedIds);
-            env.apply(destination,rollback);
-            if(canonical(env.state()[destination])!==canonical(rollback))throw Error("Selective rollback could not be verified; manual verification is required.");
+            const destinations=targets(kind),rollback=kind==="maintenance"?maintenance.rollback(env.state(),staged,before):{[target(kind)]:selectiveRollback(kind,env.state(),staged,before,plannedIds)};
+            for(const destination of destinations)env.apply(destination,rollback[destination]);
+            if(destinations.some(key=>canonical(env.state()[key])!==canonical(rollback[key])))throw Error("Selective rollback could not be verified; manual verification is required.");
             result.rollbackCompleted=true;result.afterCount=count(kind,env.state());
           }catch(rollbackError){
             result.rollbackReviewRequired=true;result.rollbackError=String(rollbackError?.message||rollbackError);
