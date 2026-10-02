@@ -82,7 +82,12 @@
   const business=state=>Object.fromEntries(Object.entries(state).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
   function normalizeBusinessForComparison(state){
     const normalized=business(state);
-    if(Array.isArray(normalized.tasksAsReq))normalized.tasksAsReq=normalized.tasksAsReq.map(task=>task&&typeof task==="object"&&!Array.isArray(task)&&task.completedDates===undefined?{...task,completedDates:[]}:task);
+    if(Array.isArray(normalized.tasksAsReq))normalized.tasksAsReq=normalized.tasksAsReq.map(task=>task&&typeof task==="object"&&!Array.isArray(task)?{
+      ...task,
+      completedDates:task.completedDates===undefined?[]:task.completedDates,
+      occurrenceHours:task.occurrenceHours===undefined?{}:task.occurrenceHours,
+      occurrenceNotes:task.occurrenceNotes===undefined?{}:task.occurrenceNotes
+    }:task);
     return normalized;
   }
   const unrelated=(kind,state)=>Object.fromEntries(Object.entries(business(state)).filter(([key])=>!targets(kind).includes(key)));

@@ -80,6 +80,15 @@ const comparisonCases=[
   ["explicit undefined completedDates",state=>{state.tasksAsReq[0].completedDates=undefined;},true],
   ["real completed date",state=>{state.tasksAsReq[0].completedDates=["2026-01-01"];},false],
   ["real completed date versus empty array",(state,cloud)=>{state.tasksAsReq[0].completedDates=["2026-01-01"];cloud.tasksAsReq[0].completedDates=[];},false],
+  ...["occurrenceHours","occurrenceNotes"].flatMap(field=>[
+    [`cloud missing and local empty ${field}`,state=>{state.tasksAsReq[0][field]={};},true],
+    [`cloud empty and local missing ${field}`,(state,cloud)=>{cloud.tasksAsReq[0][field]={};},true],
+    [`explicit undefined ${field}`,state=>{state.tasksAsReq[0][field]=undefined;},true],
+    [`nonempty ${field}`,state=>{state.tasksAsReq[0][field]={"2026-01-01":field==="occurrenceHours"?1:"Changed pump"};},false],
+    [`null versus empty ${field}`,(state,cloud)=>{state.tasksAsReq[0][field]=null;cloud.tasksAsReq[0][field]={};},false],
+    [`${field} on interval task`,(state,cloud)=>{state.tasksInterval=[{id:"interval",[field]:{}}];cloud.tasksInterval=[{id:"interval"}];},false]
+  ]),
+  ["all three empty task history fields",state=>{Object.assign(state.tasksAsReq[0],{completedDates:[],occurrenceHours:{},occurrenceNotes:{}});},true],
   ["different task price",state=>{state.tasksAsReq[0].price++;},false],
   ["different task name",state=>{state.tasksAsReq[0].name="Changed";},false],
   ["extra task",state=>{state.tasksAsReq.push({id:"extra",name:"Extra"});},false],
