@@ -108,6 +108,40 @@ for(const [name,sourceChange,stored,passes]of [
   }else assert.match(result.error,/exact cloud IDs\/counts\/protected-field verification/);
 });
 
+function recoveredMaintenanceFixture(size=1){
+  const rows=workbooks.adapt("maintenance",Array.from({length:size},(_,index)=>({import_event_id:`rerun-${index}`,event_date:"2025-01-03",route:"calendar_only",event_name:`Inspect fixture ${index}`,exact_existing_task:"",calendar_mode:"one_time",mark_completed:true,labor_minutes:5,parts_cost_snapshot:3.1,__sourceRowNumber:index+2})));
+  const initial={syncMeta:{rev:7},tasksAsReq:[],tasksInterval:[],inventory:[{id:"keep",qtyNew:9}],maintenanceTasksV2:[],maintenanceCalendarInstancesV2:[],maintenanceOccurrencesV2:[]};
+  return{rows,state:history.append("maintenance",initial,history.preview("maintenance",rows,initial))};
+}
+const rerunCompletion=state=>state.maintenanceOccurrencesV2.find(row=>row.import_event_id==="rerun-0");
+for(const [name,change,expected]of [
+  ["cloud missing parser metadata versus workbook empty",(state,rows)=>{delete rerunCompletion(state).importProvenance.sourceRecord.__recoveryProblems;},history.STATUS.present],
+  ["cloud empty parser metadata versus workbook missing",(state,rows)=>{delete rows[0].__recoveryProblems;},history.STATUS.present],
+  ["cloud undefined parser metadata versus workbook empty",state=>{rerunCompletion(state).importProvenance.sourceRecord.__recoveryProblems=undefined;},history.STATUS.present],
+  ["nonempty stored parser evidence",state=>{rerunCompletion(state).importProvenance.sourceRecord.__recoveryProblems=["Needs review"];},history.STATUS.match],
+  ["changed labor minutes",(state,rows)=>{rows[0].labor_minutes++;},history.STATUS.match],
+  ["changed source date",(state,rows)=>{rows[0].event_date="2025-01-04";},history.STATUS.match],
+  ["changed parts cost",(state,rows)=>{rows[0].parts_cost_snapshot++;},history.STATUS.match],
+  ["changed other parser evidence",(state,rows)=>{rows[0].__sourceRowNumber++;},history.STATUS.match],
+  ["incomplete lifecycle",state=>{state.maintenanceOccurrencesV2=state.maintenanceOccurrencesV2.filter(row=>row.eventType!=="scheduled");},history.STATUS.match],
+  ["duplicate instance",state=>{state.maintenanceCalendarInstancesV2.push(clone(state.maintenanceCalendarInstancesV2[0]));},history.STATUS.match],
+  ["changed one-time lifecycle",state=>{state.maintenanceCalendarInstancesV2[0].repeatRule={enabled:true};},history.STATUS.match],
+  ["invalid lifecycle root",state=>{rerunCompletion(state).rootOccurrenceId="wrong-root";},history.STATUS.match],
+  ["exact existing valid lifecycle",()=>{},history.STATUS.present],
+  ["unresolved workbook evidence",(state,rows)=>{rows[0].__recoveryProblems=["Needs review"];},history.STATUS.problem]
+])test(`maintenance rerun preview: ${name}`,async()=>{
+  const {rows,state}=recoveredMaintenanceFixture();change(state,rows);const before=clone({rows,state}),plan=history.preview("maintenance",rows,state);assert.equal(plan[0].status,expected);
+  let writes=0;const api=history.createApi({state:()=>clone(state),readCloud:async()=>clone(state),loadedRevision:()=>7,canWrite:()=>true,backup:async()=>{writes++;},apply:()=>{writes++;},save:async()=>{writes++;}});
+  const result=await api.submit("maintenance",rows,{confirmed:true,reviewedPreview:plan});assert.equal(result.saved,false);assert.equal(result.error,"");assert.equal(writes,0);assert.deepEqual(result.importedIds,[]);assert.deepEqual({rows,state},before);
+});
+test("maintenance rerun leaves 21 compacted imports present and 28 unresolved rows blocked with zero writes",async()=>{
+  const {rows,state}=recoveredMaintenanceFixture(21);for(const record of state.maintenanceOccurrencesV2)if(record.importProvenance)delete record.importProvenance.sourceRecord.__recoveryProblems;
+  const source=[...rows,...Array.from({length:28},(_,index)=>({...rows[0],import_event_id:`unresolved-${index}`,__recoveryProblems:["Needs review"]}))],before=clone({source,state}),plan=history.preview("maintenance",source,state);
+  assert.deepEqual(Object.fromEntries(Object.values(history.STATUS).map(status=>[status,plan.filter(row=>row.status===status).length])),{[history.STATUS.present]:21,[history.STATUS.missing]:0,[history.STATUS.match]:0,[history.STATUS.problem]:28});
+  let writes=0;const api=history.createApi({state:()=>clone(state),readCloud:async()=>clone(state),loadedRevision:()=>7,canWrite:()=>true,backup:async()=>{writes++;},apply:()=>{writes++;},save:async()=>{writes++;}});
+  const result=await api.submit("maintenance",source,{confirmed:true,reviewedPreview:plan});assert.equal(result.saved,false);assert.equal(result.error,"");assert.equal(result.beforeCount,21);assert.equal(result.afterCount,21);assert.equal(writes,0);assert.deepEqual({source,state},before);
+});
+
 const comparisonState=()=>({syncMeta:{rev:7},tasksAsReq:[{id:"salt",name:"Refill Salt",price:10}],tasksInterval:[],inventory:[{id:"stock",qtyNew:9}],weeklyCostReports:[{weekStartISO:"2026-09-28",weekKey:"2026-W40",totalCost:100,jobs:[{id:"job",cost:100,generatedAtISO:"nested-value"}],generatedAtISO:"2026-10-02T14:28:36.836Z"}],maintenanceTasksV2:[],maintenanceCalendarInstancesV2:[],maintenanceOccurrencesV2:[]});
 const comparisonCases=[
   ["cloud missing and local empty completedDates",state=>{state.tasksAsReq[0].completedDates=[];},true],

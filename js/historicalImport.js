@@ -99,8 +99,8 @@
     if(kind!=="maintenance"||!Array.isArray(destination))return destination;
     return destination.map(record=>{
       const source=record?.importProvenance?.sourceRecord;
-      if(!source||typeof source!=="object"||Array.isArray(source)||!(source.__recoveryProblems===undefined||(Array.isArray(source.__recoveryProblems)&&source.__recoveryProblems.length===0)))return record;
-      const sourceRecord={...source};delete sourceRecord.__recoveryProblems;
+      const sourceRecord=maintenance.normalizeSourceRecordForComparison(source);
+      if(sourceRecord===source)return record;
       return{...record,importProvenance:{...record.importProvenance,sourceRecord}};
     });
   }

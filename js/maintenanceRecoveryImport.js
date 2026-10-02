@@ -6,6 +6,10 @@
   const keys=["maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2"];
   const clone=v=>JSON.parse(JSON.stringify(v));
   const canonical=v=>v===undefined?"undefined":v===null||typeof v!=="object"?JSON.stringify(v):Array.isArray(v)?"["+v.map(canonical).join(",")+"]":"{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+canonical(v[k])).join(",")+"}";
+  function normalizeSourceRecordForComparison(source){
+    if(!source||typeof source!=="object"||Array.isArray(source)||!(source.__recoveryProblems===undefined||(Array.isArray(source.__recoveryProblems)&&source.__recoveryProblems.length===0)))return source;
+    const compared={...source};delete compared.__recoveryProblems;return compared;
+  }
   const id=(kind,value)=>"recovery_"+kind+"_"+Array.from(value).map(c=>c.codePointAt(0).toString(16).padStart(6,"0")).join("");
   const numeric=v=>typeof v==="number"&&Number.isFinite(v)&&v>=0;
   const blank=v=>v==null||v==="";
@@ -72,7 +76,7 @@
           const ownedEvents=(state.maintenanceOccurrencesV2||[]).filter(record=>record.recoveryImportId===eventId);
           const legacy=[...(state.tasksInterval||[]),...(state.tasksAsReq||[])].flatMap(record=>record.manualHistory||[]).filter(record=>record.import_event_id===eventId);
           if(existing.length||ownedInstances.length||ownedEvents.length||legacy.length){
-            if(existing.length===1&&existing[0].eventType==="completed"&&ownedInstances.length===1&&ownedInstances[0].instanceMode==="one_time"&&ownedInstances[0].repeatRule===null&&ownedEvents.length===2&&ownedEvents.some(e=>e.id===existing[0].rootOccurrenceId&&e.eventType==="scheduled")&&existing[0].instanceId===ownedInstances[0].id&&canonical(existing[0].importProvenance?.sourceRecord)===canonical(raw)){
+            if(existing.length===1&&existing[0].eventType==="completed"&&ownedInstances.length===1&&ownedInstances[0].instanceMode==="one_time"&&ownedInstances[0].repeatRule===null&&ownedEvents.length===2&&ownedEvents.some(e=>e.id===existing[0].rootOccurrenceId&&e.eventType==="scheduled")&&existing[0].instanceId===ownedInstances[0].id&&canonical(normalizeSourceRecordForComparison(existing[0].importProvenance?.sourceRecord))===canonical(normalizeSourceRecordForComparison(raw))){
               status=STATUS.present;reason="Permanent historical identity already exists exactly once; no-op.";
             }else{status=STATUS.match;reason="Existing identity has different evidence or an incomplete/ambiguous V2 lifecycle; review required.";}
           }else{
@@ -127,5 +131,5 @@
     if(next.maintenanceCalendarInstancesV2.some(row=>removedTasks.has(row.taskId))||next.maintenanceOccurrencesV2.some(row=>removedTasks.has(row.taskId)||removedInstances.has(row.instanceId)||removedEvents.has(row.rootOccurrenceId)||removedEvents.has(row.supersedesEventId)))throw Error("Concurrent maintenance lifecycle references import-created records; manual verification required.");
     return next;
   }
-  return Object.freeze({keys,savedTasks,checklistPreview,lifecycleEvent,preview,append,rollback});
+  return Object.freeze({keys,savedTasks,checklistPreview,lifecycleEvent,normalizeSourceRecordForComparison,preview,append,rollback});
 });
