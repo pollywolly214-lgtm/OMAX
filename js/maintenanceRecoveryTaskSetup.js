@@ -7,8 +7,8 @@
   const STATUS=Object.freeze({present:"Already Exists — exact one match",ready:"Missing — Ready to Create",duplicate:"Duplicate / Ambiguous — Review",blocked:"Missing — Needs Review"});
   const definitions=Object.freeze([
     {name:"Refill Salt",pn:"",price:10,minutes:15},
-    {name:"Transfer Tank Water Pump",pn:null,price:null,minutes:null,reason:"Part number, parts cost and labor unresolved."},
-    {name:"Empty Scrap Bin",pn:"",price:0,minutes:null,reason:"Labor duration unresolved."},
+    {name:"Transfer Tank Water Pump",pn:"",price:70,minutes:60},
+    {name:"Empty Scrap Bin",pn:"",price:0,minutes:30},
     {name:"Nozzle Collet",pn:"308641",price:33.5,minutes:10},
     {name:"Nozzle Nut",pn:"303453",price:57.5,minutes:10},
     {name:"Main Pump 0.2 Micron",pn:"204000",price:144,minutes:30},
