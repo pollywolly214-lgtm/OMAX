@@ -81,3 +81,46 @@ rg -n --max-columns 180 --max-columns-preview 'projectNumber|project_number|cate
 The project/category suite covers all confirmed mappings, ALAMO, legacy 1111 preservation, narrow zero recovery, future projects, conflicts, 30-row creation/rerun idempotency, provenance, ready-only planning, material/review blockers, rollback, indeterminate/thrown saves, protected fields, preview drift, native metadata normalization, preview labels, and production cloud folder verification. The actual 129-row reviewed workbook was not supplied in this checkout; acceptance is tested with deterministic source rows and existing XLSX parsing fixtures.
 
 Verified October 2, 2026: all eight syntax commands PASS; cutting importer 24/24 PASS; history compatibility 15/15 PASS; project/category resolver/import 34/34 PASS; selective rollback/recovery/atomic persistence 51/51 PASS. Total: 124 tests, zero failures. `git diff --check` PASS; targeted `rg` inspection PASS. No npm, production import, or PR merge was performed.
+
+## CJI-02A: normal-click backup/import action
+
+Continued on the same branch and PR #490 from the expected `fb70ccb6f6167e78ac071346e28b126d59380364`. The confirmed code defects were: the backup anchor was created/clicked only after two awaited cloud reads; the final UI handler had no catch for unexpected rejections; and it showed one generic status through validation, backup, staging, save, and verification. Those defects can leave the operator with no useful explanation and put the download outside transient user activation. No missing registration, DOM replacement, unawaited submission, or watcher dependency was found in this path.
+
+An actual Edge probe served the original core/importer from that commit, with a 5.5-second delay per cloud read. At the old backup trigger `navigator.userActivation.isActive` was **false**, proving activation was lost. Edge still accepted the download and completed the fixture import without a watcher. Thus activation loss is a confirmed timing defect, but this local test did **not** reproduce or establish the sole cause of the operator's intermittent production failure. Evidence is saved locally in `artifacts/cji-02a/legacy-activation-probe.json`.
+
+Before: trusted Run click → native blocking confirmation → await authoritative validation → await backup cloud read → serialize Blob/create URL/click anchor → stage → save → verify. A long confirmation/read could expire activation; unexpected errors could escape the UI handler.
+
+After: Preview → read/validate authoritative baseline → prepare immutable backup JSON Blob/object URL → enable review/import controls. Run opens a small explicit confirmation dialog showing the reviewed plan. Its **Download backup and import** button supplies a fresh trusted click, even if the operator spent a long time reading the confirmation. That click checks local/preview identity and invokes the already-prepared download **synchronously, before any await**. A single-use receipt is then passed to the guarded async importer. Fresh cloud reads must match both the current authoritative baseline and the exact prepared backup/material settings before any folder/job staging. The prepared revision is also passed explicitly to the existing CAS save guard. A missing/forged/reused receipt or rejected backup stops before mutation/save.
+
+Progress is deterministic: Preparing backup → Downloading backup → Validating current cloud revision → Validating prepared backup → Staging reviewed jobs → Saving → Verifying → Import complete. The current stage and bounded result are kept in the preview element's dataset. Errors show the failing stage and at most 240 characters with URLs redacted. Cloud reads have a 30-second deadline, with timer cleanup. There is no import-progress polling, interval, or MutationObserver in the implementation. The one-shot timers serve read deadlines and safe object-URL disposal only.
+
+The page validates the JSON Blob and object URL, requires a trusted click and available activation, invokes the anchor synchronously, and propagates trigger exceptions. Unused URLs are revoked immediately; triggered URLs remain available for 60 seconds before revocation. It reports **download started**, never claims the file finished downloading. Browser acceptance/completion is not observable by ordinary page code; the confirmation and success text direct the operator to browser Downloads. A trigger exception cannot issue a receipt and cannot save.
+
+The action locks before triggering and prevents concurrent clicks. Definite pre-write failures restore controls for a new preview/review. Indeterminate save/verification outcomes preserve staged evidence, disable import/review actions, and require refresh/read verification; the Close control remains available for diagnostics. All project/category consistency, duplicate identity, material/review blockers, protected-state comparison, exact staged verification, and selective rollback behavior remain intact. Shared export/recovery/repair downloads were not changed.
+
+Node/DOM verification uses the actual installed UI handler and importer in a deterministic DOM fixture, plus the production receipt adapter and download helper. Real-browser verification uses installed Edge through the existing bundled Playwright approach, the full localhost app, real file input/button events, accepted downloads whose JSON contents are inspected, and the disposable `?devsafe=1` backend. Every external request is blocked. The browser matrix checks normal operation with no watcher, an unrelated interval, and a MutationObserver/status reader; slow async reads; trigger/read failures; double click; indeterminate save; and local/server revision drift. In the no-watcher case the test driver awaits the business completion promise and reads status once afterward; it does not poll the status DOM during import. DevTools and console polling are never opened or required. Browser fixture injection and failure simulation do not constitute production Firebase operations.
+
+Run from this checkout (no `package.json`, no npm):
+
+```powershell
+node --check js/core.js
+node --check js/cuttingJobImporter.js
+node --check js/cuttingJobImportDownload.js
+node --check tests/cji-02-project-category-import.test.js
+node --check tests/cji-02a-backup-action.test.js
+node --check scripts/cji-02a-browser.js
+node tests/cutting-job-import.test.js
+node tests/cji02-history-repair.test.js
+node --test tests/cji-02a-backup-action.test.js tests/cji-02-project-category-import.test.js tests/import-selective-rollback.test.js tests/atomic-persistence.test.js
+node --test tests/recovery-import.test.js
+node scripts/devsafe-server.js
+# In a second terminal:
+$env:OMAX_PLAYWRIGHT_PATH='C:\Users\Ryder\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright'
+node scripts/cji-02a-browser.js
+git diff --check
+rg -n --max-columns 180 --max-columns-preview 'cuttingJobImportConfirm|prepareCuttingJobImportBackup|readCuttingJobImportCloudState|backupReceipt|onProgress|createObjectURL|trigger\(event\)' index.html js/core.js js/cuttingJobImporter.js js/cuttingJobImportDownload.js tests/cji-02a-backup-action.test.js
+```
+
+Operator Vercel verification remains necessary in the shop's actual browser/download-policy environment: preview the workbook, review the plan, make one final confirmation click with DevTools closed, verify the backup appears in Downloads, and inspect the visible completion/error state. Do not bypass a stale baseline or a suspended/indeterminate state. No production Firebase import was performed during this task.
+
+CJI-02A verification on October 2, 2026: six syntax commands PASS; cutting importer 24/24 PASS; history compatibility 15/15 PASS; combined backup/project/category/selective-rollback/atomic suite 79/79 PASS (including 17 backup/action cases); recovery suite 23/23 PASS. Total Node/DOM: 141 tests, zero failures. Actual Edge: 10/10 scenarios PASS, zero failures. Diff checks and targeted handler/download searches PASS. Browser result JSON and downloaded fixture backups are retained under the ignored local `artifacts/cji-02a/` directory.

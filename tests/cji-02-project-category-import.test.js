@@ -190,7 +190,7 @@ test("production cloud verifier requires exact categories alongside exact jobs",
   const section=core.slice(core.indexOf("verifyCloud:async({plannedIds,expectedState,expectedCategories})=>{"),core.indexOf("  suspend:reason=>",core.indexOf("window.cuttingJobImporter =")));
   const expectedState={cuttingJobs:[{id:"job",import_event_id:"event"}],completedCuttingJobs:[]},expectedCategories=[root,{id:"blanco",name:"1254 Blanco"}],baseline={...expectedState,jobFolders:[root],inventory:[{id:"keep"}]};
   let cloud={...baseline,jobFolders:expectedCategories};
-  const context=vm.createContext({window:{__cjiAuthoritativeBaseline:baseline},readCurrentCloudStateReadOnly:async()=>structuredClone(cloud),stableStringify:JSON.stringify});
+  const context=vm.createContext({window:{__cjiAuthoritativeBaseline:baseline},readCuttingJobImportCloudState:async()=>structuredClone(cloud),stableStringify:JSON.stringify});
   vm.runInContext(`this.verify=({${section}}).verifyCloud`,context);
   const args={plannedIds:["event"],expectedState,expectedCategories};assert.equal(await context.verify(args),true);
   cloud={...cloud,jobFolders:[root]};assert.equal(await context.verify(args),false);
