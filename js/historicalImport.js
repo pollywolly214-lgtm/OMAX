@@ -88,6 +88,10 @@
       occurrenceHours:task.occurrenceHours===undefined?{}:task.occurrenceHours,
       occurrenceNotes:task.occurrenceNotes===undefined?{}:task.occurrenceNotes
     }:task);
+    if(Array.isArray(normalized.weeklyCostReports))normalized.weeklyCostReports=normalized.weeklyCostReports.map(report=>{
+      if(!report||typeof report!=="object"||Array.isArray(report))return report;
+      const compared={...report};delete compared.generatedAtISO;return compared;
+    });
     return normalized;
   }
   const unrelated=(kind,state)=>Object.fromEntries(Object.entries(business(state)).filter(([key])=>!targets(kind).includes(key)));

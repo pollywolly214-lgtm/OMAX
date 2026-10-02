@@ -73,7 +73,7 @@ test("protected isolation check still rejects unrelated drift even when the stag
   assert.match(result.error,/Unrelated protected fields changed during staging/);assert.equal(result.stagingMismatch,undefined);assert.equal(h.saves,0);assert.equal(h.window.receiptTrackerWeeks.length,0);assert.equal(h.window.inventory[0].qtyNew,11);assert.equal(h.suspends,1);
 });
 
-const comparisonState=()=>({syncMeta:{rev:7},tasksAsReq:[{id:"salt",name:"Refill Salt",price:10}],tasksInterval:[],inventory:[{id:"stock",qtyNew:9}],maintenanceTasksV2:[],maintenanceCalendarInstancesV2:[],maintenanceOccurrencesV2:[]});
+const comparisonState=()=>({syncMeta:{rev:7},tasksAsReq:[{id:"salt",name:"Refill Salt",price:10}],tasksInterval:[],inventory:[{id:"stock",qtyNew:9}],weeklyCostReports:[{weekStartISO:"2026-09-28",weekKey:"2026-W40",totalCost:100,jobs:[{id:"job",cost:100,generatedAtISO:"nested-value"}],generatedAtISO:"2026-10-02T14:28:36.836Z"}],maintenanceTasksV2:[],maintenanceCalendarInstancesV2:[],maintenanceOccurrencesV2:[]});
 const comparisonCases=[
   ["cloud missing and local empty completedDates",state=>{state.tasksAsReq[0].completedDates=[];},true],
   ["cloud empty and local missing completedDates",(state,cloud)=>{cloud.tasksAsReq[0].completedDates=[];},true],
@@ -89,6 +89,16 @@ const comparisonCases=[
     [`${field} on interval task`,(state,cloud)=>{state.tasksInterval=[{id:"interval",[field]:{}}];cloud.tasksInterval=[{id:"interval"}];},false]
   ]),
   ["all three empty task history fields",state=>{Object.assign(state.tasksAsReq[0],{completedDates:[],occurrenceHours:{},occurrenceNotes:{}});},true],
+  ["regenerated weekly report timestamp",state=>{state.weeklyCostReports[0].generatedAtISO="2026-10-02T15:20:21.938Z";},true],
+  ["local missing weekly report timestamp",state=>{delete state.weeklyCostReports[0].generatedAtISO;},true],
+  ["cloud missing weekly report timestamp",(state,cloud)=>{delete cloud.weeklyCostReports[0].generatedAtISO;},true],
+  ["different weekly report total",state=>{state.weeklyCostReports[0].totalCost++;},false],
+  ["different weekly report job value",state=>{state.weeklyCostReports[0].jobs[0].cost++;},false],
+  ["extra weekly report",state=>{state.weeklyCostReports.push(clone(state.weeklyCostReports[0]));},false],
+  ["missing weekly report",state=>{state.weeklyCostReports=[];},false],
+  ["different weekly report week date",state=>{state.weeklyCostReports[0].weekStartISO="2026-09-21";},false],
+  ["different weekly report week key",state=>{state.weeklyCostReports[0].weekKey="2026-W39";},false],
+  ["nested report generatedAtISO remains meaningful",state=>{state.weeklyCostReports[0].jobs[0].generatedAtISO="changed";},false],
   ["different task price",state=>{state.tasksAsReq[0].price++;},false],
   ["different task name",state=>{state.tasksAsReq[0].name="Changed";},false],
   ["extra task",state=>{state.tasksAsReq.push({id:"extra",name:"Extra"});},false],
@@ -117,5 +127,6 @@ for(const [name,change,equal]of comparisonCases)test(`post-backup business compa
   const plan=history.preview("maintenance",rows,cloud),result=await api.submit("maintenance",rows,{confirmed:true,reviewedPreview:plan});
   assert.equal(backups,1);assert.equal(result.saved,equal);assert.equal(result.error,equal?"":"Local state changed during backup; review a fresh preview.");assert.equal(saves,equal?1:0);assert.equal(applies,equal?3:0);
   assert.deepEqual(local.tasksAsReq,beforeLocal.tasksAsReq);assert.deepEqual(cloud.tasksAsReq,beforeCloud.tasksAsReq);
+  assert.deepEqual(local.weeklyCostReports,beforeLocal.weeklyCostReports);assert.deepEqual(cloud.weeklyCostReports,beforeCloud.weeklyCostReports);
   if(!equal){assert.deepEqual(local,beforeLocal);assert.deepEqual(cloud,beforeCloud);}
 });
