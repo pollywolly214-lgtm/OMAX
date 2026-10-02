@@ -728,10 +728,13 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   }
   const effectiveDateISO = normalizeDateKey(opts.effectiveDateISO || ymd(new Date()));
   const nowISO = new Date().toISOString();
-  const legacyTaskId = String(task.id);
-  const existingTask = collections.tasks.find(entry => entry && String(entry.legacyTaskId || "") === legacyTaskId) || null;
+  const calendarOnly = opts.calendarOnly === true && mode === "one_time";
+  const legacyTaskId = calendarOnly ? null : String(task.id);
+  const existingTask = collections.tasks.find(entry => entry && (calendarOnly
+    ? String(entry.id) === String(task.id) && entry.legacyTaskId == null
+    : String(entry.legacyTaskId || "") === legacyTaskId)) || null;
   const taskRecord = existingTask || {
-    id: genId("maintenance_task_v2"),
+    id: calendarOnly ? String(task.id) : genId("maintenance_task_v2"),
     system: "v2",
     schemaVersion: 2,
     legacyTaskId,
@@ -765,14 +768,14 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
     if(instance.recoveryImportId)return false;
     if (String(instance.system || "") !== "v2" && Number(instance.schemaVersion || 0) < 2) return false;
     if (String(instance.status || "active") === "stopped") return false;
-    if (String(instance.legacyTaskId || "") !== legacyTaskId) return false;
+    if (calendarOnly ? String(instance.taskId || "") !== String(taskRecord.id) : String(instance.legacyTaskId || "") !== legacyTaskId) return false;
     if (String(instance.instanceMode || "") !== mode) return false;
     if (normalizeDateKey(instance.startDateISO || null) !== effectiveDateISO) return false;
     if (mode === "repeat") return stringifyMaintenanceV2RepeatRule(instance.repeatRule) === stringifyMaintenanceV2RepeatRule(normalizedRepeatRule);
     return collections.occurrences.some(event => event
       && String(event.system || "") === "v2"
       && String(event.instanceId || "") === String(instance.id || "")
-      && String(event.legacyTaskId || "") === legacyTaskId
+      && (calendarOnly ? String(event.taskId || "") === String(taskRecord.id) : String(event.legacyTaskId || "") === legacyTaskId)
       && String(event.eventType || "") === eventType
       && normalizeDateKey(event.effectiveDateISO || event.dateISO || null) === effectiveDateISO
       && !occurrenceHasRemovedLifecycle(event));
@@ -800,7 +803,7 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   // The equivalent-record branch already returned. These records are new.
   const reusedInstance = false;
   const reusedOccurrence = false;
-  const originalBaseId = `${createMaintenanceV2StablePart(legacyTaskId)}_${createMaintenanceV2StablePart(effectiveDateISO)}_${createMaintenanceV2StablePart(mode)}`;
+  const originalBaseId = `${createMaintenanceV2StablePart(legacyTaskId || taskRecord.id)}_${createMaintenanceV2StablePart(effectiveDateISO)}_${createMaintenanceV2StablePart(mode)}`;
   let stableBaseId=originalBaseId,identitySuffix=1;
   while(collections.instances.some(entry=>entry?.id===`maintenance_instance_v2_${stableBaseId}`)||collections.occurrences.some(entry=>entry?.id===`maintenance_occurrence_v2_${stableBaseId}_${createMaintenanceV2StablePart(eventType)}`))stableBaseId=`${originalBaseId}_${++identitySuffix}`;
   const instance = {
@@ -6939,7 +6942,7 @@ function renderDashboard(){
     jobForm?.reset();
     resetGarnetForm();
     resetOneTimeTaskForm();
-    collapseExistingTaskDropdown();
+    if (existingTaskResults) existingTaskResults.hidden = true;
     setContextDate(null);
     pendingGarnetEditId = null;
   }
@@ -7603,6 +7606,7 @@ function renderDashboard(){
     const note = (oneTimeNoteInput?.value || "").trim();
     const rawDate = (oneTimeDateInput?.value || "").trim();
     const targetISO = rawDate ? ymd(rawDate) : (addContextDateISO || ymd(new Date()));
+    if (!targetISO){ alert("Select a valid calendar date."); return; }
     const condition = note || "One-time maintenance task";
     const task = {
       id: genId(name),
@@ -7625,6 +7629,7 @@ function renderDashboard(){
     };
     const saved=await window.runMaintenanceCalendarMutation(()=>window.createMaintenanceV2FromTemplate(task, {
         mode: "one_time",
+        calendarOnly: true,
         eventType: "scheduled",
         effectiveDateISO: targetISO,
         note
