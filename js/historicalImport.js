@@ -80,6 +80,11 @@
   const target=kind=>kind==="task_setup"?"tasksAsReq":kind==="purchase"?"receiptTrackerWeeks":kind==="pump_hours"?"totalHistory":"pumpEff";
   const targets=kind=>kind==="maintenance"?maintenance.keys:[target(kind)];
   const business=state=>Object.fromEntries(Object.entries(state).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
+  function normalizeBusinessForComparison(state){
+    const normalized=business(state);
+    if(Array.isArray(normalized.tasksAsReq))normalized.tasksAsReq=normalized.tasksAsReq.map(task=>task&&typeof task==="object"&&!Array.isArray(task)&&task.completedDates===undefined?{...task,completedDates:[]}:task);
+    return normalized;
+  }
   const unrelated=(kind,state)=>Object.fromEntries(Object.entries(business(state)).filter(([key])=>!targets(kind).includes(key)));
   function diagnosticValue(value,path){
     if(value===undefined)return "(missing)";
@@ -134,7 +139,7 @@
       try {
         const current=env.state(),cloud=await env.readCloud();
         if(!cloud||cloud.syncMeta?.rev!==env.loadedRevision())throw Error("Latest authoritative baseline changed or is missing; reload before previewing.");
-        if(canonical(business(current))!==canonical(business(cloud)))throw Error("Local business state differs from cloud. Save/reload and generate a fresh preview before importing.");
+        if(canonical(normalizeBusinessForComparison(current))!==canonical(normalizeBusinessForComparison(cloud)))throw Error("Local business state differs from cloud. Save/reload and generate a fresh preview before importing.");
         const plan=preview(kind,rows,cloud);
         if(!reviewedPreview||canonical(plan)!==canonical(reviewedPreview))throw Error("The reviewed preview changed. Review a fresh reconciliation preview before confirming.");
         const ready=plan.filter(item=>item.status===(kind==="task_setup"?taskSetup.STATUS.ready:STATUS.missing));
@@ -144,7 +149,7 @@
         if(!env.scan||env.scan(kind==="task_setup"?cloud:rows).contaminated)throw Error("Source includes embedded file content or the content firewall is unavailable.");
         if(await env.backup(cloud)!==true)throw Error("Downloadable exact cloud pre-import backup is required.");
         result.backupCreated=true;
-        if(canonical(business(env.state()))!==canonical(business(current)))throw Error("Local state changed during backup; review a fresh preview.");
+        if(canonical(normalizeBusinessForComparison(env.state()))!==canonical(normalizeBusinessForComparison(current)))throw Error("Local state changed during backup; review a fresh preview.");
         if(env.loadedRevision()!==cloud.syncMeta.rev||!env.canWrite())throw Error("Authoritative revision or write gate changed during backup; review a fresh preview.");
         before=clone(current);const next=append(kind,current,ready,{createTask:env.createTask}),destinations=targets(kind);
         if(kind==="task_setup"&&env.scan(next).contaminated)throw Error("Native task plan failed the content firewall.");
@@ -204,5 +209,5 @@
       }finally{busy=false;}
     }});
   }
-  return Object.freeze({STATUS,identity,preview,append,weekFor,canonical,createApi});
+  return Object.freeze({STATUS,identity,preview,append,weekFor,canonical,normalizeBusinessForComparison,createApi});
 });

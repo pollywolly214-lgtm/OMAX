@@ -72,3 +72,41 @@ test("protected isolation check still rejects unrelated drift even when the stag
   const rows=await workbookRows(),h=browserHarness({apply:(window,key,count)=>{if(count===1)window.inventory[0].qtyNew=11;}}),result=await h.submit("purchase",rows);
   assert.match(result.error,/Unrelated protected fields changed during staging/);assert.equal(result.stagingMismatch,undefined);assert.equal(h.saves,0);assert.equal(h.window.receiptTrackerWeeks.length,0);assert.equal(h.window.inventory[0].qtyNew,11);assert.equal(h.suspends,1);
 });
+
+const comparisonState=()=>({syncMeta:{rev:7},tasksAsReq:[{id:"salt",name:"Refill Salt",price:10}],tasksInterval:[],inventory:[{id:"stock",qtyNew:9}],maintenanceTasksV2:[],maintenanceCalendarInstancesV2:[],maintenanceOccurrencesV2:[]});
+const comparisonCases=[
+  ["cloud missing and local empty completedDates",state=>{state.tasksAsReq[0].completedDates=[];},true],
+  ["cloud empty and local missing completedDates",(state,cloud)=>{cloud.tasksAsReq[0].completedDates=[];},true],
+  ["explicit undefined completedDates",state=>{state.tasksAsReq[0].completedDates=undefined;},true],
+  ["real completed date",state=>{state.tasksAsReq[0].completedDates=["2026-01-01"];},false],
+  ["real completed date versus empty array",(state,cloud)=>{state.tasksAsReq[0].completedDates=["2026-01-01"];cloud.tasksAsReq[0].completedDates=[];},false],
+  ["different task price",state=>{state.tasksAsReq[0].price++;},false],
+  ["different task name",state=>{state.tasksAsReq[0].name="Changed";},false],
+  ["extra task",state=>{state.tasksAsReq.push({id:"extra",name:"Extra"});},false],
+  ["missing task",state=>{state.tasksAsReq=[];},false],
+  ["unrelated protected difference",state=>{state.inventory[0].qtyNew++;},false],
+  ["identical state",()=>{},true],
+  ["null completedDates",state=>{state.tasksAsReq[0].completedDates=null;},false],
+  ["completedDates on interval task",(state,cloud)=>{state.tasksInterval=[{id:"interval",completedDates:[]}];cloud.tasksInterval=[{id:"interval"}];},false]
+];
+for(const [name,change,equal]of comparisonCases)test(`pre-import business comparison: ${name}`,async()=>{
+  const local=comparisonState(),cloud=comparisonState();change(local,cloud);const beforeLocal=clone(local),beforeCloud=clone(cloud);
+  const normalizedLocal=history.normalizeBusinessForComparison(local),normalizedCloud=history.normalizeBusinessForComparison(cloud);
+  assert.equal(history.canonical(normalizedLocal)===history.canonical(normalizedCloud),equal);
+  assert.deepEqual(local,beforeLocal);assert.deepEqual(cloud,beforeCloud);
+  let writes=0;
+  const api=history.createApi({state:()=>clone(local),readCloud:async()=>clone(cloud),loadedRevision:()=>7,canWrite:()=>true,backup:async()=>{writes++;},apply:()=>{writes++;},save:async()=>{writes++;}});
+  const result=await api.submit("maintenance",[],{confirmed:true,reviewedPreview:[]});
+  assert.equal(result.error,equal?"":"Local business state differs from cloud. Save/reload and generate a fresh preview before importing.");assert.equal(writes,0);
+});
+
+for(const [name,change,equal]of comparisonCases)test(`post-backup business comparison: ${name}`,async()=>{
+  const local=comparisonState(),duringBackup=clone(local);change(duringBackup,local);const cloud=clone(local),beforeLocal=clone(local),beforeCloud=clone(cloud);
+  const rows=[{import_event_id:"comparison-fixture",event_date:"2025-01-03",route:"calendar_only",event_name:"Inspect fixture",exact_existing_task:"",calendar_mode:"one_time",mark_completed:true,labor_minutes:5}];
+  let reads=0,backups=0,applies=0,saves=0;
+  const api=history.createApi({state:()=>clone(++reads===2?duringBackup:local),readCloud:async()=>clone(cloud),loadedRevision:()=>7,canWrite:()=>true,scan:()=>({contaminated:false}),backup:async snapshot=>{assert.deepEqual(snapshot,cloud);backups++;return true;},apply:(key,value)=>{local[key]=clone(value);applies++;},save:async()=>{for(const key of ["maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2"])cloud[key]=clone(local[key]);saves++;return{saved:true,stateWriteCompleted:true,stateWriteAttempted:true};}});
+  const plan=history.preview("maintenance",rows,cloud),result=await api.submit("maintenance",rows,{confirmed:true,reviewedPreview:plan});
+  assert.equal(backups,1);assert.equal(result.saved,equal);assert.equal(result.error,equal?"":"Local state changed during backup; review a fresh preview.");assert.equal(saves,equal?1:0);assert.equal(applies,equal?3:0);
+  assert.deepEqual(local.tasksAsReq,beforeLocal.tasksAsReq);assert.deepEqual(cloud.tasksAsReq,beforeCloud.tasksAsReq);
+  if(!equal){assert.deepEqual(local,beforeLocal);assert.deepEqual(cloud,beforeCloud);}
+});
