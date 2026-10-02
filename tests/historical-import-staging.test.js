@@ -7,7 +7,7 @@ async function workbookRows(){return workbooks.parseFile("purchase",fixtures.fil
 function browserHarness(options={}){
   const window={OMAXHistoricalImport:history,APP_SCHEMA:1,__loadedCloudRevisionForSaveGuard:7,inventory:[{id:"keep",qtyNew:9}],receiptTrackerWeeks:[],totalHistory:[],tasksInterval:[],tasksAsReq:[],cuttingJobs:[],completedCuttingJobs:[],opportunityRollups:[],orderRequests:[],orderRequestTab:"open",garnetCleanings:[],dailyCutHours:[],maintenanceTasksV2:[],maintenanceCalendarInstancesV2:[],maintenanceOccurrencesV2:[],jobFolders:[],weeklyCostReports:[],deletedItems:[],appConfig:{keep:true},settingsFolders:[],pumpEff:{entries:[],notes:[]}};
   let cloud,saves=0,suspends=0,applies=0;
-  const context=vm.createContext({window,console,APP_SCHEMA:1,lastAppliedCloudRevision:7,FB:{user:{uid:"fixture"}},structuredClone,cloneStructured:clone,normalizeSettingsFolders:clone,normalizeInventoryMaterials:()=>({}),normalizeAppConfig:clone,getCloudSyncClientId:()=>"fixture",snapshotJobFolders:()=>[],canWriteCloud:()=>!suspends,scanAuthoritativeCutFileContent:firewall.scanCuttingFileContent,buildDataIntegritySummary:()=>({}),exportJsonDownload:()=>true,renderRecoveryDiagnosticsPanel:()=>{suspends++;},readCurrentCloudStateReadOnly:async()=>clone(cloud),saveCloudNow:async saveOptions=>{saves++;assert.equal(saveOptions.expectedRevision,7);if(options.save)return options.save(window);cloud=clone(context.state());cloud.syncMeta.rev=8;window.__loadedCloudRevisionForSaveGuard=8;return{saved:true,stateWriteAttempted:true,stateWriteCompleted:true};}});
+  const context=vm.createContext({window,console,APP_SCHEMA:1,lastAppliedCloudRevision:7,FB:{user:{uid:"fixture"}},structuredClone,cloneStructured:clone,normalizeSettingsFolders:clone,normalizeInventoryMaterials:()=>({}),normalizeAppConfig:clone,getCloudSyncClientId:()=>"fixture",snapshotJobFolders:()=>[],canWriteCloud:()=>!suspends,scanAuthoritativeCutFileContent:firewall.scanCuttingFileContent,buildDataIntegritySummary:()=>({}),exportJsonDownload:()=>true,renderRecoveryDiagnosticsPanel:()=>{suspends++;},readCurrentCloudStateReadOnly:async()=>clone(cloud),saveCloudNow:async saveOptions=>{saves++;assert.equal(saveOptions.expectedRevision,7);if(options.save)return options.save(window);cloud=clone(context.state());options.stored?.(cloud);cloud.syncMeta.rev=8;window.__loadedCloudRevisionForSaveGuard=8;return{saved:true,stateWriteAttempted:true,stateWriteCompleted:true};}});
   const fields=["totalHistory","tasksInterval","tasksAsReq","inventory","cuttingJobs","completedCuttingJobs","opportunityRollups","orderRequests","orderRequestTab","garnetCleanings","dailyCutHours","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","jobFolders","weeklyCostReports","receiptTrackerWeeks","deletedItems","appConfig"];
   vm.runInContext(fields.map(key=>`let ${key}=window.${key};`).join("\n"),context);
   for(const [start,end]of [["const LARGE_CONTENT_KEY_PATTERN","function estimateTopLevelFieldSizes"],["function compactStateForStorage","function buildEmergencyBackup"],["function refreshGlobalCollections","/* ================ Jobs editing"],["function cloneFolders","function foldersEqual"],["function snapshotSettingsFolders","window.defaultAsReqTasks"],["function snapshotState(options","function scanAuthoritativeCutFileContent"]])vm.runInContext(core.slice(core.indexOf(start),core.indexOf(end,core.indexOf(start))),context);
@@ -71,6 +71,41 @@ test("partial multi-destination maintenance apply failure restores all pre-save 
 test("protected isolation check still rejects unrelated drift even when the staged destination matches",async()=>{
   const rows=await workbookRows(),h=browserHarness({apply:(window,key,count)=>{if(count===1)window.inventory[0].qtyNew=11;}}),result=await h.submit("purchase",rows);
   assert.match(result.error,/Unrelated protected fields changed during staging/);assert.equal(result.stagingMismatch,undefined);assert.equal(h.saves,0);assert.equal(h.window.receiptTrackerWeeks.length,0);assert.equal(h.window.inventory[0].qtyNew,11);assert.equal(h.suspends,1);
+});
+
+test("post-save maintenance normalization preserves nonempty parser evidence and does not mutate inputs",()=>{
+  const missing=[{importProvenance:{sourceRecord:{event_name:"Inspect fixture"}}}],empty=clone(missing),undefinedMarker=clone(missing),nonempty=clone(missing);
+  empty[0].importProvenance.sourceRecord.__recoveryProblems=[];undefinedMarker[0].importProvenance.sourceRecord.__recoveryProblems=undefined;nonempty[0].importProvenance.sourceRecord.__recoveryProblems=["Needs review"];
+  const originals=[missing,empty,undefinedMarker,nonempty].map(value=>clone(value)),normalized=[missing,empty,undefinedMarker,nonempty].map(value=>history.canonical(history.normalizeDestinationForVerification("maintenance",value)));
+  assert.equal(normalized[0],normalized[1]);assert.equal(normalized[0],normalized[2]);assert.notEqual(normalized[0],normalized[3]);assert.deepEqual([missing,empty,undefinedMarker,nonempty],originals);
+  assert.notEqual(history.canonical(history.normalizeDestinationForVerification("purchase",missing)),history.canonical(history.normalizeDestinationForVerification("purchase",empty)));
+});
+const completedImport=state=>state.maintenanceOccurrencesV2.find(row=>row.import_event_id==="post-save-fixture");
+for(const [name,sourceChange,stored,passes]of [
+  ["empty parser metadata compacted away",()=>{},cloud=>{delete completedImport(cloud).importProvenance.sourceRecord.__recoveryProblems;},true],
+  ["missing parser metadata restored as empty",row=>{delete row.__recoveryProblems;},cloud=>{completedImport(cloud).importProvenance.sourceRecord.__recoveryProblems=[];},true],
+  ["nonempty parser evidence",()=>{},cloud=>{completedImport(cloud).importProvenance.sourceRecord.__recoveryProblems=["Changed evidence"];},false],
+  ["null parser metadata",()=>{},cloud=>{completedImport(cloud).importProvenance.sourceRecord.__recoveryProblems=null;},false],
+  ["changed import ID",()=>{},cloud=>{completedImport(cloud).import_event_id="wrong-id";},false],
+  ["changed hours",()=>{},cloud=>{completedImport(cloud).loggedHours++;},false],
+  ["changed date",()=>{},cloud=>{completedImport(cloud).effectiveDateISO="2025-01-04";},false],
+  ["changed cost",()=>{},cloud=>{completedImport(cloud).partsCostSnapshot++;},false],
+  ["changed source provenance",()=>{},cloud=>{completedImport(cloud).importProvenance.sourceRecord.event_name="Changed source";},false],
+  ["changed other parser metadata",()=>{},cloud=>{completedImport(cloud).importProvenance.sourceRecord.__sourceRowNumber++;},false],
+  ["missing imported completion",()=>{},cloud=>{cloud.maintenanceOccurrencesV2=cloud.maintenanceOccurrencesV2.filter(row=>!row.import_event_id);},false],
+  ["duplicate imported completion",()=>{},cloud=>{cloud.maintenanceOccurrencesV2.push(clone(completedImport(cloud)));},false],
+  ["unrelated protected drift",()=>{},cloud=>{cloud.inventory[0].qtyNew++;},false],
+  ["changed one-time instance",()=>{},cloud=>{cloud.maintenanceCalendarInstancesV2[0].repeatRule={enabled:true};},false],
+  ["missing scheduled lifecycle event",()=>{},cloud=>{cloud.maintenanceOccurrencesV2=cloud.maintenanceOccurrencesV2.filter(row=>row.eventType!=="scheduled");},false],
+  ["changed lifecycle link",()=>{},cloud=>{completedImport(cloud).rootOccurrenceId="wrong-root";},false]
+])test(`post-save maintenance verification: ${name}`,async()=>{
+  const rows=workbooks.adapt("maintenance",[{import_event_id:"post-save-fixture",event_date:"2025-01-03",route:"calendar_only",event_name:"Inspect fixture",exact_existing_task:"",calendar_mode:"one_time",mark_completed:true,labor_minutes:5,parts_cost_snapshot:3.1,__sourceRowNumber:2}]);sourceChange(rows[0]);
+  const h=browserHarness({stored}),result=await h.submit("maintenance",rows);
+  assert.equal(h.saves,1);assert.equal(result.saveCompleted,true);assert.equal(result.saved,passes);assert.equal(result.verificationCompleted,passes);assert.equal(result.indeterminate,!passes);assert.equal(h.suspends,passes?0:1);
+  if(passes){
+    assert.deepEqual(result.importedIds,["post-save-fixture"]);assert.equal(result.afterCount,1);assert.equal(h.cloud.maintenanceCalendarInstancesV2.length,1);assert.equal(h.cloud.maintenanceCalendarInstancesV2[0].instanceMode,"one_time");assert.equal(h.cloud.maintenanceCalendarInstancesV2[0].repeatRule,null);
+    assert.deepEqual(h.cloud.maintenanceOccurrencesV2.map(row=>row.eventType),["scheduled","completed"]);assert.deepEqual(completedImport(h.window).importProvenance.sourceRecord,rows[0]);assert.equal(h.cloud.maintenanceTasksV2.length,1);
+  }else assert.match(result.error,/exact cloud IDs\/counts\/protected-field verification/);
 });
 
 const comparisonState=()=>({syncMeta:{rev:7},tasksAsReq:[{id:"salt",name:"Refill Salt",price:10}],tasksInterval:[],inventory:[{id:"stock",qtyNew:9}],weeklyCostReports:[{weekStartISO:"2026-09-28",weekKey:"2026-W40",totalCost:100,jobs:[{id:"job",cost:100,generatedAtISO:"nested-value"}],generatedAtISO:"2026-10-02T14:28:36.836Z"}],maintenanceTasksV2:[],maintenanceCalendarInstancesV2:[],maintenanceOccurrencesV2:[]});

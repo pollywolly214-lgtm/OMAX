@@ -95,6 +95,15 @@
     return normalized;
   }
   const unrelated=(kind,state)=>Object.fromEntries(Object.entries(business(state)).filter(([key])=>!targets(kind).includes(key)));
+  function normalizeDestinationForVerification(kind,destination){
+    if(kind!=="maintenance"||!Array.isArray(destination))return destination;
+    return destination.map(record=>{
+      const source=record?.importProvenance?.sourceRecord;
+      if(!source||typeof source!=="object"||Array.isArray(source)||!(source.__recoveryProblems===undefined||(Array.isArray(source.__recoveryProblems)&&source.__recoveryProblems.length===0)))return record;
+      const sourceRecord={...source};delete sourceRecord.__recoveryProblems;
+      return{...record,importProvenance:{...record.importProvenance,sourceRecord}};
+    });
+  }
   function diagnosticValue(value,path){
     if(value===undefined)return "(missing)";
     if(Array.isArray(value))return `[array length ${value.length}]`;
@@ -181,7 +190,7 @@
         const verified=await env.readCloud();
         result.afterCount=count(kind,verified||{});
         const expectedIds=plannedIds;
-        if(result.afterCount!==result.beforeCount+ready.length||destinations.some(key=>canonical(verified?.[key])!==canonical(next[key]))||canonical(unrelated(kind,verified||{}))!==canonical(unrelated(kind,cloud))||expectedIds.some(id=>records(kind,verified||{}).filter(item=>(kind==="task_setup"?item.id:item.import_event_id)===id).length!==1))throw Error("Committed save did not pass exact cloud IDs/counts/protected-field verification; review before retrying.");
+        if(result.afterCount!==result.beforeCount+ready.length||destinations.some(key=>canonical(normalizeDestinationForVerification(kind,verified?.[key]))!==canonical(normalizeDestinationForVerification(kind,next[key])))||canonical(unrelated(kind,verified||{}))!==canonical(unrelated(kind,cloud))||expectedIds.some(id=>records(kind,verified||{}).filter(item=>(kind==="task_setup"?item.id:item.import_event_id)===id).length!==1))throw Error("Committed save did not pass exact cloud IDs/counts/protected-field verification; review before retrying.");
         if(kind==="task_setup"){
           const preflight=taskSetup.preview(verified);
           if(ready.some(row=>preflight.find(item=>item.raw.name===row.raw.name)?.status!==taskSetup.STATUS.present))throw Error("Created task exact-name preflight failed; review before retrying.");
@@ -218,5 +227,5 @@
       }finally{busy=false;}
     }});
   }
-  return Object.freeze({STATUS,identity,preview,append,weekFor,canonical,normalizeBusinessForComparison,createApi});
+  return Object.freeze({STATUS,identity,preview,append,weekFor,canonical,normalizeBusinessForComparison,normalizeDestinationForVerification,createApi});
 });
