@@ -9218,7 +9218,7 @@ function ensureMaintenanceTaskModalAPI(){
         createdTask = task;
       } else {
         const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
-        const task = Object.assign(base, { mode:"asreq", condition, variant: "template", templateId: id });
+        const task = window.OMAXMaintenanceRecoveryTaskSetup.buildAsRequiredTask(base, condition);
         (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(task);
         createdTask = task;
       }
@@ -10889,6 +10889,7 @@ function renderSettings(){
   const contextMenu = document.getElementById("maintenanceContextMenu");
   wireMaintenanceHistoryImportTool(root);
   renderHistoricalReconciliationTool(root);
+  renderMaintenanceRecoveryTaskSetupTool(root);
   let contextTarget = null;
   let occurrenceNotesTaskId = null;
   let inventoryLinkTask = null;
@@ -11701,7 +11702,7 @@ function renderSettings(){
       createdTask = creation.task;
     }else{
       const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
-      const task = Object.assign(base, { mode:"asreq", condition, variant: "template", templateId: id });
+      const task = window.OMAXMaintenanceRecoveryTaskSetup.buildAsRequiredTask(base, condition);
       const creation = typeof window.createMaintenanceTaskOnce === "function"
         ? window.createMaintenanceTaskOnce(actionToken, task, ()=>{
             (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(task);
