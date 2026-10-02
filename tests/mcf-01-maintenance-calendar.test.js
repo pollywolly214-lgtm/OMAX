@@ -3,6 +3,53 @@ const test=require("node:test"),assert=require("node:assert/strict"),fs=require(
 const integrity=require("../js/maintenanceCalendarIntegrity"),maintenance=require("../js/maintenanceRecoveryImport"),history=require("../js/historicalImport"),atomic=require("../js/atomicPersistence"),firewall=require("../js/cuttingFileContentFirewall");
 const clone=value=>structuredClone(value),calendar=fs.readFileSync("js/calendar.js","utf8"),renderer=fs.readFileSync("js/renderers.js","utf8"),core=fs.readFileSync("js/core.js","utf8");
 const date="2026-06-16",stamp="2026-10-02T00:00:00Z";
+test("one-time bubble creates and reuses one node, opens without throwing and preserves immediate/delayed hiding",()=>{
+  const nodes=[],timers=new Map();let timerId=0;
+  const document={
+    activeElement:null,
+    body:{appendChild:node=>{nodes.push(node);}},
+    getElementById:id=>nodes.find(node=>node.id===id)||null,
+    createElement:tag=>({
+      tagName:tag,style:{},className:"",listeners:{},hovered:false,
+      classList:{add(){}},querySelector:()=>null,
+      addEventListener(type,listener){this.listeners[type]=listener;},
+      matches(){return this.hovered;},contains(element){return element===this;},
+      remove(){nodes.splice(nodes.indexOf(this),1);}
+    })
+  };
+  const window={scrollX:10,scrollY:20,__calendarV2OneTimeLookup:{root:{name:"Mixing tube rotation",dateISO:date,status:"completed",note:"",hours:5/60}}};
+  const before=clone(window),anchor={getBoundingClientRect:()=>({left:30,bottom:40})};
+  const context=vm.createContext({
+    document,window,parseDateLocal:()=>({toDateString:()=>date}),escapeHtml:String,
+    clearTimeout:id=>{timers.delete(id);},
+    setTimeout:(callback,delay)=>{assert.equal(delay,180);timers.set(++timerId,callback);return timerId;}
+  });
+  vm.runInContext("let bubbleTimer=null;"+calendar.slice(calendar.indexOf("function ensureBubble"),calendar.indexOf("function closeV2OneTimePanel")),context);
+  const open=()=>context.showV2OneTimeBubble("root",anchor);
+  assert.doesNotThrow(open);
+  const bubble=document.getElementById("bubble");
+  assert.ok(bubble);assert.equal(bubble.tagName,"div");assert.equal(bubble.className,"bubble");
+  assert.match(bubble.innerHTML,/Mixing tube rotation/);assert.match(bubble.innerHTML,/Completed/);
+  assert.equal(bubble.style.left,"40px");assert.equal(bubble.style.top,"68px");
+  for(let count=0;count<5;count++)assert.doesNotThrow(open);
+  assert.equal(document.getElementById("bubble"),bubble);assert.equal(nodes.length,1);
+
+  bubble.listeners.mouseleave();assert.equal(timers.size,1);
+  bubble.listeners.mouseenter();assert.equal(timers.size,0);
+  const fireTimer=()=>{const [id,callback]=timers.entries().next().value;timers.delete(id);callback();};
+  bubble.hovered=true;context.hideBubbleSoon();fireTimer();
+  assert.equal(document.getElementById("bubble"),bubble);assert.equal(timers.size,1);
+  bubble.hovered=false;document.activeElement=bubble;fireTimer();
+  assert.equal(document.getElementById("bubble"),bubble);assert.equal(timers.size,1);
+  document.activeElement=null;fireTimer();
+  assert.equal(document.getElementById("bubble"),null);assert.equal(timers.size,0);
+
+  const existing=document.createElement("div");existing.id="bubble";existing.className="bubble";document.body.appendChild(existing);
+  assert.doesNotThrow(open);assert.equal(document.getElementById("bubble"),existing);assert.equal(nodes.length,1);
+  context.hideBubbleSoon();context.hideBubble();
+  assert.equal(document.getElementById("bubble"),null);assert.equal(nodes.length,0);assert.equal(timers.size,0);
+  assert.deepEqual(window,before);
+});
 function initial(){return{syncMeta:{rev:7},tasksAsReq:[],tasksInterval:[{id:"mixing",name:"Mixing tube rotation",mode:"interval",price:10,downtimeHours:5/60,recurrence:{enabled:true,every:30},completedDates:["2026-01-01"],manualHistory:[{id:"keep"}]}],inventory:[{id:"stock",qtyNew:9}],receiptTrackerWeeks:[{key:"keep",rows:[{cost:80}]}],weeklyCostReports:[],totalHistory:[{hours:100}],pumpEff:{entries:[]},maintenanceTasksV2:[],maintenanceCalendarInstancesV2:[],maintenanceOccurrencesV2:[]};}
 function recovery(){
   const state=initial(),source=[{import_event_id:"recovery-1",event_date:date,route:"existing_task",exact_existing_task:"Mixing tube rotation",event_name:"Mixing tube rotation",calendar_mode:"one_time",mark_completed:true,labor_minutes:5}];

@@ -212,6 +212,17 @@ if (typeof window !== "undefined"){
   window.cancelCalendarHoursEditing = cancelCalendarHoursEditing;
   window.commitCalendarHoursEditing = commitCalendarHoursEditing;
 }
+function ensureBubble(){
+  const existing = document.getElementById("bubble");
+  if (existing) return existing;
+  const b = document.createElement("div");
+  b.id = "bubble";
+  b.className = "bubble";
+  b.addEventListener("mouseenter", ()=>clearTimeout(bubbleTimer));
+  b.addEventListener("mouseleave", hideBubbleSoon);
+  document.body.appendChild(b);
+  return b;
+}
 function hideBubble(){
   if (bubbleTimer){
     clearTimeout(bubbleTimer);
