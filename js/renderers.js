@@ -18284,7 +18284,7 @@ function computeCostModel(){
                   ? effHoursRaw
                   : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0))))));
 
-      const projectNumber = String(job?.projectNumber || "").replace(/[^0-9]/g, "").slice(0, 8);
+      const projectNumber = window.CuttingJobHistory.normalizeProjectKey(job?.projectNumber);
       const categoryDisplay = projectNumber
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
@@ -20447,12 +20447,14 @@ function renderJobs(){
   const flowHidePreviews = content.querySelector("#jobFlowHidePreviews");
   const flowDialog = flowBackdrop?.querySelector(".job-flow-modal") || null;
 
-  const normalizeProjectNumber = (value)=> String(value || "").replace(/[^0-9]/g, "").slice(0, 8);
+  const normalizeProjectNumber = (value)=> window.CuttingJobHistory.normalizeProjectKey(value);
   const normalizeCategoryKey = (value)=> String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const categoryProjectMap = new Map([["colin","1208"],["lady bird","1241"],["brazos","1247"],["cable trough at t","1249"],["cable trough att","1249"],["at t","1249"],["atm","1251"],["alamo","0000"],["all jobs","0000"]]);
+  const categoryProjectMap = new Map([["colin","1208"],["lady bird","1241"],["brazos","1247"],["cable trough at t","1249"],["cable trough att","1249"],["at t","1249"],["atm","1251"],["alamo","ALAMO"],["company improvements","0000"],["undisclosed project","XXXX"]]);
   const categoryProjectNumber = (name)=>{
     const key = normalizeCategoryKey(name);
     if (!key) return "";
+    const embedded=window.CuttingJobHistory.leadingProject(name)||window.CuttingJobHistory.reversedProject(name);
+    if(embedded)return embedded;
     if (categoryProjectMap.has(key)) return categoryProjectMap.get(key) || "";
     for (const [alias, project] of categoryProjectMap.entries()){ if (key.includes(alias)) return project; }
     return "";
@@ -22735,7 +22737,7 @@ function renderJobs(){
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
     const projectNumberRaw = document.getElementById("jobProjectNumber")?.value ?? "";
-    const projectNumber = String(projectNumberRaw).replace(/[^0-9]/g, "").slice(0, 8);
+    const projectNumber = window.CuttingJobHistory.normalizeProjectKey(projectNumberRaw);
     const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
     const priorityNum = Number(priorityRaw);
     const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
@@ -23802,6 +23804,9 @@ function renderJobs(){
       const j  = cuttingJobs.find(x => String(x?.id) === idStr); if (!j) return;
       const filesBeforeSave = Array.isArray(j.files) ? j.files.slice() : [];
       const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${idStr}"]`)?.value;
+      const projectRaw=String(qs("projectNumber")||"").trim();
+      const projectInput=window.CuttingJobHistory.normalizeProjectKey(projectRaw);
+      if(projectRaw&&!projectInput){toast("Project # must be 1-8 digits, ALAMO, or XXXX.");return;}
       const chargeRaw = qs("chargeRate");
       const chargeVal = chargeRaw === "" || chargeRaw == null ? null : Number(chargeRaw);
       if (chargeVal != null && (!Number.isFinite(chargeVal) || chargeVal < 0)){ toast("Enter a valid charge rate."); return; }
@@ -23824,7 +23829,6 @@ function renderJobs(){
       j.materialQty = Math.max(0, Number(qs("materialQty")) || 0);
       j.startISO = qs("startISO") || j.startISO;
       j.dueISO   = qs("dueISO")   || j.dueISO;
-      const projectInput = String(qs("projectNumber") || "").replace(/[^0-9]/g, "").slice(0, 8);
       if (projectInput) j.projectNumber = projectInput;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${idStr}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;
