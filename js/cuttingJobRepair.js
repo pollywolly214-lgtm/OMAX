@@ -7,8 +7,7 @@
   "use strict";
   const PROTECTED_KEYS=["purchases","inventory","inventoryFolders","inventoryMaterials","receiptTrackerWeeks","orderRequests","dailyCutHours","totalHistory","garnetCleanings","pumpEff","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","dashboardLayout","costLayout","jobLayout","deletedItems"];
   const clone=value=>typeof structuredClone==="function"?structuredClone(value):JSON.parse(JSON.stringify(value));
-  const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b),key=value=>String(value||"").trim().toLocaleLowerCase();
-  const exact=(folders,name)=>folders.filter(folder=>key(folder?.name)===key(name));
+  const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   const fingerprint=value=>{const text=JSON.stringify(value),input=typeof text==="string"?text:"undefined";let hash=2166136261;for(let index=0;index<input.length;index++){hash^=input.charCodeAt(index);hash=Math.imul(hash,16777619);}return `fnv1a32:${(hash>>>0).toString(16).padStart(8,"0")}:${input.length}`;};
   const stateSnapshot=state=>({cuttingJobs:clone(state?.cuttingJobs||[]),completedCuttingJobs:clone(state?.completedCuttingJobs||[]),...Object.fromEntries(PROTECTED_KEYS.map(name=>[name,clone(state?.[name])]))});
   const fingerprints=(state,folders,baseline)=>({jobFolders:fingerprint(folders||[]),cuttingJobs:fingerprint(state?.cuttingJobs||[]),completedCuttingJobs:fingerprint(state?.completedCuttingJobs||[]),authoritativeBaseline:fingerprint(baseline),protectedBusinessCollections:fingerprint(Object.fromEntries(PROTECTED_KEYS.map(name=>[name,state?.[name]])))});
@@ -17,14 +16,14 @@
     const nextFolders=clone(folders||[]),created=[],renamed=[],reused=[];
     if(!nextFolders.some(folder=>String(folder?.id)===history.ROOT_ID))nextFolders.unshift({id:history.ROOT_ID,name:"All Jobs",parent:null,order:1});
     for(const[project,name]of history.PROJECT_CATEGORIES){
-      const matches=exact(nextFolders,name);if(matches.length>1)return{ok:false,error:`Duplicate canonical category ${name}.`};
-      let folder=matches[0];
-      if(!folder){const reversed=nextFolders.filter(item=>history.reversedProject(item?.name)===project);if(reversed.length>1)return{ok:false,error:`Ambiguous reversed category for ${project}.`};folder=reversed[0];if(folder){renamed.push({id:String(folder.id),from:folder.name,to:name});folder.name=name;}}
-      if(!folder){let id=`job_project_${project.toLocaleLowerCase()}`,suffix=1;while(nextFolders.some(item=>String(item.id)===id))id=`job_project_${project.toLocaleLowerCase()}_${++suffix}`;folder={id,name,parent:history.ROOT_ID,order:nextFolders.length+1};nextFolders.push(folder);created.push(String(id));}else reused.push(String(folder.id));
-      folder.parent=history.ROOT_ID;
+      const resolution=history.resolveProjectCategory(project,nextFolders,undefined,[...(state?.cuttingJobs||[]),...(state?.completedCuttingJobs||[])]);
+      if(["conflict","ambiguous"].includes(resolution.status))return{ok:false,error:resolution.reason};
+      let folder=resolution.folder;
+      if(resolution.status==="rename"){renamed.push(resolution.rename);folder.name=name;}
+      if(!folder){let id="job_project_"+project.toLocaleLowerCase(),suffix=1;while(nextFolders.some(item=>String(item.id)===id))id="job_project_"+project.toLocaleLowerCase()+"_"+(++suffix);folder={id,name,parent:history.ROOT_ID,order:nextFolders.length+1};nextFolders.push(folder);created.push(String(id));}else reused.push(String(folder.id));
     }
     const nextActive=clone(state?.cuttingJobs||[]),nextCompleted=clone(state?.completedCuttingJobs||[]),assignments=[];
-    for(const job of [...nextActive,...nextCompleted]){const resolution=history.resolveProjectCategory(job.projectNumber,nextFolders);if(resolution.status!=="matched")return{ok:false,error:resolution.reason};const from=job.cat??null,to=String(resolution.folder.id);job.cat=to;assignments.push({id:String(job.id),projectNumber:String(job.projectNumber),from,to});}
+    for(const job of [...nextActive,...nextCompleted]){const resolution=history.resolveProjectCategory(job.projectNumber,nextFolders,undefined,[...nextActive,...nextCompleted]);if(resolution.status!=="matched")return{ok:false,error:resolution.reason};const from=job.cat??null,to=String(resolution.folder.id);job.cat=to;assignments.push({id:String(job.id),projectNumber:String(job.projectNumber),from,to});}
     const resequence=history.resequence(nextActive,nextCompleted);
     return{ok:true,nextFolders,nextActive,nextCompleted,created,renamed,reused,assignments,resequence};
   }

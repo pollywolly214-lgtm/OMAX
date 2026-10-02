@@ -13,6 +13,7 @@ The root cause was a project-only resolver using a closed category registry, ign
 | Project key | Confirmed name |
 | --- | --- |
 | 0000 | Company Improvements |
+| XXXX | Undisclosed Project |
 | 1178 | Comal |
 | 1208 | Collin |
 | 1237 | Kicaster |
@@ -25,13 +26,13 @@ The root cause was a project-only resolver using a closed category registry, ign
 | 1254 | Blanco |
 | 1261 | Fredericksburg Barricades |
 
-ALAMO remains supported as `ALAMO`, without a numeric substitute. `1111` has no confirmed mapping. It may use a consistent independent legacy name, but cannot claim Company Improvements. Import does not rename or migrate historical folders or change existing jobs' project/category fields. Existing chronological resequencing behavior is preserved.
+ALAMO remains supported as `ALAMO`, without a numeric substitute. `1111` has no confirmed mapping. It may use a consistent independent legacy name, but cannot claim Company Improvements. Historical 1111 jobs and folders appear in read-only audit diagnostics for review and are never silently converted to XXXX. Reviewed imports can now rename uniquely owned obsolete folder names, preserving existing jobs' project/category fields. Existing chronological resequencing behavior is preserved.
 
 `0000` stays exactly `"0000"`. Only `"0"` with unambiguous Company Improvements source evidence (plain name, `0000 Company Improvements`, or `Company Improvements 0000`) becomes `"0000"`, with a visible preview warning. Other numbers are never padded.
 
 ## Resolution and conflicts
 
-The focused resolver validates the source pair and inspects existing folder evidence: optional `projectNumber`, a leading project key, confirmed canonical/legacy names, supported reversed names such as `ATM 1251`, and existing jobs referencing that folder. A unique compatible legacy name is reusable without migration. Existing optional metadata survives native folder normalization as a string; it is not added to every old folder or required on any folder.
+The focused resolver validates the source pair and inspects existing folder evidence: optional `projectNumber`, a leading project key, confirmed canonical/legacy names, supported reversed names such as `ATM 1251`, and existing jobs referencing that folder. A unique compatible name is reusable. A uniquely owned obsolete name is a reviewed name-only rename candidate. Native normalization retains arbitrary folder metadata, including null projectNumber; non-null projectNumber remains a string. Metadata is not added to every old folder or required on every folder.
 
 Conflicting metadata, prefix, known name, or existing job ownership blocks the row. Multiple candidate folders or duplicate folder IDs block rather than picking one. For example, `1254 / ATM` and `1242 / Blanco` block. A legacy folder already used by another project cannot be silently reused.
 
@@ -41,7 +42,7 @@ Known keys can infer their confirmed name when the category is blank. Unknown ke
 
 ## Creation, preview, and idempotency
 
-Preview shows Project, Category, and Existing / Will create / Conflict or Review status. Preview never creates a folder. Only ready rows contribute to the creation plan; a project mentioned solely by rows with `needs_review`, RC50, thickness, dimensions, or other blockers creates nothing.
+Preview shows Project, Category, and Existing / Will create / Rename existing / Conflict or Review status. Preview never creates a folder. Only ready rows contribute to the creation plan; a project mentioned solely by rows with `needs_review`, RC50, thickness, dimensions, or other blockers creates nothing.
 
 After the existing reviewed final confirmation and successful backup, missing categories use the existing `addJobFolder` adapter: native `genId`, `jobs_root` parent, next native order, and native optional color behavior. New names are `<project_number> <category name>` using confirmed spelling for known keys; an already supplied number is stripped before composing the name. ALAMO stays `ALAMO`. No parallel category model is introduced.
 
@@ -53,7 +54,7 @@ The authenticated fresh authoritative baseline, full backup, reviewed confirmati
 
 Folders and both job arrays are staged in the same import/save. Immutable copies of the staged folders and jobs are passed to cloud read-back verification; folders are now verified exactly alongside jobs, unique source IDs, and every unrelated cloud field.
 
-On a definite rejection, selective rollback removes owned staged jobs, restores owned sequence changes, and removes unchanged, unreferenced import-created folders. Without concurrent edits this restores the intended arrays exactly. Concurrent edits/additions are preserved; changed or referenced import evidence suspends writes for review. Indeterminate or thrown saves and failed committed read-back verification retain all evidence, suspend writes, and never retry automatically. Refresh and read verification are required before proceeding.
+On a definite rejection, selective rollback removes owned staged jobs, restores owned sequence changes, restores the original name on an owned renamed folder, and removes unchanged, unreferenced import-created folders. Concurrent folder metadata edits survive the name-only rollback; a changed name or project ownership retains evidence and suspends writes. Without concurrent edits this restores the intended arrays exactly. Concurrent edits/additions are preserved; changed or referenced import evidence suspends writes for review. Indeterminate or thrown saves and failed committed read-back verification retain all evidence, suspend writes, and never retry automatically. Refresh and read verification are required before proceeding.
 
 Material validation/calculation and existing review blockers were not changed. Maintenance, purchases, inventory, receipt history, orders, pump data, machine hours, layouts, cutting-file attachments/cache, Firebase rules, and Storage rules were not changed. No material definitions are created.
 
@@ -124,3 +125,41 @@ rg -n --max-columns 180 --max-columns-preview 'cuttingJobImportConfirm|prepareCu
 Operator Vercel verification remains necessary in the shop's actual browser/download-policy environment: preview the workbook, review the plan, make one final confirmation click with DevTools closed, verify the backup appears in Downloads, and inspect the visible completion/error state. Do not bypass a stale baseline or a suspended/indeterminate state. No production Firebase import was performed during this task.
 
 CJI-02A verification on October 2, 2026: six syntax commands PASS; cutting importer 24/24 PASS; history compatibility 15/15 PASS; combined backup/project/category/selective-rollback/atomic suite 79/79 PASS (including 17 backup/action cases); recovery suite 23/23 PASS. Total Node/DOM: 141 tests, zero failures. Actual Edge: 10/10 scenarios PASS, zero failures. Diff checks and targeted handler/download searches PASS. Browser result JSON and downloaded fixture backups are retained under the ignored local `artifacts/cji-02a/` directory.
+
+## CJI-02B: legacy folder adoption and special projects
+
+Continued on the same branch and PR #490. Before editing, verified branch `cutting-import-project-categories`, HEAD `ca8c6bd7a7808b1aabfa339f8934bb8b09abfdb2`, and a clean working tree. No package.json or AGENTS.md exists in this checkout.
+
+The reported blocker came from treating a display-name mismatch as a project-identity conflict. The repair planner also used a separate exact/reversed-name lookup. Both paths now use the shared ownership resolver. `0000` is Company Improvements; `XXXX` is Undisclosed Project; `1111` has no Company Improvements mapping and no automatic conversion. Validation accepts only 1–8 digits, ALAMO, and XXXX. Add/edit inputs, job labels, cost displays and flow-chart project labels preserve explicit special keys rather than stripping them to digits. Default folders contain only the All Jobs root; no obsolete semantic seed remains.
+
+The supplied cloud evidence was not fetched from production: one `job_project_0000` folder named `0000 Undisclosed Project`, null project metadata, and 11 referencing jobs whose projectNumber is `"0000"`. Deterministic fixtures reproduce this shape. The reviewed plan proposes **Rename existing**, from `0000 Undisclosed Project` to `0000 Company Improvements`, reusing `job_project_0000`. Staging changes only the name, preserving parent, order, color, null projectNumber and arbitrary nested metadata. No second 0000 category is created. Existing job IDs, projectNumber and cat fields remain unchanged; existing chronological resequencing behavior is retained.
+
+Rename requires a unique folder with project ownership proven by matching explicit metadata, an embedded project code, or matching referencing jobs. Every linked job must have the matching nonblank project key. Contradicting metadata, crossed known names, conflicting or missing linked project identity, duplicate folder IDs, and multiple project claimants block. The exact obsolete spelling `0000 Undisclosed Project` overrides only weak display-name inference of XXXX; it never overrides explicit or linked ownership. It cannot be adopted as XXXX. An unrelated folder with no evidence of the requested project is not a rename candidate. The audit exposes historical 1111 folder/job IDs and a visible review warning, without changing them.
+
+The category plan deduplicates ready rows into existing, new, and renamed categories. Preview warnings and final confirmation include the old/new name and preserved folder ID. Repair audit proposes the same rename and keeps all 11 assignments on their original folder ID. After success, another preview shows Existing with zero renames and zero new categories.
+
+The prepared backup, synchronous trusted final download, fresh authoritative baseline, full reviewed-preview identity, expected-revision CAS, protected-state comparison, exact cloud folder/job verification, and selective rollback remain enforced. Rename and job append are staged and verified together. Definite rejection restores the original folder name and removes the owned imported jobs; concurrent metadata survives. Indeterminate or thrown saves and committed verification mismatches retain evidence, suspend writes, and never retry automatically.
+
+Exact verification commands (all PASS on October 2, 2026):
+
+```powershell
+node --check js/core.js
+node --check js/cuttingJobHistory.js
+node --check js/cuttingJobImporter.js
+node --check js/cuttingJobRepair.js
+node --check js/renderers.js
+node --check js/views.js
+node --check scripts/cji-02a-browser.js
+node --check tests/cji-02b-legacy-category-adoption.test.js
+node --test tests/cji-02-project-category-import.test.js tests/cji-02a-backup-action.test.js tests/cji-02b-legacy-category-adoption.test.js tests/cutting-job-import.test.js tests/cji02-history-repair.test.js tests/import-selective-rollback.test.js tests/atomic-persistence.test.js tests/recovery-import.test.js
+node scripts/devsafe-server.js
+# In a second terminal:
+$env:OMAX_PLAYWRIGHT_PATH='C:\Users\Ryder\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright'
+node scripts/cji-02a-browser.js
+git diff --check
+rg -n '0000|1111|Undisclosed Project|Company Improvements|PROJECT_CATEGORIES|normalizeProjectPair|resolveProjectCategory|job_project_0000' js tests docs/cji-02-project-category-import.md
+```
+
+Node/DOM suites: project/category 34/34, backup/download 17/17, legacy adoption 29/29, cutting importer 24/24, repair/audit 15/15, selective rollback 15/15, atomic persistence 13/13, recovery 23/23: **170 cases, zero failures**. Node's aggregate runner reports 133 entries because two older script suites appear as one entry each; their internal 24 and 15 cases also pass.
+
+Actual Edge: **14/14 scenarios, zero failures**. The original ten CJI-02A scenarios still pass. Four additional scenarios verify successful legacy name-only adoption, definite CAS rejection with exact rollback, indeterminate retention/suspension, and independent XXXX creation while the legacy 0000 folder exists. Real downloads contain the original legacy folder name and 11 original jobs. Accepted downloads start in active trusted user activation; success verifies saved folder metadata and rerun idempotency. Runs use the full localhost app with disposable devsafe state and all external requests blocked, without DevTools. Results and backups remain in ignored `artifacts/cji-02a/`. No production Firebase import, npm command, new branch/PR, or merge was performed. Shop production/browser-policy acceptance remains untested.

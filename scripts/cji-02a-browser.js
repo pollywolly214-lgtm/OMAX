@@ -8,16 +8,21 @@ const row={import_event_id:"browser-cji02a",record_status:"active",job_name:"Bro
 const checks=[];
 async function main(){
   const browser=await chromium.launch({channel:"msedge",headless:true});
-  async function scenario(name,mode,verify){
+  async function scenario(name,mode,verify,{legacy=false,rows=[row]}={}){
     const context=await browser.newContext({acceptDownloads:true,serviceWorkers:"block"}),page=await context.newPage(),errors=[];
     page.setDefaultTimeout(30000);page.on("pageerror",error=>errors.push(error.message));
     await context.route("**/*",route=>new URL(route.request().url()).hostname==="localhost"?route.continue():route.abort());
     try{
       await page.goto("http://localhost:8000/?devsafe=1");await page.waitForFunction(()=>window.__initialAdoptComplete===true);
-      await page.evaluate(async()=>{
+      await page.evaluate(async legacy=>{
         if(!window.OMAXDevSafe.active)throw Error("Disposable backend required");
         location.hash="#/jobs";route();
         localStorage.setItem("job_material_pricing_v1",JSON.stringify({wasteFactor:10,materials:[{id:"steel",name:"Steel",density:.283,pricePerLb:.8}]}));
+        if(legacy){
+          setJobFolders([{id:"jobs_root",name:"All Jobs",parent:null,order:1},{id:"job_project_0000",name:"0000 Undisclosed Project",projectNumber:null,parent:"jobs_root",order:17,color:"#ABCDEF",custom:{owner:"shop",flags:[1,2]}}]);
+          window.cuttingJobs=Array.from({length:11},(_,i)=>({id:"old-"+i,name:"Original cut "+i,projectNumber:"0000",cat:"job_project_0000",cutNumber:"C"+String(i+1).padStart(3,"0"),startISO:"2020-01-01",files:[]}));
+          cuttingJobs=window.cuttingJobs;
+        }
         const saved=await saveCloudNow();if(!saved.saved)throw Error(JSON.stringify(saved));
         window.__cjiBefore=await readCurrentCloudStateReadOnly();window.__cjiTrace=[];window.__cjiSaves=0;
         window.__cjiDone=new Promise(resolve=>window.__cjiResolveDone=resolve);
@@ -47,13 +52,14 @@ async function main(){
           window.__cjiSaves++;window.__cjiTrace.push({stage:"save",revision:options?.expectedRevision});
           if(window.__cjiSaveGate)await new Promise(resolve=>{window.__cjiReleaseSave=resolve;window.__cjiResolveSaveStarted();});
           if(window.__cjiIndeterminate)return{saved:false,stateWriteAttempted:true,stateWriteCompleted:false,indeterminate:true};
+          if(window.__cjiDefiniteFailure)return{saved:false,stateWriteAttempted:true,definiteFailure:true,error:"Fixture CAS rejection"};
           return save(options);
         };
-      });
+      },legacy);
       if(mode==="poller")await page.evaluate(()=>{window.__unrelatedPoll=setInterval(()=>{document.getElementById("cuttingJobImportStatus").textContent;},10);});
       if(mode==="observer")await page.evaluate(()=>{window.__unrelatedObserver=new MutationObserver(()=>{document.getElementById("cuttingJobImportStatus").textContent;});window.__unrelatedObserver.observe(document.getElementById("cuttingJobImportStatus"),{childList:true,subtree:true});});
       await page.evaluate(()=>openReviewedCuttingJobImporter());
-      await page.locator("#cuttingJobImportFile").setInputFiles({name:"fixture.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify([row]))});
+      await page.locator("#cuttingJobImportFile").setInputFiles({name:"fixture.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(rows))});
       await page.locator("#cuttingJobImportPreview").click();await page.waitForFunction(()=>!document.getElementById("cuttingJobImportPreview").disabled);
       assert.equal(await page.locator("#cuttingJobImportStatus").textContent().then(text=>text.startsWith("Import stopped")),false,await page.locator("#cuttingJobImportStatus").textContent());
       await page.locator("#cuttingJobImportReviewed").check();assert.equal(await page.locator("#cuttingJobImportRun").isEnabled(),true);
@@ -77,6 +83,40 @@ async function main(){
     assert.deepEqual(unrelated(result.cloud),unrelated(result.before));return result;
   };
   try{
+    const legacyRows=[{...row,project_number:"0000",category:"Company Improvements"}];
+    for(const outcome of ["success","definite failure","indeterminate"]){
+      await scenario("legacy 0000 name-only adoption: "+outcome,"none",async page=>{
+        assert.match(await page.locator("#cuttingJobImportRows").textContent(),/Rename existing/);
+        assert.match(await page.locator("#cuttingJobImportConfirmMessage").textContent(),/job_project_0000/);
+        const audit=await page.evaluate(()=>auditCuttingJobHistoryRepair());
+        assert.equal(audit.blockingError,"");assert.deepEqual(audit.repairPlan.renamed,[{id:"job_project_0000",from:"0000 Undisclosed Project",to:"0000 Company Improvements"}]);
+        assert.ok(audit.repairPlan.assignments.every(a=>a.from===a.to));
+        await page.evaluate(outcome=>{window.__cjiDefiniteFailure=outcome==="definite failure";window.__cjiIndeterminate=outcome==="indeterminate";window.__cjiTrace=[];},outcome);
+        const pending=page.waitForEvent("download");await page.locator("#cuttingJobImportConfirmRun").click();const download=await pending;
+        const filename=path.join(output,"legacy-0000-"+outcome.replaceAll(" ","-")+"-backup.json");await download.saveAs(filename);assert.equal(await download.failure(),null);
+        const backup=JSON.parse(fs.readFileSync(filename,"utf8"));assert.equal(backup.jobFolders.find(f=>f.id==="job_project_0000").name,"0000 Undisclosed Project");assert.equal(backup.cuttingJobs.length,11);
+        await final(page);
+        const result=await page.evaluate(async()=>({cloud:await readCurrentCloudStateReadOnly(),before:window.__cjiBefore,folders:window.jobFolders,jobs:window.cuttingJobs,trace:window.__cjiTrace,saves:window.__cjiSaves,result:JSON.parse(document.getElementById("cuttingJobImportRows").dataset.lastImportResult)}));
+        assert.equal(result.saves,1);assert.equal(result.trace[0].stage,"download");assert.equal(result.trace[0].active,true);
+        const beforeFolder=result.before.jobFolders.find(f=>f.id==="job_project_0000"),folder=result.folders.find(f=>f.id===beforeFolder.id);
+        assert.equal(result.folders.filter(f=>f.id==="job_project_0000").length,1);
+        assert.deepEqual(result.jobs.slice(0,11),result.before.cuttingJobs);
+        if(outcome==="definite failure"){
+          assert.equal(result.result.rollbackVerified,true);assert.deepEqual(folder,beforeFolder);assert.deepEqual(result.cloud.jobFolders,result.before.jobFolders);assert.equal(result.jobs.length,11);
+        }else{
+          assert.deepEqual(folder,{...beforeFolder,name:"0000 Company Improvements"});assert.equal(result.jobs.length,12);assert.equal(result.jobs[11].cat,beforeFolder.id);
+          if(outcome==="success"){
+            assert.equal(result.result.saveCompleted,true);assert.deepEqual(result.cloud.jobFolders,result.folders);
+            const plan=await page.evaluate(rows=>CuttingJobImporter.definitionPlan(cuttingJobImporter.preview(rows)),[{...legacyRows[0],import_event_id:"rerun-next"}]);assert.equal(plan.renamedCategories.length,0);assert.equal(plan.newCategories.length,0);
+          }else{assert.equal(result.result.saveIndeterminate,true);assert.equal(result.result.rollbackAttempted,false);assert.equal(await page.locator("#cuttingJobImportPreview").isDisabled(),true);}
+        }
+      },{legacy:true,rows:legacyRows});
+    }
+    await scenario("explicit XXXX Undisclosed Project creates independently of legacy 0000","none",async page=>{
+      const pending=page.waitForEvent("download");await page.locator("#cuttingJobImportConfirmRun").click();await pending;await final(page);
+      const result=await page.evaluate(async()=>({cloud:await readCurrentCloudStateReadOnly(),result:JSON.parse(document.getElementById("cuttingJobImportRows").dataset.lastImportResult)}));
+      assert.equal(result.result.saveCompleted,true);const job=result.cloud.cuttingJobs[11];assert.equal(job.projectNumber,"XXXX");assert.equal(result.cloud.jobFolders.find(f=>f.id===job.cat).name,"XXXX Undisclosed Project");assert.equal(result.cloud.jobFolders.find(f=>f.id==="job_project_0000").name,"0000 Undisclosed Project");
+    },{legacy:true,rows:[{...row,project_number:"XXXX",category:"Undisclosed Project"}]});
     for(const mode of ["none","poller","observer"])await scenario(`real download and guarded import with ${mode}`,mode,page=>successful(page,`${mode}-backup.json`));
     await scenario("download remains in trusted click before a slow asynchronous cloud read","none",async page=>{await page.evaluate(()=>{window.__cjiDelayRead=5500;});await successful(page,"slow-backup.json");});
     await scenario("trigger exception visibly stops with zero saves and recovers preview controls","none",async page=>{
