@@ -1,8 +1,8 @@
 (function(root,factory){
-  const api=factory(typeof module==="object"&&module.exports?require("./maintenanceRecoveryImport"):root.OMAXMaintenanceRecoveryImport);
+  const api=factory(typeof module==="object"&&module.exports?require("./maintenanceRecoveryImport"):root.OMAXMaintenanceRecoveryImport,typeof module==="object"&&module.exports?require("./maintenanceRecoveryTaskSetup"):root.OMAXMaintenanceRecoveryTaskSetup);
   if(typeof module==="object"&&module.exports)module.exports=api;
   if(root)root.OMAXHistoricalImport=api;
-})(typeof window==="undefined"?null:window,function(maintenance){
+})(typeof window==="undefined"?null:window,function(maintenance,taskSetup){
   "use strict";
   const STATUS=Object.freeze({present:"Already Present",missing:"Missing — Import",match:"Possible Match — Review",problem:"Source Problem — Review"});
   const clone=value=>JSON.parse(JSON.stringify(value));
@@ -13,9 +13,10 @@
     if(typeof row.source_id==="string"&&typeof row.source_record_id==="string"&&row.source_id.trim()&&row.source_record_id.trim())return JSON.stringify([row.source_id,row.source_record_id]);
     return "";
   }
-  const records=(kind,state)=>kind==="purchase"?(state.receiptTrackerWeeks||[]).flatMap(week=>week.rows||[]):kind==="pump_hours"?state.totalHistory||[]:kind==="maintenance"?(state.maintenanceOccurrencesV2||[]).filter(row=>row.import_event_id):state.pumpEff?.entries||[];
+  const records=(kind,state)=>kind==="task_setup"?state.tasksAsReq||[]:kind==="purchase"?(state.receiptTrackerWeeks||[]).flatMap(week=>week.rows||[]):kind==="pump_hours"?state.totalHistory||[]:kind==="maintenance"?(state.maintenanceOccurrencesV2||[]).filter(row=>row.import_event_id):state.pumpEff?.entries||[];
   const count=(kind,state)=>records(kind,state).length;
   function preview(kind,rows,state){
+    if(kind==="task_setup")return taskSetup.preview(state);
     if(kind==="maintenance")return maintenance.preview(rows,state,STATUS);
     if(!["purchase","pump","pump_hours"].includes(kind)||!Array.isArray(rows))throw Error("Choose a supported history and supply reviewed source rows.");
     const existing=records(kind,state),identities=new Map();
@@ -54,7 +55,8 @@
     const week=Math.round((monday-first)/604800000)+1;
     return{key:`${year}-W${String(week).padStart(2,"0")}`,year,week,startISO:monday.toISOString().slice(0,10),endISO:end.toISOString().slice(0,10),rows:[]};
   }
-  function append(kind,state,candidates){
+  function append(kind,state,candidates,{createTask}={}){
+    if(kind==="task_setup")return taskSetup.append(state,candidates,createTask);
     if(kind==="maintenance")return maintenance.append(state,candidates);
     const next=clone(state);
     for(const item of candidates){
@@ -75,7 +77,7 @@
     }
     return next;
   }
-  const target=kind=>kind==="purchase"?"receiptTrackerWeeks":kind==="pump_hours"?"totalHistory":"pumpEff";
+  const target=kind=>kind==="task_setup"?"tasksAsReq":kind==="purchase"?"receiptTrackerWeeks":kind==="pump_hours"?"totalHistory":"pumpEff";
   const targets=kind=>kind==="maintenance"?maintenance.keys:[target(kind)];
   const business=state=>Object.fromEntries(Object.entries(state).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
   const unrelated=(kind,state)=>Object.fromEntries(Object.entries(business(state)).filter(([key])=>!targets(kind).includes(key)));
@@ -121,7 +123,11 @@
   }
   function createApi(env){
     let busy=false;
-    return Object.freeze({preview:(kind,rows)=>preview(kind,rows,env.state()),isBusy:()=>busy,async submit(kind,rows,{confirmed=false,reviewedPreview}={}){
+    return Object.freeze({preview:(kind,rows)=>preview(kind,rows,env.state()),isBusy:()=>busy,async previewAuthoritativeTaskSetup(){
+      const cloud=await env.readCloud();
+      if(!cloud||!Number.isFinite(cloud.syncMeta?.rev)||cloud.syncMeta.rev<=0)throw Error("A current authoritative cloud state with a valid revision is required for task setup preview.");
+      return taskSetup.preview(cloud);
+    },async submit(kind,rows,{confirmed=false,reviewedPreview}={}){
       const result={saved:false,saveAttempted:false,saveCompleted:false,verificationCompleted:false,indeterminate:false,rollbackCompleted:false,backupCreated:false,beforeCount:0,afterCount:0,importedIds:[],error:""};
       if(busy||!confirmed||!env.canWrite()){result.error="Explicit reviewed confirmation and a writable authoritative baseline are required.";return result;}
       busy=true;let before=null,staged=null,plannedIds=[],applied=false,committed=false;
@@ -131,16 +137,18 @@
         if(canonical(business(current))!==canonical(business(cloud)))throw Error("Local business state differs from cloud. Save/reload and generate a fresh preview before importing.");
         const plan=preview(kind,rows,cloud);
         if(!reviewedPreview||canonical(plan)!==canonical(reviewedPreview))throw Error("The reviewed preview changed. Review a fresh reconciliation preview before confirming.");
-        const ready=plan.filter(item=>item.status===STATUS.missing);
+        const ready=plan.filter(item=>item.status===(kind==="task_setup"?taskSetup.STATUS.ready:STATUS.missing));
+        if(kind==="task_setup")result.taskSetup={...taskSetup.summary(plan),preflight:plan};
         result.beforeCount=count(kind,cloud);result.afterCount=result.beforeCount;
         if(!ready.length)return result;
-        if(!env.scan||env.scan(rows).contaminated)throw Error("Source includes embedded file content or the content firewall is unavailable.");
+        if(!env.scan||env.scan(kind==="task_setup"?cloud:rows).contaminated)throw Error("Source includes embedded file content or the content firewall is unavailable.");
         if(await env.backup(cloud)!==true)throw Error("Downloadable exact cloud pre-import backup is required.");
         result.backupCreated=true;
         if(canonical(business(env.state()))!==canonical(business(current)))throw Error("Local state changed during backup; review a fresh preview.");
         if(env.loadedRevision()!==cloud.syncMeta.rev||!env.canWrite())throw Error("Authoritative revision or write gate changed during backup; review a fresh preview.");
-        before=clone(current);const next=append(kind,current,ready),destinations=targets(kind);
-        staged=clone(next);plannedIds=ready.map(item=>item.import_event_id);
+        before=clone(current);const next=append(kind,current,ready,{createTask:env.createTask}),destinations=targets(kind);
+        if(kind==="task_setup"&&env.scan(next).contaminated)throw Error("Native task plan failed the content firewall.");
+        staged=clone(next);plannedIds=kind==="task_setup"?next.tasksAsReq.filter(task=>!before.tasksAsReq.some(prior=>prior.id===task.id)).map(task=>task.id):ready.map(item=>item.import_event_id);
         applied=true;for(const destination of destinations)env.apply(destination,clone(next[destination]));
         const appliedState=env.state();
         for(const destination of destinations){
@@ -158,8 +166,13 @@
         // Read from the server, not from local pending-write cache.
         const verified=await env.readCloud();
         result.afterCount=count(kind,verified||{});
-        const expectedIds=ready.map(item=>item.import_event_id);
-        if(result.afterCount!==result.beforeCount+ready.length||destinations.some(key=>canonical(verified?.[key])!==canonical(next[key]))||canonical(unrelated(kind,verified||{}))!==canonical(unrelated(kind,cloud))||expectedIds.some(id=>records(kind,verified||{}).filter(item=>item.import_event_id===id).length!==1))throw Error("Committed save did not pass exact cloud IDs/counts/protected-field verification; review before retrying.");
+        const expectedIds=plannedIds;
+        if(result.afterCount!==result.beforeCount+ready.length||destinations.some(key=>canonical(verified?.[key])!==canonical(next[key]))||canonical(unrelated(kind,verified||{}))!==canonical(unrelated(kind,cloud))||expectedIds.some(id=>records(kind,verified||{}).filter(item=>(kind==="task_setup"?item.id:item.import_event_id)===id).length!==1))throw Error("Committed save did not pass exact cloud IDs/counts/protected-field verification; review before retrying.");
+        if(kind==="task_setup"){
+          const preflight=taskSetup.preview(verified);
+          if(ready.some(row=>preflight.find(item=>item.raw.name===row.raw.name)?.status!==taskSetup.STATUS.present))throw Error("Created task exact-name preflight failed; review before retrying.");
+          result.taskSetup={...taskSetup.summary(plan,ready.length),preflight};
+        }
         if(kind==="maintenance")result.maintenanceCounts={instancesAdded:ready.length,scheduledAdded:ready.length,completedAdded:ready.length,descriptorsAdded:next.maintenanceTasksV2.length-before.maintenanceTasksV2.length,reusableTasksAdded:0,repeatChainsAdded:0,futureProjectionsAdded:0};
         result.saved=true;result.verificationCompleted=true;result.importedIds=expectedIds;return result;
       }catch(error){
@@ -171,7 +184,7 @@
             // the affected destinations even if staging transformed their rows.
             // After the call, retain the existing identity-based selective rollback.
             const preSave=!result.saveAttempted;
-            const rollback=preSave?before:kind==="maintenance"?maintenance.rollback(current,staged,before):{[target(kind)]:selectiveRollback(kind,current,staged,before,plannedIds)};
+            const rollback=preSave?before:kind==="task_setup"?taskSetup.rollback(current,staged,before):kind==="maintenance"?maintenance.rollback(current,staged,before):{[target(kind)]:selectiveRollback(kind,current,staged,before,plannedIds)};
             const unrelatedChanged=preSave&&canonical(unrelated(kind,current))!==canonical(unrelated(kind,before));
             for(const destination of destinations)env.apply(destination,clone(rollback[destination]));
             const restored=env.state();

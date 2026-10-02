@@ -4368,7 +4368,11 @@ window.historicalImport = window.OMAXHistoricalImport.createApi({
   loadedRevision:()=>Number(window.__loadedCloudRevisionForSaveGuard || 0),
   scan:scanAuthoritativeCutFileContent,
   backup:async state=>exportJsonDownload(`omax-pre-import-${Date.now()}.json`,{ state, integrity:buildDataIntegritySummary(state), syncMeta:state.syncMeta }),
-  apply:(key,value)=>{window[key]=value;refreshGlobalCollections();},
+  createTask:(definition,order)=>window.OMAXMaintenanceRecoveryTaskSetup.buildAsRequiredTask({
+    id:genId(definition.name),name:definition.name,manualLink:"",storeLink:"",pn:definition.pn,price:definition.price,note:"",
+    cat:typeof window.ROOT_FOLDER_ID==="string"?window.ROOT_FOLDER_ID:"root",parentTask:null,order,downtimeHours:definition.downtimeHours
+  }),
+  apply:(key,value)=>{window[key]=value;refreshGlobalCollections();if(key==="tasksAsReq")window._maintOrderCounter=value.reduce((max,task)=>Math.max(max,Number(task?.order)||0),Number(window._maintOrderCounter)||0);},
   save:options=>saveCloudNow(options),
   suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastImportVerificationError=reason;renderRecoveryDiagnosticsPanel();}
 });

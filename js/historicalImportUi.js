@@ -53,3 +53,60 @@ function renderHistoricalReconciliationTool(root){
     finally{busy=false;kind.disabled=false;file.disabled=false;previewButton.disabled=false;review.disabled=false;invalidate();}
   });
 }
+
+function renderMaintenanceRecoveryTaskSetupTool(root){
+  const section=document.createElement("section");
+  section.className="history-import-admin";
+  section.innerHTML=`<h4>Maintenance Recovery Task Setup</h4>
+    <p>Preview the eight reviewed setup names against authoritative cloud state. Create only eligible missing reusable tasks. Existing tasks stay unchanged. Transfer Tank Water Pump and Empty Scrap Bin remain blocked until manually reviewed. This action does not import maintenance history or schedule calendar events.</p>
+    <button type="button" data-task-setup-preview>Preview task setup</button>
+    <label><input type="checkbox" data-task-setup-confirm disabled> I reviewed these task definitions and authorize creating only the eligible missing tasks.</label>
+    <button type="button" data-task-setup-create disabled>Download backup and create reviewed missing tasks</button>
+    <p data-task-setup-status role="status"></p>
+    <div style="overflow:auto;max-height:420px" tabindex="0" aria-label="Reviewed maintenance task setup"><table class="cost-table"><thead><tr><th>Exact task name</th><th>Expected type</th><th>Part #</th><th>Parts cost</th><th>Labor</th><th>Exact matches</th><th>Status</th><th>Review notes</th></tr></thead><tbody data-task-setup-rows></tbody></table></div>`;
+  root.appendChild(section);
+  const previewButton=section.querySelector("[data-task-setup-preview]"),review=section.querySelector("[data-task-setup-confirm]"),create=section.querySelector("[data-task-setup-create]"),status=section.querySelector("[data-task-setup-status]"),rows=section.querySelector("[data-task-setup-rows]");
+  const setup=window.OMAXMaintenanceRecoveryTaskSetup;
+  let reviewedPreview=null,busy=false;
+  const eligible=()=>reviewedPreview?.some(item=>item.status===setup.STATUS.ready);
+  const updateControls=()=>{previewButton.disabled=busy;review.disabled=busy||!eligible();create.disabled=busy||!review.checked||!eligible();};
+  const display=plan=>{
+    rows.replaceChildren();
+    for(const item of plan){
+      const tr=document.createElement("tr"),raw=item.raw;
+      for(const value of [raw.name,raw.type,raw.pn===null?"Unresolved":raw.pn||"—",raw.price===null?"Unresolved":new Intl.NumberFormat(undefined,{style:"currency",currency:"USD"}).format(raw.price),raw.minutes===null?"Unresolved":`${raw.minutes} minutes`,String(item.matchCount),item.status,item.reason]){
+        const td=document.createElement("td");td.textContent=value;tr.appendChild(td);
+      }
+      rows.appendChild(tr);
+    }
+  };
+  review.addEventListener("change",updateControls);
+  previewButton.addEventListener("click",async()=>{
+    if(busy)return;
+    busy=true;review.checked=false;reviewedPreview=null;updateControls();status.textContent="Reading authoritative task setup preview…";
+    try{
+      reviewedPreview=await window.historicalImport.previewAuthoritativeTaskSetup();display(reviewedPreview);
+      const counts=setup.summary(reviewedPreview);
+      status.textContent=`Read-only preview — no state changed. Ready to create: ${reviewedPreview.filter(item=>item.status===setup.STATUS.ready).length}; Already Present: ${counts.alreadyPresent}; Blocked for Review: ${counts.blockedForReview}; Duplicates: ${counts.duplicates}.`;
+    }catch(error){status.textContent=String(error?.message||error);rows.replaceChildren();}
+    finally{busy=false;updateControls();}
+  });
+  create.addEventListener("click",async()=>{
+    if(busy||!review.checked||!eligible())return;
+    if(!window.confirm("Download an exact cloud backup and create only the eligible missing Maintenance Settings tasks you reviewed? No maintenance history will be imported."))return;
+    busy=true;updateControls();
+    try{
+      const result=await window.historicalImport.submit("task_setup",null,{confirmed:true,reviewedPreview});
+      section.dataset.lastTaskSetupResult=JSON.stringify(result);
+      if(result.saved){
+        const counts=result.taskSetup;
+        status.textContent=`Cloud verified. Created: ${counts.created}; Already Present: ${counts.alreadyPresent}; Blocked for Review: ${counts.blockedForReview}; Duplicates: ${counts.duplicates}. Exact-name preflight below verifies the created tasks are found exactly once. Maintenance history has not been imported.`;
+        display(counts.preflight);
+      }else{
+        status.textContent=result.error||"No eligible missing tasks; zero tasks created and zero saves.";
+        if(result.taskSetup?.preflight)display(result.taskSetup.preflight);
+      }
+    }catch(error){status.textContent=String(error?.message||error);}
+    finally{busy=false;review.checked=false;reviewedPreview=null;updateControls();}
+  });
+}
