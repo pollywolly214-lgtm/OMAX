@@ -714,12 +714,27 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   const collections = ensureMaintenanceV2Collections();
   const mode = String(opts.mode || "one_time");
   const eventType = String(opts.eventType || "scheduled");
+  if(mode==="one_time"&&eventType==="completed"){
+    const created=createMaintenanceV2FromTemplate(task,{...opts,eventType:"scheduled"});
+    if(!created?.occurrence)return null;
+    const root=created.occurrence;
+    let completed=window.OMAXMaintenanceCalendarIntegrity.resolveOneTime(window,root.id,root).status==="completed"?collections.occurrences.find(entry=>entry?.eventType==="completed"&&entry.rootOccurrenceId===root.id&&entry.instanceId===root.instanceId&&entry.taskId===root.taskId):null;
+    if(!completed){
+      const seed=genId("v2_completed");let eventId=seed,suffix=1;while(collections.occurrences.some(entry=>entry?.id===eventId))eventId=`${seed}_${++suffix}`;
+      completed=window.OMAXMaintenanceRecoveryImport.lifecycleEvent(root,{eventId,eventType:"completed",payload:{...root.payload}});
+      collections.occurrences.unshift(completed);
+    }
+    return{...created,scheduled:root,occurrence:completed};
+  }
   const effectiveDateISO = normalizeDateKey(opts.effectiveDateISO || ymd(new Date()));
   const nowISO = new Date().toISOString();
-  const legacyTaskId = String(task.id);
-  const existingTask = collections.tasks.find(entry => entry && String(entry.legacyTaskId || "") === legacyTaskId) || null;
+  const calendarOnly = opts.calendarOnly === true && mode === "one_time";
+  const legacyTaskId = calendarOnly ? null : String(task.id);
+  const existingTask = collections.tasks.find(entry => entry && (calendarOnly
+    ? String(entry.id) === String(task.id) && entry.legacyTaskId == null
+    : String(entry.legacyTaskId || "") === legacyTaskId)) || null;
   const taskRecord = existingTask || {
-    id: genId("maintenance_task_v2"),
+    id: calendarOnly ? String(task.id) : genId("maintenance_task_v2"),
     system: "v2",
     schemaVersion: 2,
     legacyTaskId,
@@ -735,8 +750,6 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   };
   if (!existingTask){
     collections.tasks.unshift(taskRecord);
-  }else{
-    taskRecord.updatedAtISO = nowISO;
   }
 
   const normalizedRepeatRule = mode === "repeat" ? (opts.repeatRule || null) : null;
@@ -752,16 +765,17 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   };
   const equivalentInstance = collections.instances.find(instance => {
     if (!instance || typeof instance !== "object") return false;
+    if(instance.recoveryImportId)return false;
     if (String(instance.system || "") !== "v2" && Number(instance.schemaVersion || 0) < 2) return false;
     if (String(instance.status || "active") === "stopped") return false;
-    if (String(instance.legacyTaskId || "") !== legacyTaskId) return false;
+    if (calendarOnly ? String(instance.taskId || "") !== String(taskRecord.id) : String(instance.legacyTaskId || "") !== legacyTaskId) return false;
     if (String(instance.instanceMode || "") !== mode) return false;
     if (normalizeDateKey(instance.startDateISO || null) !== effectiveDateISO) return false;
     if (mode === "repeat") return stringifyMaintenanceV2RepeatRule(instance.repeatRule) === stringifyMaintenanceV2RepeatRule(normalizedRepeatRule);
     return collections.occurrences.some(event => event
       && String(event.system || "") === "v2"
       && String(event.instanceId || "") === String(instance.id || "")
-      && String(event.legacyTaskId || "") === legacyTaskId
+      && (calendarOnly ? String(event.taskId || "") === String(taskRecord.id) : String(event.legacyTaskId || "") === legacyTaskId)
       && String(event.eventType || "") === eventType
       && normalizeDateKey(event.effectiveDateISO || event.dateISO || null) === effectiveDateISO
       && !occurrenceHasRemovedLifecycle(event));
@@ -789,7 +803,9 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   // The equivalent-record branch already returned. These records are new.
   const reusedInstance = false;
   const reusedOccurrence = false;
-  const stableBaseId = `${createMaintenanceV2StablePart(legacyTaskId)}_${createMaintenanceV2StablePart(effectiveDateISO)}_${createMaintenanceV2StablePart(mode)}`;
+  const originalBaseId = `${createMaintenanceV2StablePart(legacyTaskId || taskRecord.id)}_${createMaintenanceV2StablePart(effectiveDateISO)}_${createMaintenanceV2StablePart(mode)}`;
+  let stableBaseId=originalBaseId,identitySuffix=1;
+  while(collections.instances.some(entry=>entry?.id===`maintenance_instance_v2_${stableBaseId}`)||collections.occurrences.some(entry=>entry?.id===`maintenance_occurrence_v2_${stableBaseId}_${createMaintenanceV2StablePart(eventType)}`))stableBaseId=`${originalBaseId}_${++identitySuffix}`;
   const instance = {
     id: `maintenance_instance_v2_${stableBaseId}`,
     system: "v2",
@@ -6926,7 +6942,7 @@ function renderDashboard(){
     jobForm?.reset();
     resetGarnetForm();
     resetOneTimeTaskForm();
-    collapseExistingTaskDropdown();
+    if (existingTaskResults) existingTaskResults.hidden = true;
     setContextDate(null);
     pendingGarnetEditId = null;
   }
@@ -7306,14 +7322,12 @@ function renderDashboard(){
       if (typeof saveCloudNow === "function"){
         trace.saveCloudNowCalled = true;
         window.__activeExplicitMaintenanceAddSaveTrace = trace;
-        const result = saveCloudNow();
+        const result = saveCloudNow({expectedRevision:trace.loadedRevBeforeSave});
         trace.saveCloudNowReturnedPromise = !!(result && typeof result.then === "function");
-        if (result && typeof result.then === "function") await result;
-      } else if (typeof saveCloudDebounced === "function"){
-        saveCloudDebounced();
-        if (typeof window.recordMaintenanceV2MutationSource === "function"){
-          window.recordMaintenanceV2MutationSource({ ...payload, action: "save_debounced_fallback" });
-        }
+        const outcome=await result;
+        if(outcome?.saved!==true||outcome?.stateWriteCompleted!==true)throw Error(outcome?.error||"Maintenance cloud save was not confirmed.");
+      } else {
+        throw Error("Awaited maintenance cloud save is unavailable.");
       }
     } catch (err){
       trace.saveThrewError = err?.message || String(err);
@@ -7592,6 +7606,7 @@ function renderDashboard(){
     const note = (oneTimeNoteInput?.value || "").trim();
     const rawDate = (oneTimeDateInput?.value || "").trim();
     const targetISO = rawDate ? ymd(rawDate) : (addContextDateISO || ymd(new Date()));
+    if (!targetISO){ alert("Select a valid calendar date."); return; }
     const condition = note || "One-time maintenance task";
     const task = {
       id: genId(name),
@@ -7612,28 +7627,22 @@ function renderDashboard(){
       note,
       downtimeHours: 1
     };
-    const created = (typeof window.createMaintenanceV2FromTemplate === "function")
-      ? window.createMaintenanceV2FromTemplate(task, {
+    const saved=await window.runMaintenanceCalendarMutation(()=>window.createMaintenanceV2FromTemplate(task, {
         mode: "one_time",
+        calendarOnly: true,
         eventType: "scheduled",
         effectiveDateISO: targetISO,
         note
-      })
-      : null;
-    if (!created){
-      toast("Could not add one-time task. V2 creation failed.");
+      }));
+    const created=saved.created;
+    if (!saved.saved||!created){
+      toast(saved.error||"Could not add one-time task. V2 creation failed.");
       if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] Failed one-time V2 creation", { taskName: name, targetISO });
       return;
     }
     if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 one-time record");
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
-    toast("Saving one-time task…");
-    const saveTrace = await persistExplicitMaintenanceAddSave("calendar_add_one_time_new_task", created, { effectiveDateISO: targetISO });
-    if (saveTrace && saveTrace.remoteVerificationPassed === false){
-      toast("Added locally, but cloud save did not confirm. Do not refresh yet.");
-      return;
-    }
     toast("One-time task added to the calendar");
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
@@ -7685,13 +7694,14 @@ function renderDashboard(){
     let message = "Maintenance task added";
     let createdV2Record = null;
     if (choice === "one_time"){
-      const created = createMaintenanceV2FromTemplate(task, {
+      const saved=await window.runMaintenanceCalendarMutation(()=>createMaintenanceV2FromTemplate(task, {
         mode: "one_time",
         eventType: "scheduled",
         effectiveDateISO: targetISO,
         note: occurrenceNote
-      });
-      if (!created){ toast("Could not create one-time reminder in V2."); if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] V2 one-time creation failed", { taskId: task.id }); return; }
+      }));
+      const created=saved.created;
+      if (!saved.saved||!created){ toast(saved.error||"Could not create one-time reminder in V2."); return; }
       createdV2Record = created;
       if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 one-time record");
       const targetDate = parseDateLocal(targetISO);
@@ -7760,7 +7770,7 @@ function renderDashboard(){
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
     toast("Saving maintenance calendar change…");
-    const saveTrace = await persistExplicitMaintenanceAddSave(`calendar_add_existing_${choice}`, createdV2Record, {
+    const saveTrace = choice==="one_time"?null:await persistExplicitMaintenanceAddSave(`calendar_add_existing_${choice}`, createdV2Record, {
       taskId: task.id,
       legacyTaskId: task.id,
       effectiveDateISO: targetISO
@@ -19118,7 +19128,7 @@ function computeCostModel(){
       else if (!resolvedDate || resolvedDate !== dateISO) invalidReason = "resolver_date_mismatch";
     }
     if (!invalidReason && typeof window.resolveV2OneTimeOccurrenceState === "function" && !rootOccurrenceId.startsWith("repeat:")){
-      const resolved = window.resolveV2OneTimeOccurrenceState(rootOccurrenceId, { id: rootOccurrenceId, effectiveDateISO: dateISO });
+      const resolved = window.resolveV2OneTimeOccurrenceState(rootOccurrenceId, { id: rootOccurrenceId, effectiveDateISO: dateISO,instanceId,taskId });
       resolvedStatus = String(resolved?.status || "").toLowerCase();
       resolvedDate = toHistoryDateKey(resolved?.displayDateISO || dateISO);
       if (resolvedStatus && resolvedStatus !== "completed") invalidReason = `resolver_status_${resolvedStatus}`;

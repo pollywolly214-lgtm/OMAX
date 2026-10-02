@@ -4361,6 +4361,23 @@ function getCloudCutFileStorageDiagnostics(){
 
 window.auditCuttingFileContentExposure = auditCuttingFileContentExposure;
 window.getCloudCutFileStorageDiagnostics = getCloudCutFileStorageDiagnostics;
+window.runMaintenanceCalendarMutation = window.OMAXMaintenanceCalendarIntegrity.createMutationRunner({
+  state:()=>compactStateForStorage(snapshotState({skipLocalFileCacheSync:true})),
+  readCloud:()=>readCurrentCloudStateReadOnly(),
+  loadedRevision:()=>Number(window.__loadedCloudRevisionForSaveGuard||0),
+  canWrite:()=>canWriteCloud("maintenance calendar action"),
+  apply:(key,value)=>{window[key]=value;refreshGlobalCollections();},
+  save:options=>saveCloudNow(options),
+  checkpoint:()=>({undo:undoStack.slice(),redo:redoStack.slice(),current:currentSnapshotJSON}),
+  restoreCheckpoint:checkpoint=>{
+    undoStack.splice(0,undoStack.length,...checkpoint.undo);redoStack.splice(0,redoStack.length,...checkpoint.redo);currentSnapshotJSON=checkpoint.current;
+    persistLocalStateBackup(snapshotState({skipLocalFileCacheSync:true}));
+  },
+  suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastImportVerificationError=reason;renderRecoveryDiagnosticsPanel();}
+});
+window.inspectMaintenanceCalendarIntegrity = (options={})=>window.OMAXMaintenanceCalendarIntegrity.inspect(window,{...options,projectedRepeatRows:window.__maintenanceCalendarProjectedRepeatRows||[]});
+window.inspectMaintenanceCalendarCloud = async (options={})=>window.OMAXMaintenanceCalendarIntegrity.inspect(await readCurrentCloudStateReadOnly(),options);
+
 window.historicalImport = window.OMAXHistoricalImport.createApi({
   state:()=>compactStateForStorage(snapshotState({ skipLocalFileCacheSync:true })),
   canWrite:()=>canWriteCloud("historical reconciliation") && Boolean(FB.user),
