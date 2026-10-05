@@ -3230,7 +3230,7 @@ function viewJobs(){
   };
 
 
-  const normalizeProjectNumber = (value)=> String(value || "").trim().replace(/[^0-9]/g, "").slice(0, 8);
+  const normalizeProjectNumber = (value)=> window.CuttingJobHistory.normalizeProjectKey(value);
   const projectLabel = (job)=> {
     const value = normalizeProjectNumber(job?.projectNumber);
     return value || "Unassigned";
@@ -4449,7 +4449,7 @@ function viewJobs(){
                 <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-j="costRate" data-id="${j.id}" value="${Number.isFinite(costRate) ? costRate : 45}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
-                <label>Project #<input type="text" data-j="projectNumber" data-id="${j.id}" inputmode="numeric" maxlength="8" value="${esc(projectLabel(j) === "Unassigned" ? "" : projectLabel(j))}"></label>
+                <label>Project #<input type="text" data-j="projectNumber" data-id="${j.id}" inputmode="text" maxlength="8" value="${esc(projectLabel(j) === "Unassigned" ? "" : projectLabel(j))}"></label>
                 <label>Priority<select data-j="priority" data-id="${j.id}">${priorityOptionsMarkup(priorityValue)}</select></label>
                 <label>Category<select data-j="cat" data-id="${j.id}" data-job-category-select>
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
@@ -4632,7 +4632,7 @@ function viewJobs(){
             <input type="date" id="jobDue" required value="${esc(addJobDraftField("due", defaultJobDateISO))}">
           </label>
           <label>Project #
-            <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
+            <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="text" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
           </label>
           <div class="job-category-field">
             <label for="jobCategory">Category</label>
