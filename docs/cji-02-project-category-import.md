@@ -52,7 +52,7 @@ Creation is deduplicated by project key. Thirty or forty ready rows for one miss
 
 The authenticated fresh authoritative baseline, full backup, reviewed confirmation, atomic revision/CAS save guard, and protected-state checks remain in place. The complete preview is checked again after authoritative revalidation and after backup. Every ready job's normalized project/category pair is resolved and checked against its assigned folder ID before append/save.
 
-Folders and both job arrays are staged in the same import/save. Immutable copies of the staged folders and jobs are passed to cloud read-back verification; folders are now verified exactly alongside jobs, unique source IDs, and every unrelated cloud field.
+Folders and both job arrays are staged in the same import/save. Immutable copies of staged folders and jobs are passed to cloud read-back verification; folders, jobs, and unique source IDs remain exact. Unrelated business data uses the shared comparison helper with only the five generated weekly-window metadata exceptions documented in CJI-02E below.
 
 On a definite rejection, selective rollback removes owned staged jobs, restores owned sequence changes, restores the original name on an owned renamed folder, and removes unchanged, unreferenced import-created folders. Concurrent folder metadata edits survive the name-only rollback; a changed name or project ownership retains evidence and suspends writes. Without concurrent edits this restores the intended arrays exactly. Concurrent edits/additions are preserved; changed or referenced import evidence suspends writes for review. Indeterminate or thrown saves and failed committed read-back verification retain all evidence, suspend writes, and never retry automatically. Refresh and read verification are required before proceeding.
 
@@ -254,3 +254,53 @@ git diff --cached --check
 Node/DOM: **233 cases passed, zero failures** (the prior 205 plus 28 focused stability cases). The aggregate Node runner reports 196 entries because the older importer/repair scripts each count as one entry instead of their internal 24 and 15 cases. The new tests exercise the actual Preview handler and preparation adapter, transient convergence, persistent local drift, same-revision cloud drift, revision/edit-version changes, bounded nonconvergence, callback deadlines/cleanup, double Preview/cancel protection, one authoritative backup, trusted download and CAS, 0000/XXXX, and post-save suspension. All CJI-02A/B/C, rollback, persistence and recovery suites pass.
 
 Actual Edge: **21/21 scenarios passed, zero failures**. Five new full-page scenarios verify a single Preview click succeeds after an injected projection settles, and visibly blocks persistent local business drift, cloud business drift, revision drift, and never-stable snapshots with zero backup Blobs/downloads/saves. The previous 16 scenarios pass, including trusted downloads without a watcher, report timestamp normalization, strict post-save drift suspension, legacy 0000 adoption, and XXXX. Every external request is blocked; only the disposable localhost devsafe backend is used. The normal import driver awaits the business promise and reads status afterward, without DevTools or status polling during submission. Artifacts remain in ignored `artifacts/cji-02a/`. No production Firebase import, new branch/PR, or merge was performed. The exact shop transient writer/path and actual Vercel acceptance remain unverified.
+
+## CJI-02E: generated weekly-window rollover metadata
+
+Continued on the existing branch and PR #490 after confirming `cutting-import-project-categories`, expected HEAD `bf82a65d6c60a2470b2dd0256d98f15b62991222`, and clean status. No package.json or AGENTS.md exists; no npm commands were used.
+
+The shop supplied the missing production comparison evidence: D's blocker was `$.weeklyCostReports[0].weekEndISO`. Loaded and cloud revisions both equaled `1791208959184`, and both arrays contained 25 reports. The current empty local report covered Oct 5–11 (`weekKey/weekStartISO: 2026-10-05`, `weekEndISO: 2026-10-11`, `weekLabel: Oct 4, 2026 - Oct 10, 2026`, generatedAtISO `2026-10-05T14:09:31.745Z`). Cloud still held the previous empty Sep 28–Oct 4 window (`2026-09-28`, `2026-10-04`, `Sep 27, 2026 - Oct 3, 2026`, generatedAtISO `2026-10-02T20:40:59.094Z`). Both had empty cut/maintenance item arrays, zero costs/hours, and empty cutByCategory. The supplied full-state comparison was equal after removing only the five direct window properties. These diagnostics came from the user; no production state was fetched or imported.
+
+Mandatory code inspection before editing confirmed that weeklyCostReports is a persisted generated reporting cache, not an independently edited financial ledger:
+
+- `computeCostModel()` in `js/renderers.js` creates a fresh weeklyMap on each build. Its `startOfWeekMonday()` / `formatWeekKey()` and `ensureWeek()` generate weekKey and weekStartISO, calculate weekEndISO as six days later, and assign generatedAtISO from the clock.
+- Completed job records and maintenance occurrence/history records populate cutItems, maintenanceItems, totals, hours, and category aggregates. Their original IDs, dates, costs, and relationships remain in source records and report items.
+- `ensureWeek(startOfWeekMonday(new Date()))` adds the current reporting week, including an empty current bucket. A week rollover can therefore replace a previous empty generated bucket without changing report count or business content.
+- The builder sorts buckets by generated weekStartISO, formats weekLabel from the generated endpoints, and replaces `window.weeklyCostReports` with the result. The cost UI selects/displays/exports these generated buckets; it does not edit stored weekly-report ledger rows. weekKey identifies a generated bucket, not a manually persisted source transaction.
+- `snapshotState()` copies the live cache into ordinary save/backup data, and adoption restores it. Searches found no independent weekly-report editor/writer besides the builder and normal persistence/adoption.
+
+The existing `CuttingJobImporter.normalizeComparisonState()` now removes exactly these direct properties from each object entry in an array, **in the comparison copy only**:
+
+```text
+generatedAtISO
+weekKey
+weekLabel
+weekStartISO
+weekEndISO
+```
+
+This expands C's original timestamp-only exception; it supersedes the earlier C/D statements that direct generated window dates must always be strict. Source dates, nested fields with the same five names, report IDs, and every other business value remain exact. The helper clones input and isolates shared entries, preserving frozen/live objects, snapshot output, backup JSON, cloud data, save payloads, and dashboard/export display. It neither modifies the report builder nor strips fields from application storage. Ordinary saves still preserve the live generated metadata as before.
+
+No additional ignore implementation was added. The same helper already serves Preview/stability signatures, prepared-backup validation, fresh baseline checks, backup receipt verification, protected-state staging comparison, and post-save unrelated-state verification. D's A/B/C checks, bounds, first-path diagnostics, and revision/edit-version guards remain unchanged.
+
+Report array count and content order remain strict; no sorting or removal of reports is introduced. Exact comparisons still cover cutItems, maintenanceItems, cutByCategory, totalCutCost, totalMaintenanceCost, totalCutHours, profit/loss, dollar/hour labels, job/category/project identities, nested costs/dates/hours, unknown fields, and future financial fields. Jobs, completed jobs, folders, inventory, maintenance, revision/CAS, and all other protected business data remain strict. The C negative date fixture now mutates a source item's dateISO instead of a direct generated weekStartISO, preserving the meaningful-date regression under the new explicit exception.
+
+Exact verification commands (all PASS on October 5, 2026):
+
+```powershell
+node --check js/cuttingJobImporter.js
+node --check tests/cji-02c-comparison-state.test.js
+node --check tests/cji-02e-weekly-window.test.js
+node --check scripts/cji-02a-browser.js
+node --test tests/cji-02-project-category-import.test.js tests/cji-02a-backup-action.test.js tests/cji-02b-legacy-category-adoption.test.js tests/cji-02c-comparison-state.test.js tests/cji-02d-preview-stability.test.js tests/cji-02e-weekly-window.test.js tests/cutting-job-import.test.js tests/cji02-history-repair.test.js tests/import-selective-rollback.test.js tests/atomic-persistence.test.js tests/recovery-import.test.js
+node scripts/devsafe-server.js
+# In a second terminal:
+$env:OMAX_PLAYWRIGHT_PATH='C:\Users\Ryder\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright'
+node scripts/cji-02a-browser.js
+git diff --check
+git diff --cached --check
+```
+
+Node/DOM: **283 cases passed, zero failures** (the prior 233 plus 50 focused E cases). Node's aggregate runner reports 246 entries because the older importer/repair scripts each count as one entry rather than their internal 24 and 15 cases. E covers each generated property separately, all-five and missing/multiple-entry variants, 25-report rollover, frozen/shared/non-array behavior, all six production comparison sites, preservation of original payloads, strict pre-save and post-save drift across 33 financial/content/identity/count/order/protected variants, diagnostics, and revision mismatch. All A/B/C/D, import, repair/audit, selective rollback, atomic persistence, and recovery suites pass, including 0000 folder rename/reuse, XXXX, trusted downloads, never-stable preparation, and post-save suspension.
+
+Actual Edge: **23/23 scenarios passed, zero failures**. Two new full-page no-watcher cases use 25 cloud reports with Sep 28–Oct 4 metadata and otherwise identical live reports with Oct 5–11 metadata. Positive: one Preview prepares one authoritative backup, normal trusted confirmation triggers a real download, one CAS save succeeds, and post-save verification completes without recovery. The inspected backup retains all original cloud fields; live/saved reports retain the new generated window, with every other report property unchanged. Negative: changing totalCutCost while the windows differ blocks Preview at `$.weeklyCostReports[0].totalCutCost`, with zero backup Blobs/downloads/saves. The previous 21 scenarios still pass. Tests use only disposable localhost devsafe state with external requests blocked; no DevTools or manual retry is required. Artifacts remain in ignored `artifacts/cji-02a/`. No production Firebase import, new branch/PR, or merge was performed. Actual shop Vercel acceptance remains untested.

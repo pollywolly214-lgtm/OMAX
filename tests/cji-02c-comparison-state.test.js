@@ -40,7 +40,7 @@ const drifts={
   "added weekly report":state=>state.weeklyCostReports.push({id:"new"}),
   "removed weekly report":state=>state.weeklyCostReports.pop(),
   "weekly category":state=>state.weeklyCostReports[0].cutByCategory.Blanco.cost++,
-  "weekly date":state=>state.weeklyCostReports[0].weekStartISO="2026-09-29",
+  "weekly source-item date":state=>state.weeklyCostReports[0].cutItems[0].dateISO="2026-09-29",
   "weekly arbitrary field":state=>state.weeklyCostReports[0].notes="concurrent",
   "cuttingJobs":state=>state.cuttingJobs.push({id:"changed",projectNumber:"0000",cat:"jobs_root"}),
   "completedCuttingJobs":state=>state.completedCuttingJobs.push({id:"changed",import_event_id:"other"}),

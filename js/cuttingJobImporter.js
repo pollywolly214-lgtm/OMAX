@@ -11,15 +11,17 @@
   const MATERIAL_ALIASES=new Map([["a36","A36 steel"],["grade 50","Grade 572-50 steel"],["304 stainless","Stainless Steel"],["316 stainless","Stainless Steel"],["stainless","Stainless Steel"],["aluminum","Aluminum"]]);
   const clone=v=>typeof structuredClone==="function"?structuredClone(v):JSON.parse(JSON.stringify(v));
   const canonical=v=>JSON.stringify(v);
-  // Comparison copies only: report generation time is refreshed by the cost
-  // renderer independently of week identity, financial content, and cloud revision.
+  // Comparison copies only: the rolling report cache regenerates window metadata
+  // from source records/current date. All report content and source dates stay exact.
   function normalizeComparisonState(state){
     const comparison=clone(state);
     if(Array.isArray(comparison?.weeklyCostReports)){
       comparison.weeklyCostReports=comparison.weeklyCostReports.map(report=>{
         if(!report||typeof report!=="object"||Array.isArray(report))return report;
         // Isolate the entry even if another collection references the same object.
-        const entry={...report};delete entry.generatedAtISO;return entry;
+        const entry={...report};
+        for(const key of ["generatedAtISO","weekKey","weekLabel","weekStartISO","weekEndISO"])delete entry[key];
+        return entry;
       });
     }
     return comparison;
