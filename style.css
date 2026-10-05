@@ -631,6 +631,17 @@ body.cost-receipt-modal-open{ overflow:hidden; }
 #costReceiptModal .cost-receipt-summary-table th:nth-child(1){ width:120px; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(2),
 #costReceiptModal .cost-receipt-summary-table th:nth-child(2){ width:220px; }
+#costReceiptModal .cost-receipt-week-table tbody td:nth-child(2),
+#costReceiptModal .cost-receipt-summary-table tbody td:nth-child(2){
+  white-space:normal;
+  overflow-wrap:anywhere;
+  overflow:hidden;
+}
+#costReceiptModal .cost-receipt-week-table input[data-col="purchased"]{
+  display:block;
+  width:100%;
+  max-width:100%;
+}
 #costReceiptModal .cost-receipt-week-table th:nth-child(3),
 #costReceiptModal .cost-receipt-summary-table th:nth-child(3){ width:130px; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(4),
