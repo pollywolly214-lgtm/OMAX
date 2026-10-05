@@ -212,6 +212,17 @@ if (typeof window !== "undefined"){
   window.cancelCalendarHoursEditing = cancelCalendarHoursEditing;
   window.commitCalendarHoursEditing = commitCalendarHoursEditing;
 }
+function ensureBubble(){
+  const existing = document.getElementById("bubble");
+  if (existing) return existing;
+  const b = document.createElement("div");
+  b.id = "bubble";
+  b.className = "bubble";
+  b.addEventListener("mouseenter", ()=>clearTimeout(bubbleTimer));
+  b.addEventListener("mouseleave", hideBubbleSoon);
+  document.body.appendChild(b);
+  return b;
+}
 function hideBubble(){
   if (bubbleTimer){
     clearTimeout(bubbleTimer);
@@ -349,15 +360,15 @@ function openV2OneTimePanel(occurrenceId){
   const close = ()=> closeV2OneTimePanel();
   overlay.addEventListener("click", (event)=>{ if (event.target === overlay) close(); });
   card.querySelector("[data-v2-panel-close]")?.addEventListener("click", close);
-  card.querySelector("[data-v2-panel-complete]")?.addEventListener("click", ()=>{ window.completeV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
-  card.querySelector("[data-v2-panel-uncomplete]")?.addEventListener("click", ()=>{ window.uncompleteV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
-  card.querySelector("[data-v2-panel-note]")?.addEventListener("click", ()=>{ window.setV2OneTimeOccurrenceNote?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
-  card.querySelector("[data-v2-panel-hours]")?.addEventListener("click", ()=>{ window.setV2OneTimeOccurrenceHours?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
-  card.querySelector("[data-v2-panel-move]")?.addEventListener("click", ()=>{ window.moveV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
-  card.querySelector("[data-v2-panel-remove]")?.addEventListener("click", ()=>{
+  card.querySelector("[data-v2-panel-complete]")?.addEventListener("click", async ()=>{ await window.completeV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-uncomplete]")?.addEventListener("click", async ()=>{ await window.uncompleteV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-note]")?.addEventListener("click", async ()=>{ await window.setV2OneTimeOccurrenceNote?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-hours]")?.addEventListener("click", async ()=>{ await window.setV2OneTimeOccurrenceHours?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-move]")?.addEventListener("click", async ()=>{ await window.moveV2OneTimeOccurrence?.(String(occurrenceId)); openV2OneTimePanel(occurrenceId); });
+  card.querySelector("[data-v2-panel-remove]")?.addEventListener("click", async ()=>{
     const ok = window.confirm ? window.confirm("Remove this V2 one-time reminder from the calendar?") : true;
     if (!ok) return;
-    window.removeV2OneTimeOccurrence?.(String(occurrenceId));
+    await window.removeV2OneTimeOccurrence?.(String(occurrenceId));
     close();
   });
 }
@@ -366,11 +377,14 @@ function getV2OneTimeOccurrenceView(occurrenceId){
   const occId = String(occurrenceId || "");
   if (!occId) return null;
   const events = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
-  const scheduled = events.find(entry => entry && String(entry.id || "") === occId && String(entry.eventType || "") === "scheduled");
-  if (!scheduled) return null;
+  const matches=events.filter(entry => entry && String(entry.id || "") === occId && String(entry.eventType || "") === "scheduled");
+  if(matches.length!==1)return null;
+  const scheduled=matches[0];
   const instanceId = scheduled.instanceId != null ? String(scheduled.instanceId) : "";
-  const instance = (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []).find(entry => entry && String(entry.id || "") === instanceId) || null;
+  const instanceMatches=(Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []).filter(entry => entry && String(entry.id || "") === instanceId);
+  const instance=instanceMatches.length===1?instanceMatches[0]:null;
   if (!instance || String(instance.instanceMode || "") !== "one_time") return null;
+  if(String(scheduled.taskId||"")!==String(instance.taskId||""))return null;
   const taskId = String(instance.taskId || scheduled.taskId || "");
   const task = (Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : []).find(entry => entry && String(entry.id || "") === taskId) || null;
   const dateISO = normalizeDateKey(scheduled.effectiveDateISO || scheduled.dateISO || instance.startDateISO || null);
@@ -918,33 +932,12 @@ window.stopV2RepeatTracking = (instanceId, taskId, dateISO, rootOccurrenceId = n
   toast("Repeat tracking stopped");
 };
 
-function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supersedesEventId = null){
+async function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supersedesEventId = null){
+  const result=await window.runMaintenanceCalendarMutation(()=>{
   const list = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : (window.maintenanceOccurrencesV2 = []);
-  const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
-  const base = lookup[String(baseOccurrenceId)];
-  if (!base) return false;
-  const existing = list.find(entry => entry
-    && String(entry.instanceId || "") === String(base.instanceId || "")
-    && String(entry.taskId || "") === String(base.taskId || "")
-    && String(entry.eventType || "") === String(eventType || "")
-    && normalizeDateKey(entry.effectiveDateISO || null) === normalizeDateKey(base.dateISO || null)
-    && String(entry.rootOccurrenceId || "") === String(baseOccurrenceId || "")
-    && String(entry.supersedesEventId || "") === String(supersedesEventId || ""));
-  if (existing){
-    if (typeof window.recordMaintenanceV2MutationSource === "function"){
-      window.recordMaintenanceV2MutationSource({
-        helper: "appendV2OccurrenceEvent",
-        action: "deduped_or_reused",
-        eventType,
-        taskId: base.taskId,
-        instanceId: base.instanceId,
-        occurrenceId: existing.id,
-        effectiveDateISO: base.dateISO,
-        rootOccurrenceId: String(baseOccurrenceId)
-      });
-    }
-    return true;
-  }
+  const base = getV2OneTimeOccurrenceView(String(baseOccurrenceId));
+  if (!base) throw Error("One-time maintenance root is missing or ambiguous.");
+  if((eventType==="completed"&&base.status==="completed")||(eventType==="uncompleted"&&base.status==="scheduled")||(eventType==="note_set"&&base.note===String(payload.note||""))||(eventType==="hours_set"&&base.hours===payload.hours)||(eventType==="removed"&&base.status==="removed")||(eventType==="moved"&&base.dateISO===payload.toDateISO))return true;
   let id = genId(`v2_${eventType}`);
   const baseId = String(id);
   let guard = 0;
@@ -969,87 +962,40 @@ function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supe
       rootOccurrenceId: String(baseOccurrenceId)
     });
   }
-  if (typeof saveCloudNow === "function") saveCloudNow();
-  else saveCloudDebounced();
-  renderCalendar();
   return true;
+  });
+  if(!result.saved)toast(result.error||"Maintenance change was not saved.");
+  renderCalendar();
+  return result.saved;
 }
 
 function resolveV2OneTimeOccurrenceState(rootOccurrenceId, scheduledEvent){
-  const rootId = String(rootOccurrenceId || "");
-  const events = Array.isArray(window.maintenanceOccurrencesV2) ? window.maintenanceOccurrencesV2 : [];
-  const relevant = events
-    .map((entry, index)=>({ entry, index }))
-    .filter(({ entry })=>{
-      if (!entry || typeof entry !== "object") return false;
-      const id = entry.id != null ? String(entry.id) : "";
-      if (id === rootId) return true;
-      if (entry.rootOccurrenceId != null && String(entry.rootOccurrenceId) === rootId) return true;
-      if (entry.supersedesEventId != null && String(entry.supersedesEventId) === rootId) return true;
-      return false;
-    })
-    .sort((a,b)=>{
-      const aTime = Date.parse(String(a.entry.recordedAtISO || ""));
-      const bTime = Date.parse(String(b.entry.recordedAtISO || ""));
-      const aValid = Number.isFinite(aTime);
-      const bValid = Number.isFinite(bTime);
-      if (aValid && bValid && aTime !== bTime) return aTime - bTime;
-      if (aValid && !bValid) return 1;
-      if (!aValid && bValid) return -1;
-      return a.index - b.index;
-    });
-  let status = "scheduled";
-  let note = scheduledEvent?.payload && Object.prototype.hasOwnProperty.call(scheduledEvent.payload, "note")
-    ? (scheduledEvent.payload.note == null ? "" : String(scheduledEvent.payload.note))
-    : "";
-  let hours = scheduledEvent?.payload && Object.prototype.hasOwnProperty.call(scheduledEvent.payload, "hours")
-    ? (scheduledEvent.payload.hours == null || scheduledEvent.payload.hours === "" ? null : Number(scheduledEvent.payload.hours))
-    : null;
-  let displayDateISO = normalizeDateKey(scheduledEvent?.effectiveDateISO || scheduledEvent?.dateISO || null);
-  relevant.forEach(({ entry })=>{
-    const type = String(entry.eventType || "");
-    if (type === "completed") status = "completed";
-    if (type === "uncompleted") status = "scheduled";
-    if (type === "skipped") status = "skipped";
-    if (type === "moved" && entry.payload && entry.payload.toDateISO){
-      status = "moved";
-      displayDateISO = normalizeDateKey(entry.payload.toDateISO) || displayDateISO;
-    }
-    if (type === "removed") status = "removed";
-    if (type === "note_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "note")){
-      note = entry.payload.note == null ? "" : String(entry.payload.note);
-    }
-    if (type === "hours_set" && entry.payload && Object.prototype.hasOwnProperty.call(entry.payload, "hours")){
-      const raw = entry.payload.hours;
-      hours = raw == null || raw === "" ? null : (Number.isFinite(Number(raw)) ? Number(raw) : hours);
-    }
-  });
-  return { status, note, hours, displayDateISO };
+  return window.OMAXMaintenanceCalendarIntegrity.resolveOneTime(window,rootOccurrenceId,scheduledEvent);
 }
 
-window.completeV2OneTimeOccurrence = (occurrenceId)=>{
+window.completeV2OneTimeOccurrence = async (occurrenceId)=>{
   const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
   const base = lookup[String(occurrenceId)];
   if (!base) return;
   if (base.status === "completed"){ toast("Already completed"); return; }
-  if (appendV2OccurrenceEvent(occurrenceId, "completed", {}, String(occurrenceId))) toast("Marked complete");
+  if (await appendV2OccurrenceEvent(occurrenceId, "completed", {}, String(occurrenceId))) toast("Marked complete");
 };
-window.uncompleteV2OneTimeOccurrence = (occurrenceId)=>{
+window.uncompleteV2OneTimeOccurrence = async (occurrenceId)=>{
   const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
   const base = lookup[String(occurrenceId)];
   if (!base) return;
   if (base.status !== "completed"){ toast("Already incomplete"); return; }
-  if (appendV2OccurrenceEvent(occurrenceId, "uncompleted", {}, String(occurrenceId))) toast("Marked incomplete");
+  if (await appendV2OccurrenceEvent(occurrenceId, "uncompleted", {}, String(occurrenceId))) toast("Marked incomplete");
 };
-window.setV2OneTimeOccurrenceNote = (occurrenceId)=>{
+window.setV2OneTimeOccurrenceNote = async (occurrenceId)=>{
   const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
   const base = lookup[String(occurrenceId)];
   if (!base) return;
   const input = window.prompt("Set note for this V2 reminder:", base.note || "");
   if (input === null) return;
-  if (appendV2OccurrenceEvent(occurrenceId, "note_set", { note: String(input) }, String(occurrenceId))) toast("Note saved");
+  if (await appendV2OccurrenceEvent(occurrenceId, "note_set", { note: String(input) }, String(occurrenceId))) toast("Note saved");
 };
-window.setV2OneTimeOccurrenceHours = (occurrenceId)=>{
+window.setV2OneTimeOccurrenceHours = async (occurrenceId)=>{
   const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
   const base = lookup[String(occurrenceId)];
   if (!base) return;
@@ -1058,25 +1004,25 @@ window.setV2OneTimeOccurrenceHours = (occurrenceId)=>{
   const trimmed = String(input).trim();
   const hours = trimmed === "" ? null : Number(trimmed);
   if (trimmed !== "" && (!Number.isFinite(hours) || hours < 0)){ toast("Enter a valid non-negative number."); return; }
-  if (appendV2OccurrenceEvent(occurrenceId, "hours_set", { hours }, String(occurrenceId))) toast("Hours saved");
+  if (await appendV2OccurrenceEvent(occurrenceId, "hours_set", { hours }, String(occurrenceId))) toast("Hours saved");
 };
-window.removeV2OneTimeOccurrence = (occurrenceId)=>{
+window.removeV2OneTimeOccurrence = async (occurrenceId)=>{
   const lookup = window.__calendarV2OneTimeLookup && typeof window.__calendarV2OneTimeLookup === "object" ? window.__calendarV2OneTimeLookup : {};
   const base = lookup[String(occurrenceId)] || getV2OneTimeOccurrenceView(String(occurrenceId));
   if (!base) return;
   if (base.status === "removed"){ toast("Already removed"); return; }
-  if (appendV2OccurrenceEvent(occurrenceId, "removed", { source: "calendar_panel" }, String(occurrenceId))){
+  if (await appendV2OccurrenceEvent(occurrenceId, "removed", { source: "calendar_panel" }, String(occurrenceId))){
     toast("Removed from calendar");
   }
 };
-window.moveV2OneTimeOccurrence = (occurrenceId)=>{
+window.moveV2OneTimeOccurrence = async (occurrenceId)=>{
   const base = getV2OneTimeOccurrenceView(String(occurrenceId));
   if (!base) return;
   const input = window.prompt("Move reminder to date (YYYY-MM-DD):", String(base.dateISO || ""));
   if (input == null) return;
   const toDateISO = normalizeDateKey(input);
   if (!toDateISO){ toast("Enter a valid date (YYYY-MM-DD)."); return; }
-  if (appendV2OccurrenceEvent(occurrenceId, "moved", { fromDateISO: base.dateISO, toDateISO, source: "calendar_panel" }, String(occurrenceId))) toast("Occurrence moved");
+  if (await appendV2OccurrenceEvent(occurrenceId, "moved", { fromDateISO: base.dateISO, toDateISO, source: "calendar_panel" }, String(occurrenceId))) toast("Occurrence moved");
 };
 function triggerDashboardAddPicker(opts){
   const detail = (opts && typeof opts === "object") ? { ...opts } : {};
@@ -3332,9 +3278,7 @@ function renderCalendar(){
     const mapKey = `${occurrenceId}:${dateISO}`;
     if (seenV2ChipKeys.has(mapKey)) return;
     if (status === "removed" || status === "skipped") return;
-    const equivalentKey = event.recoveryImportId
-      ? `recovery:${event.recoveryImportId}`
-      : makeV2CalendarEquivalentKey(["v2", "one_time", String(instance.legacyTaskId || event.legacyTaskId || instance.taskId || event.taskId || ""), name, resolvedDateISO, eventType]);
+    const equivalentKey = `one_time_root:${occurrenceId}`;
     if (seenV2ScheduledEquivalentKeys.has(equivalentKey)) return;
     seenV2ChipKeys.add(mapKey);
     seenV2ScheduledEquivalentKeys.add(equivalentKey);
@@ -3480,6 +3424,7 @@ function renderCalendar(){
   });
 
   
+window.__maintenanceCalendarProjectedRepeatRows=Object.values(dueMap).flat().filter(row=>row?.type==="v2repeat").map(row=>({id:row.id,instanceId:row.instanceId,taskId:row.taskId||row.repeatView?.taskId,dateISO:row.dateISO,name:row.name,status:row.status,mode:row.mode})).slice(0,500);
 window.resolveV2RepeatOccurrenceStateByRoot = resolveV2RepeatOccurrenceStateByRoot;
 window.resolveV2OneTimeOccurrenceState = resolveV2OneTimeOccurrenceState;
 const jobsMap = {};
