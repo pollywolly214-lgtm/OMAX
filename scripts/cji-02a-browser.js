@@ -8,13 +8,13 @@ const row={import_event_id:"browser-cji02a",record_status:"active",job_name:"Bro
 const checks=[];
 async function main(){
   const browser=await chromium.launch({channel:"msedge",headless:true});
-  async function scenario(name,mode,verify,{legacy=false,rows=[row],weeklyTimestampDrift=false,previewRace="",weeklyWindowRollover=false,weeklyWindowFinancialDrift=false}={}){
+  async function scenario(name,mode,verify,{legacy=false,rows=[row],weeklyTimestampDrift=false,previewRace="",weeklyWindowRollover=false,weeklyWindowFinancialDrift=false,emptyLegacy1111=false,legacy1111Conflict=false}={}){
     const context=await browser.newContext({acceptDownloads:true,serviceWorkers:"block"}),page=await context.newPage(),errors=[];
     page.setDefaultTimeout(30000);page.on("pageerror",error=>errors.push(error.message));
     await context.route("**/*",route=>new URL(route.request().url()).hostname==="localhost"?route.continue():route.abort());
     try{
       await page.goto("http://localhost:8000/?devsafe=1");await page.waitForFunction(()=>window.__initialAdoptComplete===true);
-      await page.evaluate(async({legacy,weeklyTimestampDrift,previewRace,weeklyWindowRollover,weeklyWindowFinancialDrift})=>{
+      await page.evaluate(async({legacy,weeklyTimestampDrift,previewRace,weeklyWindowRollover,weeklyWindowFinancialDrift,emptyLegacy1111,legacy1111Conflict})=>{
         if(!window.OMAXDevSafe.active)throw Error("Disposable backend required");
         location.hash="#/jobs";route();
         localStorage.setItem("job_material_pricing_v1",JSON.stringify({wasteFactor:10,materials:[{id:"steel",name:"Steel",density:.283,pricePerLb:.8}]}));
@@ -22,6 +22,10 @@ async function main(){
           setJobFolders([{id:"jobs_root",name:"All Jobs",parent:null,order:1},{id:"job_project_0000",name:"0000 Undisclosed Project",projectNumber:null,parent:"jobs_root",order:17,color:"#ABCDEF",custom:{owner:"shop",flags:[1,2]}}]);
           window.cuttingJobs=Array.from({length:11},(_,i)=>({id:"old-"+i,name:"Original cut "+i,projectNumber:"0000",cat:"job_project_0000",cutNumber:"C"+String(i+1).padStart(3,"0"),startISO:"2020-01-01",files:[]}));
           cuttingJobs=window.cuttingJobs;
+        }
+        if(emptyLegacy1111){
+          setJobFolders([...window.jobFolders,{id:"job_project_1111",name:"1111 Company Improvements",projectNumber:null,parent:"jobs_root",order:18,color:"#FEDCBA",custom:{keep:"legacy"}}]);
+          if(legacy1111Conflict){window.cuttingJobs.push({id:"actual-1111",name:"Historical 1111",projectNumber:"1111",cat:"job_project_1111",cutNumber:"C012",startISO:"2020-01-02",files:[]},{id:"mislinked-0000",name:"Mislinked 0000",projectNumber:"0000",cat:"job_project_1111",cutNumber:"C013",startISO:"2020-01-03",files:[]});}
         }
         if(weeklyTimestampDrift){
           window.weeklyCostReports=[{id:"browser-week",weekKey:"2026-09-28",weekStartISO:"2026-09-28",weekEndISO:"2026-10-04",totalCutCost:123.45,totalMaintenanceCost:12,cutByCategory:{Blanco:{cost:123.45}},generatedAtISO:"2026-10-02T19:52:35.090Z"}];
@@ -88,15 +92,19 @@ async function main(){
           if(window.__cjiDefiniteFailure)return{saved:false,stateWriteAttempted:true,definiteFailure:true,error:"Fixture CAS rejection"};
           return save(options);
         };
-      },{legacy,weeklyTimestampDrift,previewRace,weeklyWindowRollover,weeklyWindowFinancialDrift});
+      },{legacy,weeklyTimestampDrift,previewRace,weeklyWindowRollover,weeklyWindowFinancialDrift,emptyLegacy1111,legacy1111Conflict});
       if(mode==="poller")await page.evaluate(()=>{window.__unrelatedPoll=setInterval(()=>{document.getElementById("cuttingJobImportStatus").textContent;},10);});
       if(mode==="observer")await page.evaluate(()=>{window.__unrelatedObserver=new MutationObserver(()=>{document.getElementById("cuttingJobImportStatus").textContent;});window.__unrelatedObserver.observe(document.getElementById("cuttingJobImportStatus"),{childList:true,subtree:true});});
       await page.evaluate(()=>openReviewedCuttingJobImporter());
       await page.locator("#cuttingJobImportFile").setInputFiles({name:"fixture.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(rows))});
       await page.locator("#cuttingJobImportPreview").click();await page.waitForFunction(()=>!document.getElementById("cuttingJobImportPreview").disabled);
-      if((previewRace&&previewRace!=="transient")||weeklyWindowFinancialDrift)await verify(page);
+      if((previewRace&&previewRace!=="transient")||weeklyWindowFinancialDrift||legacy1111Conflict)await verify(page);
       else{
         assert.equal(await page.locator("#cuttingJobImportStatus").textContent().then(text=>text.startsWith("Import stopped")),false,await page.locator("#cuttingJobImportStatus").textContent());
+        if(emptyLegacy1111){
+          assert.match(await page.locator("#cuttingJobImportRows").textContent(),/Rename existing/);assert.match(await page.locator("#cuttingJobImportRows").textContent(),/Unused legacy 1111 Company Improvements folder/);
+          await page.locator("#cuttingJobRepairAudit").click();assert.match(await page.locator("#cuttingJobImportStatus").textContent(),/Unused legacy 1111 Company Improvements folder/);
+        }
         await page.locator("#cuttingJobImportReviewed").check();assert.equal(await page.locator("#cuttingJobImportRun").isEnabled(),true);
         await page.locator("#cuttingJobImportRun").click();await verify(page);
       }
@@ -119,6 +127,20 @@ async function main(){
     assert.deepEqual(unrelated(result.cloud),unrelated(result.before));return result;
   };
   try{
+    const companyRows=[{...row,project_number:"0000",category:"Company Improvements"}];
+    await scenario("proven 0000 plus unused legacy 1111 previews rename, diagnoses audit and preserves both IDs","none",async page=>{
+      assert.doesNotMatch(await page.locator("#cuttingJobImportRows").textContent(),/Conflict \/ Review/);
+      const audit=await page.evaluate(()=>JSON.parse(document.getElementById("cuttingJobImportRows").dataset.lastRepairAudit));assert.equal(audit.blockingError,"");assert.deepEqual(audit.repairPlan.renamed,[{id:"job_project_0000",from:"0000 Undisclosed Project",to:"0000 Company Improvements"}]);assert.ok(audit.repairPlan.assignments.every(a=>a.from===a.to));assert.equal(audit.categoryOwnershipDiagnostics[0].status,"unused-legacy");assert.equal(audit.categoryOwnershipDiagnostics[0].cleanupPlanned,false);
+      const pending=page.waitForEvent("download");await page.locator("#cuttingJobImportConfirmRun").click();const download=await pending;const filename=path.join(output,"unused-legacy-1111-backup.json");await download.saveAs(filename);assert.equal(await download.failure(),null);const backup=JSON.parse(fs.readFileSync(filename,"utf8"));assert.equal(backup.jobFolders.find(f=>f.id==="job_project_0000").name,"0000 Undisclosed Project");assert.equal(backup.jobFolders.find(f=>f.id==="job_project_1111").name,"1111 Company Improvements");
+      await final(page);assert.match(await page.locator("#cuttingJobImportStatus").textContent(),/^Import complete/);
+      const r=await page.evaluate(async()=>({cloud:await readCurrentCloudStateReadOnly(),before:window.__cjiBefore,result:JSON.parse(document.getElementById("cuttingJobImportRows").dataset.lastImportResult),blobs:window.__cjiBackupBlobs,saves:window.__cjiSaves,download:window.__cjiTrace.find(t=>t.stage==="download")}));
+      assert.equal(r.result.saveCompleted,true);assert.equal(r.result.createdCategoryIds.length,0);assert.equal(r.result.renamedCategories.length,1);assert.equal(r.cloud.jobFolders.length,r.before.jobFolders.length);assert.equal(r.blobs,1);assert.equal(r.saves,1);assert.equal(r.download.active,true);assert.equal(r.cloud.jobFolders.find(f=>f.id==="job_project_0000").name,"0000 Company Improvements");assert.deepEqual(r.cloud.jobFolders.find(f=>f.id==="job_project_1111"),r.before.jobFolders.find(f=>f.id==="job_project_1111"));assert.deepEqual(r.cloud.cuttingJobs.slice(0,11),r.before.cuttingJobs);assert.equal(r.cloud.cuttingJobs[11].cat,"job_project_0000");
+      const plan=await page.evaluate(rows=>CuttingJobImporter.definitionPlan(cuttingJobImporter.preview(rows)),[{...companyRows[0],import_event_id:"next"}]);assert.equal(plan.newCategories.length,0);assert.equal(plan.renamedCategories.length,0);assert.equal(plan.existingCategories[0].id,"job_project_0000");
+    },{legacy:true,emptyLegacy1111:true,rows:companyRows});
+    await scenario("linked 1111 and 0000 ownership is a true conflict with zero backup or save","none",async page=>{
+      assert.match(await page.locator("#cuttingJobImportRows").textContent(),/Conflict \/ Review/);assert.match(await page.locator("#cuttingJobImportRows").textContent(),/conflicting project ownership/);
+      const r=await page.evaluate(()=>({diagnostics:JSON.parse(document.getElementById("cuttingJobImportRows").dataset.categoryOwnershipReview),saves:window.__cjiSaves,blobs:window.__cjiBackupBlobs,downloads:window.__cjiTrace.filter(t=>t.stage==="download").length}));assert.equal(r.diagnostics[0].status,"ownership-conflict");assert.equal(r.diagnostics[0].linkedJobCount,2);assert.equal(r.diagnostics[0].cleanupPlanned,false);assert.equal(r.saves,0);assert.equal(r.blobs,0);assert.equal(r.downloads,0);assert.equal(await page.locator("#cuttingJobImportRun").isDisabled(),true);
+    },{legacy:true,emptyLegacy1111:true,legacy1111Conflict:true,rows:companyRows});
     const currentWindow={weekKey:"2026-10-05",weekStartISO:"2026-10-05",weekEndISO:"2026-10-11",weekLabel:"Oct 4, 2026 - Oct 10, 2026",generatedAtISO:"2026-10-05T14:09:31.745Z"};
     await scenario("25-report Sep 28 / Oct 5 window rollover prepares one backup and imports normally","none",async page=>{
       const preparation=await page.evaluate(()=>JSON.parse(document.getElementById("cuttingJobImportRows").dataset.lastPreviewPreparation));assert.equal(preparation.status,"ready");assert.equal(preparation.firstMismatchPath,"");assert.equal(preparation.localSignatureChanged,false);assert.equal(preparation.cloudRevision,preparation.loadedRevision);

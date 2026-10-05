@@ -50,6 +50,22 @@
     if(other)return reject(`Category "${name}" belongs to confirmed project ${other[0]}, not ${key}.`);
     return{...result,categoryName:known||name,canonicalName:canonicalCategoryName(key)||canonicalName};
   }
+  function categoryOwnershipDiagnostics(folders,jobs=[]){
+    const diagnostics=[];
+    for(const folder of Array.isArray(folders)?folders:[]){
+      if(!folder||String(folder.id)===ROOT_ID)continue;
+      const prefix=leadingProject(folder.name),metadata=projectKey(folder.projectNumber);
+      if(!prefix||nameKey(folder.name)==="0000 undisclosed project")continue;
+      const display=categoryName(folder.name,prefix),inferred=PROJECT_CATEGORIES.find(([number])=>nameKey(projectName(number))===nameKey(display));
+      if(!inferred||inferred[0]===prefix)continue;
+      const linked=jobs.filter(job=>String(job?.cat||"")===String(folder.id)),linkedProjects=[...new Set(linked.map(job=>projectKey(job.projectNumber)))].sort();
+      const retired1111=prefix==="1111"&&inferred[0]==="0000",unused=retired1111&&!metadata&&linked.length===0;
+      const conflicting=new Set([prefix,metadata,...linkedProjects].filter(Boolean)).size>1;
+      const label=unused?"Unused legacy 1111 Company Improvements folder":retired1111?"Legacy 1111 Company Improvements folder requires review":"Project-prefixed category has a conflicting canonical display name";
+      diagnostics.push({id:String(folder.id||""),name:clean(folder.name),projectNumber:prefix,inferredProjectNumber:inferred[0],status:unused?"unused-legacy":conflicting?"ownership-conflict":"legacy-review",linkedJobCount:linked.length,linkedProjectNumbers:linkedProjects,projectNumberMetadata:metadata||null,cleanupPlanned:false,message:label+" ("+String(folder.id||"missing ID")+", "+linked.length+" linked jobs); preserved without rename, reuse, or deletion."});
+    }
+    return diagnostics;
+  }
   function resolveProjectCategory(project,folders,category,jobs=[]){
     const pair=normalizeProjectPair(project,category),key=pair.projectNumber;
     const base={...pair,folder:null};
@@ -66,6 +82,10 @@
       const strong=new Set([metadata,leading,reversed,...linked.map(job=>projectKey(job.projectNumber))].filter(Boolean));
       const claims=new Set([...strong,known?.[0]].filter(Boolean));
       const sameName=!obsolete0000&&nameKey(folderName)===nameKey(pair.categoryName);
+      // An explicit prefix owns its folder. A conflicting canonical display name
+      // is a review issue for that folder, not proof of another project's ownership.
+      // Metadata or linked jobs naming the requested key still make it a real conflict.
+      if(leading&&leading!==key&&known?.[0]===key&&!strong.has(key))continue;
       if(!claims.has(key)&&!sameName)continue;
       if(claims.size>1||[...claims].some(number=>number!==key))return{...base,status:"conflict",reason:`Category "${folder.name}" has conflicting project ownership (${[...claims].join(", ")}); project ${key} requires review.`};
       if(!clean(folder.id))return{...base,status:"conflict",reason:"Category has no stable folder ID; review required."};
@@ -102,6 +122,6 @@
   }
   function planResequence(active,completed){const ordered=orderedJobs(active,completed),sequence=ordered.map(({job},index)=>({id:String(job.id),from:job.cutNumber??null,cutNumber:`C${String(index+1).padStart(3,"0")}`}));return{total:sequence.length,changed:sequence.filter(item=>item.from!==item.cutNumber).map(item=>({id:item.id,from:item.from,to:item.cutNumber})),sequence:sequence.map(({id,cutNumber})=>({id,cutNumber}))};}
   function resequence(active,completed){const proposal=planResequence(active,completed),byId=new Map(proposal.sequence.map(item=>[item.id,item.cutNumber]));for(const job of [...(active||[]),...(completed||[])])if(byId.has(String(job?.id)))job.cutNumber=byId.get(String(job.id));return proposal;}
-  function audit(state,folders){const jobs=[...(state?.cuttingJobs||[]),...(state?.completedCuttingJobs||[])],assignments=jobs.map(job=>{const resolution=resolveProjectCategory(job?.projectNumber,folders,undefined,jobs);return{id:String(job?.id||""),projectNumber:projectKey(job?.projectNumber),currentCategoryId:String(job?.cat||""),targetCategoryId:resolution.folder?String(resolution.folder.id):null,status:resolution.status,rename:resolution.rename,missingCategory:resolution.status==="missing"?resolution.canonicalName:null};});return{readOnly:true,legacy1111:{message:"Historical 1111 requires review; no automatic mapping or migration.",jobIds:jobs.filter(job=>projectKey(job.projectNumber)==="1111").map(job=>String(job.id)),folderIds:(folders||[]).filter(folder=>projectKey(folder.projectNumber)==="1111"||leadingProject(folder.name)==="1111"||jobs.some(job=>projectKey(job.projectNumber)==="1111"&&String(job.cat)===String(folder.id))).map(folder=>String(folder.id))},jobCount:jobs.length,expectedCategoryNames:PROJECT_CATEGORIES.map(x=>x[1]),assignments,unresolved:assignments.filter(x=>!["matched","rename"].includes(x.status)),numbering:orderedJobs(state?.cuttingJobs,state?.completedCuttingJobs).map(({job},index)=>({id:String(job.id),current:job.cutNumber??null,expected:`C${String(index+1).padStart(3,"0")}`}))};}
-  return Object.freeze({ROOT_ID,PROJECT_CATEGORIES,normalizeProjectKey,canonicalCategoryName,leadingProject,reversedProject,normalizeProjectPair,resolveProjectCategory,orderedJobs,planResequence,resequence,audit});
+  function audit(state,folders){const jobs=[...(state?.cuttingJobs||[]),...(state?.completedCuttingJobs||[])],assignments=jobs.map(job=>{const resolution=resolveProjectCategory(job?.projectNumber,folders,undefined,jobs);return{id:String(job?.id||""),projectNumber:projectKey(job?.projectNumber),currentCategoryId:String(job?.cat||""),targetCategoryId:resolution.folder?String(resolution.folder.id):null,status:resolution.status,rename:resolution.rename,missingCategory:resolution.status==="missing"?resolution.canonicalName:null};});return{readOnly:true,categoryOwnershipDiagnostics:categoryOwnershipDiagnostics(folders,jobs),legacy1111:{message:"Historical 1111 requires review; no automatic mapping or migration.",jobIds:jobs.filter(job=>projectKey(job.projectNumber)==="1111").map(job=>String(job.id)),folderIds:(folders||[]).filter(folder=>projectKey(folder.projectNumber)==="1111"||leadingProject(folder.name)==="1111"||jobs.some(job=>projectKey(job.projectNumber)==="1111"&&String(job.cat)===String(folder.id))).map(folder=>String(folder.id))},jobCount:jobs.length,expectedCategoryNames:PROJECT_CATEGORIES.map(x=>x[1]),assignments,unresolved:assignments.filter(x=>!["matched","rename"].includes(x.status)),numbering:orderedJobs(state?.cuttingJobs,state?.completedCuttingJobs).map(({job},index)=>({id:String(job.id),current:job.cutNumber??null,expected:`C${String(index+1).padStart(3,"0")}`}))};}
+  return Object.freeze({ROOT_ID,PROJECT_CATEGORIES,normalizeProjectKey,canonicalCategoryName,leadingProject,reversedProject,normalizeProjectPair,categoryOwnershipDiagnostics,resolveProjectCategory,orderedJobs,planResequence,resequence,audit});
 });
