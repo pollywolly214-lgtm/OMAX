@@ -18,7 +18,27 @@ function protectedBusiness(state) {
   return result;
 }
 
-test("real dashboard click creates one standalone task, saves, reloads and completes without a diagnostic hook", { timeout: 45000 }, async t => {
+const storedReports = [{
+  weekKey: "2026-09-28", weekStartISO: "2026-09-28", weekEndISO: "2026-10-04",
+  totalCutCost: 125, totalMaintenanceCost: -70, totalCutHours: 2,
+  cutItems: [{ id: "retained-cut", dateISO: "2026-09-29", name: "Retained historical report item", cost: 125, hours: 2 }],
+  maintenanceItems: [{ id: "retained-maintenance", dateISO: "2026-09-30", cost: -70 }],
+  cutByCategory: { Archived: { count: 1, cost: 125, hours: 2 } },
+  generatedAtISO: "2026-10-02T00:00:00Z", weekLabel: "Sep 27, 2026 - Oct 3, 2026",
+  operatorNote: "Preserve authoritative report details"
+}, {
+  weekKey: "2026-08-31", weekStartISO: "2026-08-31", weekEndISO: "2026-09-06",
+  totalCutCost: 50, totalMaintenanceCost: -10, totalCutHours: 1,
+  cutItems: [], maintenanceItems: [], cutByCategory: {},
+  generatedAtISO: "2026-09-07T00:00:00Z", reviewed: true, customTotals: { approvedCost: 40 }
+}];
+
+for (const scenario of [
+  { name: "original empty report baseline", reports: null },
+  { name: "prior-week four-field rollover", rollover: true },
+  { name: "authoritative historical reports", reports: storedReports }
+])
+test(`real dashboard click saves, reloads and completes without a diagnostic hook: ${scenario.name}`, { timeout: 45000 }, async t => {
   const server = http.createServer(async (req, res) => {
     const pathname = new URL(req.url, "http://localhost").pathname;
     const file = path.resolve(root, "." + pathname + (pathname.endsWith("/") ? "index.html" : ""));
@@ -34,9 +54,10 @@ test("real dashboard click creates one standalone task, saves, reloads and compl
   const origin = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true, ...(process.platform === "win32" ? { channel: "msedge" } : {}) });
   t.after(() => browser.close());
-  const context = await browser.newContext(); // Fresh disposable profile; no user caches or credentials.
+  const context = await browser.newContext({ timezoneId: "America/Chicago", locale: "en-US" }); // Fresh disposable profile; no user caches or credentials.
   await context.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
   const page = await context.newPage(), errors = [];
+  await page.clock.setFixedTime(new Date("2026-10-05T17:00:00Z"));
   page.on("pageerror", error => errors.push(error.message));
   page.setDefaultTimeout(8000);
   const load = async () => {
@@ -53,7 +74,36 @@ test("real dashboard click creates one standalone task, saves, reloads and compl
   // unrelated load behavior or bypass the maintenance equality/revision guard.
   await load();
   assert.equal((await page.evaluate(() => saveCloudNow())).saved, true);
+  const scenarioReports = scenario.rollover ? await page.evaluate(() => [{
+    ...computeCostModel().weeklyReports.find(report => report.weekKey === "2026-10-05"),
+    weekKey: "2026-09-28", weekStartISO: "2026-09-28", weekEndISO: "2026-10-04",
+    weekLabel: "Sep 27, 2026 - Oct 3, 2026"
+  }]) : scenario.reports;
+  if (scenarioReports) {
+    // Provision only this fresh profile's disposable authoritative backend.
+    // Do not save the renderer's runtime representation over these reports.
+    await page.evaluate(async reports => {
+      if (!OMAXDevSafe.active || typeof firebase !== "undefined") throw Error("Disposable backend required");
+      const ref = OMAXDevSafe.db.doc(FB.docRef.path), source = (await ref.get()).data();
+      await ref.set({ ...source, weeklyCostReports: reports });
+    }, scenarioReports);
+    await load();
+  }
   const before = await cloud();
+  if (scenarioReports) assert.deepEqual(before.weeklyCostReports, scenarioReports);
+  const reportSnapshot = () => page.evaluate(() => compactStateForStorage(snapshotState({ skipLocalFileCacheSync: true })).weeklyCostReports);
+  assert.deepEqual(await reportSnapshot(), before.weeklyCostReports);
+  const baselineSnapshot = await page.evaluate(() => compactStateForStorage(snapshotState({ skipLocalFileCacheSync: true })));
+  assert.deepEqual(history.normalizeBusinessForComparison(baselineSnapshot), history.normalizeBusinessForComparison(before));
+  // Both renderers consume a freshly calculated display model; neither may
+  // publish it into the protected stored collection, even on repeated renders.
+  const displayedReports = await page.evaluate(() => computeCostModel().weeklyReports);
+  const displayWeeks = displayedReports.map(report => report.weekKey);
+  assert.equal(displayedReports.find(report => report.weekKey === "2026-10-05").weekLabel, "Oct 5, 2026 - Oct 11, 2026");
+  if (scenarioReports) assert.notDeepEqual(displayWeeks, scenarioReports.map(report => report.weekKey));
+  await page.evaluate(() => { renderDashboard(); renderDashboard(); });
+  assert.deepEqual(await reportSnapshot(), before.weeklyCostReports);
+  assert.deepEqual(await cloud(), before);
   assert.equal(await page.evaluate(() => typeof window.recordMaintenanceV2MutationSource), "undefined");
   await page.evaluate(() => {
     window.__mcfStages = [];
@@ -95,6 +145,7 @@ test("real dashboard click creates one standalone task, saves, reloads and compl
   assert.ok(stages.indexOf("createMaintenanceV2FromTemplate") < stages.indexOf("saveCloudNow"));
   assert.ok(stages.filter(value => value === "readCurrentCloudStateReadOnly").length >= 3); // Baseline, guarded read-back, explicit test read.
   const saved = await cloud();
+  assert.deepEqual(saved.weeklyCostReports, before.weeklyCostReports);
   for (const key of maintenanceKeys) {
     assert.equal(saved[key].length, before[key].length + 1, key);
     for (const record of before[key]) assert.deepEqual(saved[key].find(row => row.id === record.id), record);
@@ -113,6 +164,7 @@ test("real dashboard click creates one standalone task, saves, reloads and compl
 
   await load(); // Full bootstrap/read/adoption, not an artificial copy of the saved arrays.
   assert.deepEqual(await cloud(), saved);
+  assert.deepEqual(await reportSnapshot(), before.weeklyCostReports);
   assert.equal(await page.evaluate(id => getV2OneTimeOccurrenceView(id).status, scheduled.id), "scheduled");
   await page.evaluate(() => {
     window.__mcfCompletion = [];
@@ -148,9 +200,15 @@ test("real dashboard click creates one standalone task, saves, reloads and compl
   assert.equal(identities.integrity(completed).valid, true);
   await load();
   assert.deepEqual(await cloud(), completed);
+  assert.deepEqual(await reportSnapshot(), before.weeklyCostReports);
   assert.equal(await page.evaluate(id => getV2OneTimeOccurrenceView(id).status, scheduled.id), "completed");
   await page.locator(`[data-cal-v2-one-time="${scheduled.id}"]`).first().click();
   assert.equal(await page.locator("#v2OneTimePanel [data-v2-panel-complete]").isDisabled(), true);
   assert.deepEqual(await cloud(), completed); // Reopening completed task remains a no-op.
+  await page.locator("#v2OneTimePanel [data-v2-panel-close]").click();
+  await page.evaluate(() => { location.hash = "#/costs"; route(); });
+  await page.waitForFunction(() => document.getElementById("costDataCenterModal"));
+  assert.deepEqual(await reportSnapshot(), before.weeklyCostReports);
+  assert.deepEqual(await cloud(), completed);
   assert.deepEqual(errors, []);
 });

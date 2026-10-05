@@ -18360,12 +18360,11 @@ function computeCostModel(){
       totalCutProfitLabel: formatterCurrency(report.totalCutCost, { showPlus: true, decimals: Math.abs(report.totalCutCost) < 1000 ? 2 : 0 }),
       totalMaintenanceLossLabel: formatterCurrency(-Math.abs(report.totalMaintenanceCost), { showPlus: true, decimals: report.totalMaintenanceCost < 1000 ? 2 : 0 }),
       totalCutHoursLabel: formatHours(report.totalCutHours),
-      weekLabel: `${formatDateLabelShort(new Date(report.weekStartISO))} - ${formatDateLabelShort(new Date(report.weekEndISO))}`
+      weekLabel: `${formatDateLabelShort(parseDateLocal(report.weekStartISO))} - ${formatDateLabelShort(parseDateLocal(report.weekEndISO))}`
     }));
 
-  if (typeof window !== "undefined"){
-    window.weeklyCostReports = weeklyReports.map(item => ({ ...item }));
-  }
+  // These recalculated reports belong to the display model. Rendering must
+  // preserve the authoritative weeklyCostReports collection used by saves.
 
   const summaryCards = [
     {
