@@ -1,9 +1,9 @@
 (function(root,factory){
   "use strict";
-  const api=factory();
+  const api=factory(root?.CuttingJobChronology||(typeof require==="function"?require("./cuttingJobChronology.js"):null));
   if(typeof module==="object"&&module.exports)module.exports=api;
   if(root)root.CuttingJobHistory=api;
-})(typeof globalThis!=="undefined"?globalThis:this,function(){
+})(typeof globalThis!=="undefined"?globalThis:this,function(chronology){
   "use strict";
 
   const ROOT_ID="jobs_root";
@@ -113,15 +113,23 @@
   const currentSequence=job=>positiveInteger(String(job?.cutNumber??"").replace(/^C/i,""));
   const cutPdfOrdinal=(job,date)=>{const eventId=String(job?.import_event_id||job?.importProvenance?.import_event_id||"").trim(),match=/^CUTPDF-(\d{8})-(\d{3})$/.exec(eventId);if(!match||match[1]!==String(date).replaceAll("-",""))return null;return positiveInteger(match[2]);};
   const historicalDate=(job,completed)=>clean(completed?job?.completedAtISO:job?.startISO).slice(0,10)||"9999-12-31";
+  const explicitChronologyPresent=(active,completed)=>[...(active||[]),...(completed||[])].some(job=>job&&["cutDateISO","cutOrderWithinDay"].some(field=>Object.prototype.hasOwnProperty.call(job,field)));
   function orderedJobs(active,completed){
+    // Established legacy workflows keep their old numbering policy. Once actual
+    // chronology is explicitly established, only the canonical model may order
+    // the domain; unresolved legacy members remain read-only until reviewed.
+    if(explicitChronologyPresent(active,completed)){
+      if(chronology)return chronology.readChronology(active,completed).entries;
+      return [...(active||[]).map(job=>({job,completed:false})),...(completed||[]).map(job=>({job,completed:true}))];
+    }
     const entries=[...(Array.isArray(active)?active:[]).map(job=>({job,completed:false})),...(Array.isArray(completed)?completed:[]).map(job=>({job,completed:true}))];
     const completeForAll=(items,read,{unique=false}={})=>{const values=items.map(read);return items.length&&values.every(Number.isFinite)&&(!unique||new Set(values).size===values.length)?values:null;};
     const groups=new Map();for(const entry of entries){entry.date=historicalDate(entry.job,entry.completed);if(!groups.has(entry.date))groups.set(entry.date,[]);groups.get(entry.date).push(entry);}
     for(const[date,group]of groups){const imports=group.filter(entry=>imported(entry.job));let values=completeForAll(imports,entry=>sourceRow(entry.job));if(!values)values=completeForAll(imports,entry=>sourceSequence(entry.job));if(!values)values=completeForAll(imports,entry=>cutPdfOrdinal(entry.job,date),{unique:true});if(!values)values=completeForAll(imports,entry=>legacyCutSequence(entry.job));imports.forEach((entry,index)=>{entry.sameDayOrder=values?values[index]:Number.MAX_SAFE_INTEGER;});group.filter(entry=>!imported(entry.job)).forEach(entry=>{entry.sameDayOrder=currentSequence(entry.job)??Number.MAX_SAFE_INTEGER;});}
     return entries.sort((a,b)=>a.date.localeCompare(b.date)||a.sameDayOrder-b.sameDayOrder||String(a.job?.id||"").localeCompare(String(b.job?.id||"")));
   }
-  function planResequence(active,completed){const ordered=orderedJobs(active,completed),sequence=ordered.map(({job},index)=>({id:String(job.id),from:job.cutNumber??null,cutNumber:`C${String(index+1).padStart(3,"0")}`}));return{total:sequence.length,changed:sequence.filter(item=>item.from!==item.cutNumber).map(item=>({id:item.id,from:item.from,to:item.cutNumber})),sequence:sequence.map(({id,cutNumber})=>({id,cutNumber}))};}
-  function resequence(active,completed){const proposal=planResequence(active,completed),byId=new Map(proposal.sequence.map(item=>[item.id,item.cutNumber]));for(const job of [...(active||[]),...(completed||[])])if(byId.has(String(job?.id)))job.cutNumber=byId.get(String(job.id));return proposal;}
+  function planResequence(active,completed){if(explicitChronologyPresent(active,completed)){if(chronology)return chronology.planRenumbering(active,completed);return{blocked:true,issues:[{code:"chronology_unavailable"}],changed:[],sequence:[]};}const ordered=orderedJobs(active,completed),sequence=ordered.map(({job},index)=>({id:String(job.id),from:job.cutNumber??null,cutNumber:`C${String(index+1).padStart(3,"0")}`}));return{total:sequence.length,changed:sequence.filter(item=>item.from!==item.cutNumber).map(item=>({id:item.id,from:item.from,to:item.cutNumber})),sequence:sequence.map(({id,cutNumber})=>({id,cutNumber}))};}
+  function resequence(active,completed){const proposal=planResequence(active,completed);if(proposal.blocked)return proposal;const byId=new Map(proposal.sequence.map(item=>[item.id,item.cutNumber]));for(const job of [...(active||[]),...(completed||[])])if(byId.has(String(job?.id)))job.cutNumber=byId.get(String(job.id));return proposal;}
   function audit(state,folders){const jobs=[...(state?.cuttingJobs||[]),...(state?.completedCuttingJobs||[])],assignments=jobs.map(job=>{const resolution=resolveProjectCategory(job?.projectNumber,folders,undefined,jobs);return{id:String(job?.id||""),projectNumber:projectKey(job?.projectNumber),currentCategoryId:String(job?.cat||""),targetCategoryId:resolution.folder?String(resolution.folder.id):null,status:resolution.status,rename:resolution.rename,missingCategory:resolution.status==="missing"?resolution.canonicalName:null};});return{readOnly:true,categoryOwnershipDiagnostics:categoryOwnershipDiagnostics(folders,jobs),legacy1111:{message:"Historical 1111 requires review; no automatic mapping or migration.",jobIds:jobs.filter(job=>projectKey(job.projectNumber)==="1111").map(job=>String(job.id)),folderIds:(folders||[]).filter(folder=>projectKey(folder.projectNumber)==="1111"||leadingProject(folder.name)==="1111"||jobs.some(job=>projectKey(job.projectNumber)==="1111"&&String(job.cat)===String(folder.id))).map(folder=>String(folder.id))},jobCount:jobs.length,expectedCategoryNames:PROJECT_CATEGORIES.map(x=>x[1]),assignments,unresolved:assignments.filter(x=>!["matched","rename"].includes(x.status)),numbering:orderedJobs(state?.cuttingJobs,state?.completedCuttingJobs).map(({job},index)=>({id:String(job.id),current:job.cutNumber??null,expected:`C${String(index+1).padStart(3,"0")}`}))};}
   return Object.freeze({ROOT_ID,PROJECT_CATEGORIES,normalizeProjectKey,canonicalCategoryName,leadingProject,reversedProject,normalizeProjectPair,categoryOwnershipDiagnostics,resolveProjectCategory,orderedJobs,planResequence,resequence,audit});
 });

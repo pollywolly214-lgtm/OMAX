@@ -4220,6 +4220,9 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       pending.dailyCutHours = mergeDailyCutHoursForSave(pending.dailyCutHours, remote.dailyCutHours);
       pending.pumpEff = mergePumpEffForSave(pending.pumpEff, remote.pumpEff);
       if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
+      // Additional chronology restriction, after all existing protected merges.
+      // It cannot bypass CAS, identity, content, size or protected-state gates.
+      if (options.validatePreparedState && options.validatePreparedState(pending) !== true) throw Object.assign(new Error("Prepared chronology state changed; review again."), { definite:true, code:"chronology_state_changed" });
       return pending;
     }
   });
@@ -4233,6 +4236,28 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   }
   return result;
 }
+
+// Foundation adapter only. No UI, hydration, creation, or import invokes it.
+// The future reviewed correction flow must supply the loaded expected revision.
+const cuttingJobChronologyMutationApi = window.CuttingJobChronology?.createMutationApi({
+  canWrite:()=>canWriteCloud("cutting-job chronology") && !hasPendingLocalChanges
+    && !isVercelPreviewRuntime() && !window.__lastIndeterminateSave,
+  localVersion:()=>({
+    revision:window.__loadedCloudRevisionForSaveGuard, mutation:lastLocalMutationAt,
+    state:getInventoryIdentityRepairLocalState()
+  }),
+  readState:readCurrentCloudStateReadOnly,
+  baselineMatches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)
+    && stableStringify(source)===stableStringify(getInventoryIdentityRepairLocalState()),
+  writeState:(next,expectedRevision,validatePreparedState)=>writeAuthoritativeStateSnapshot(next,{merge:true},{expectedRevision,validatePreparedState}),
+  adoptVerifiedState:cloud=>adoptIdentityCheckedAuthoritativeState(cloud)?.recovery===false,
+  suspend:result=>{
+    window.__autosaveDisabled=true;
+    window.__recoveryInspectMode=true;
+    window.__lastIndeterminateSave=result;
+    renderRecoveryDiagnosticsPanel();
+  }
+});
 
 function getInventoryIdentityRepairLocalState(){
   const source=window.__lastLoadedCloudState||{},live={};
