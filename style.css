@@ -600,13 +600,13 @@ body.cost-receipt-modal-open{ overflow:hidden; }
 }
 #costReceiptModal .cost-weekly-table-wrap{
   max-width:100%;
-  overflow-x:hidden;
+  overflow-x:auto;
   overflow-y:auto;
 }
 #costReceiptModal .cost-receipt-week-table,
 #costReceiptModal .cost-receipt-summary-table{
   width:100%;
-  min-width:0;
+  min-width:1100px;
   table-layout:fixed;
 }
 #costReceiptModal .cost-receipt-week-table th,
@@ -626,53 +626,29 @@ body.cost-receipt-modal-open{ overflow:hidden; }
   padding:6px 8px;
   white-space:nowrap;
 }
+#costReceiptModal .cost-receipt-week-table{ min-width:1280px; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(1),
-#costReceiptModal .cost-receipt-week-table td:nth-child(1){ width:10%; }
+#costReceiptModal .cost-receipt-summary-table th:nth-child(1){ width:120px; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(2),
-#costReceiptModal .cost-receipt-week-table td:nth-child(2){ width:19%; }
-#costReceiptModal .cost-receipt-week-table th:nth-child(3),
-#costReceiptModal .cost-receipt-week-table td:nth-child(3){ width:10.5%; }
-#costReceiptModal .cost-receipt-week-table th:nth-child(4),
-#costReceiptModal .cost-receipt-week-table td:nth-child(4){ width:5.5%; }
-#costReceiptModal .cost-receipt-week-table th:nth-child(5),
-#costReceiptModal .cost-receipt-week-table td:nth-child(5){ width:13.5%; }
-#costReceiptModal .cost-receipt-week-table th:nth-child(6),
-#costReceiptModal .cost-receipt-week-table td:nth-child(6){ width:8%; }
-#costReceiptModal .cost-receipt-week-table th:nth-child(7),
-#costReceiptModal .cost-receipt-week-table td:nth-child(7){ width:8.5%; }
-#costReceiptModal .cost-receipt-week-table th:nth-child(8),
-#costReceiptModal .cost-receipt-week-table td:nth-child(8){ width:7.5%; }
-#costReceiptModal .cost-receipt-week-table th:nth-child(9),
-#costReceiptModal .cost-receipt-week-table td:nth-child(9){ width:10%; }
-#costReceiptModal .cost-receipt-week-table th:nth-child(10),
-#costReceiptModal .cost-receipt-week-table td:nth-child(10){ width:7.5%; }
-#costReceiptModal .cost-receipt-summary-table th:nth-child(1),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(1){ width:13%; }
-#costReceiptModal .cost-receipt-summary-table th:nth-child(2),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(2){ width:27%; }
-#costReceiptModal .cost-receipt-summary-table th:nth-child(3),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(3){ width:8%; }
-#costReceiptModal .cost-receipt-summary-table th:nth-child(4),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(4){ width:17%; }
-#costReceiptModal .cost-receipt-summary-table th:nth-child(5),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(5){ width:10%; }
-#costReceiptModal .cost-receipt-summary-table th:nth-child(6),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(6){ width:8%; }
-#costReceiptModal .cost-receipt-summary-table th:nth-child(7),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(7){ width:10%; }
-#costReceiptModal .cost-receipt-summary-table th:nth-child(8),
-#costReceiptModal .cost-receipt-summary-table td:nth-child(8){ width:7%; }
-@media (max-width: 1180px){
-  #costReceiptModal .cost-weekly-table-wrap{
-    overflow-x:auto;
-  }
-  #costReceiptModal .cost-receipt-week-table{
-    min-width:1080px;
-  }
-  #costReceiptModal .cost-receipt-summary-table{
-    min-width:820px;
-  }
+#costReceiptModal .cost-receipt-summary-table th:nth-child(2){ width:220px; }
+#costReceiptModal .cost-receipt-week-table tbody td:nth-child(2),
+#costReceiptModal .cost-receipt-summary-table tbody td:nth-child(2){
+  white-space:normal;
+  overflow-wrap:anywhere;
+  overflow:hidden;
 }
+#costReceiptModal .cost-receipt-week-table input[data-col="purchased"]{
+  display:block;
+  width:100%;
+  max-width:100%;
+}
+#costReceiptModal .cost-receipt-week-table th:nth-child(3),
+#costReceiptModal .cost-receipt-summary-table th:nth-child(3){ width:130px; }
+#costReceiptModal .cost-receipt-week-table th:nth-child(4),
+#costReceiptModal .cost-receipt-summary-table th:nth-child(4){ width:65px; }
+.cost-table .purchase-number{ text-align:right; font-variant-numeric:tabular-nums; }
+#costReceiptModal .cost-receipt-week-table td:nth-child(n+4):nth-child(-n+9),
+#costReceiptModal .cost-receipt-week-table input[type="number"]{ text-align:right; font-variant-numeric:tabular-nums; }
 @media (max-width: 640px){
   .cost-timeframe-card-body{ padding:24px 18px 28px; }
   .cost-timeframe-table th,.cost-timeframe-table td{ padding:8px 10px; }

@@ -14176,16 +14176,17 @@ function renderCosts(){
       (window.receiptTrackerWeeks || []).forEach(entry => {
         const weekLabel = getWeekLabel(entry);
         normalizeRows(entry?.rows).forEach((row, idx) => {
-          const total = computeRowTotal(row);
+          const financials = getPurchaseFinancials(row);
           flatRows.push({
             dateISO: toIsoDate(row.date) || "",
             purchased: String(row.purchased || ""),
             partNumber: String(row.partNumber || ""),
-            qty: Number(row.qty) || 0,
-            cost: Number(row.cost) || 0,
-            shipping: Number(row.shipping) || 0,
-            tax: Number(row.tax) || 0,
-            total,
+            qty: financials.qty,
+            cost: financials.unitCost,
+            merchandiseSubtotal: financials.merchandiseSubtotal,
+            shipping: financials.shipping,
+            tax: financials.tax,
+            total: financials.totalSpend,
             weekLabel,
             weekKey: String(entry?.key || ""),
             rowIndex: idx
@@ -14194,7 +14195,7 @@ function renderCosts(){
       });
       flatRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
       if (!flatRows.length){
-        spendBody.innerHTML = '<tr><td colspan="9" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
+        spendBody.innerHTML = '<tr><td colspan="10" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
         return;
       }
       spendBody.innerHTML = flatRows.map(row => `
@@ -14202,12 +14203,13 @@ function renderCosts(){
           <td>${escapeHtml(row.dateISO || "—")}</td>
           <td>${escapeHtml(row.purchased || "—")}</td>
           <td>${escapeHtml(row.weekLabel || "—")}</td>
-          <td>${formatUsd(row.cost || 0)}</td>
-          <td>${escapeHtml(String(row.qty || 0))}</td>
           <td>${escapeHtml(row.partNumber || "—")}</td>
-          <td>${formatUsd(row.shipping || 0)}</td>
-          <td>${formatUsd(row.tax || 0)}</td>
-          <td>${formatUsd(row.total || 0)}</td>
+          <td class="purchase-number">${escapeHtml(String(row.qty || 0))}</td>
+          <td class="purchase-number">${formatUsd(row.cost)}</td>
+          <td class="purchase-number">${formatUsd(row.merchandiseSubtotal)}</td>
+          <td class="purchase-number">${formatUsd(row.shipping)}</td>
+          <td class="purchase-number">${formatUsd(row.tax)}</td>
+          <td class="purchase-number">${formatUsd(row.total)}</td>
         </tr>
       `).join("");
     };
@@ -14228,7 +14230,7 @@ function renderCosts(){
       if (max && value > max) return max;
       return value;
     };
-    const computeRowTotal = (row)=> ((Number(row?.cost) || 0) * (Number(row?.qty) || 0)) + (Number(row?.shipping) || 0) + (Number(row?.tax) || 0);
+    const computeRowTotal = (row)=> getPurchaseFinancials(row).totalSpend;
     const escWorkbookHtml = (value)=> String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
@@ -14303,12 +14305,14 @@ function renderCosts(){
     if (receiptOpenBtn instanceof HTMLElement && modal instanceof HTMLElement){
       const weekSelect = modal.querySelector("[data-receipt-week-select]");
       const weekRangeLabel = modal.querySelector("[data-receipt-week-range]");
+      const weekAllocationNote = modal.querySelector("[data-receipt-week-allocation-note]");
       const weekRowsBody = modal.querySelector("[data-receipt-week-rows]");
       const weekSubtotal = modal.querySelector("[data-receipt-week-subtotal]");
       const rangeSelect = modal.querySelector("[data-receipt-range-select]");
       const rangeRowsBody = modal.querySelector("[data-receipt-range-rows]");
       const rangeSubtotal = modal.querySelector("[data-receipt-range-subtotal]");
       const rangeLabel = modal.querySelector("[data-receipt-range-label]");
+      const rangeAllocationNote = modal.querySelector("[data-receipt-range-allocation-note]");
       const closeControls = Array.from(modal.querySelectorAll("[data-receipt-close]"));
       const saveWeekBtn = modal.querySelector("[data-receipt-save-week]");
       const clearAllBtn = modal.querySelector("[data-receipt-clear-all]");
@@ -14481,13 +14485,14 @@ const appendEmptyRow = (focusFirst = false)=>{
         tr.innerHTML = `
           <td><input type="date" data-col="date" min="${escapeHtml(String(getWeekEntry(activeWeekKey)?.startISO || ""))}" max="${escapeHtml(String(getWeekEntry(activeWeekKey)?.endISO || ""))}"></td>
           <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" placeholder="Select existing item"></td>
-          <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
-          <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
-          <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
+          <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
+          <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
+          <td class="purchase-number" data-col="merchandiseSubtotal">${formatUsd(0)}</td>
           <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00" style="min-width:86px"></td>
           <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00" style="min-width:72px"></td>
-          <td data-col="total">${formatUsd(0)}</td>
+          <td class="purchase-number" data-col="total">${formatUsd(0)}</td>
+          <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
           <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>`;
         weekRowsBody.appendChild(tr);
         if (focusFirst){
@@ -14505,8 +14510,11 @@ const appendEmptyRow = (focusFirst = false)=>{
             shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
             tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
           };
-          const total = computeRowTotal(row);
+          const financials = getPurchaseFinancials(row);
+          const total = financials.totalSpend;
           subtotal += total;
+          const merchandiseCell = tr.querySelector('[data-col="merchandiseSubtotal"]');
+          if (merchandiseCell) merchandiseCell.textContent = formatUsd(financials.merchandiseSubtotal);
           const totalCell = tr.querySelector('[data-col=\"total\"]');
           if (totalCell) totalCell.textContent = formatUsd(total);
         });
@@ -14515,6 +14523,7 @@ const appendEmptyRow = (focusFirst = false)=>{
       const renderWeekRows = ()=>{
         const entry = getWeekEntry(activeWeekKey);
         const rows = normalizeRows(entry.rows);
+        if (weekAllocationNote) weekAllocationNote.hidden = !rows.some(isHistoricalPurchase);
         if (weekRangeLabel){
           weekRangeLabel.textContent = entry.startISO && entry.endISO ? `Date range: ${entry.startISO} to ${entry.endISO}` : "Date range unavailable";
         }
@@ -14523,13 +14532,14 @@ const appendEmptyRow = (focusFirst = false)=>{
           <tr data-receipt-row="1" data-receipt-row-index="${idx}">
             <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}" min="${escapeHtml(String(entry.startISO || ""))}" max="${escapeHtml(String(entry.endISO || ""))}"></td>
             <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" value="${escapeHtml(row.purchased || "")}"></td>
-            <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
-            <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
-            <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
+            <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
+            <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
+            <td class="purchase-number" data-col="merchandiseSubtotal">${formatUsd(getPurchaseFinancials(row).merchandiseSubtotal)}</td>
             <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}" style="min-width:86px"></td>
             <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}" style="min-width:72px"></td>
-            <td data-col="total">${formatUsd(computeRowTotal(row))}</td>
+            <td class="purchase-number" data-col="total">${formatUsd(computeRowTotal(row))}</td>
+            <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
             <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>
           </tr>`).join("");
         appendEmptyRow();
@@ -14624,22 +14634,26 @@ const appendEmptyRow = (focusFirst = false)=>{
         if (!(rangeRowsBody instanceof HTMLElement)) return;
         const { start, end } = getRangeWindow(activeRange);
         const rows = buildRangeRows(activeRange);
+        if (rangeAllocationNote) rangeAllocationNote.hidden = !rows.some(isHistoricalPurchase);
         const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
         rangeRowsBody.innerHTML = rows.length ? rows.map(row => {
+          const financials = getPurchaseFinancials(row);
           const linked = !!findInventoryByPartNumber(row.partNumber);
           const stateLabel = linked ? "Linked" : "Unlinked";
           return `
           <tr>
             <td>${escapeHtml(row.date || "—")}</td>
             <td>${escapeHtml(row.purchased || "—")}</td>
-            <td>${escapeHtml(String(row.qty || 0))}</td>
             <td>${escapeHtml(row.partNumber || "—")}</td>
-            <td>${formatUsd(row.shipping || 0)}</td>
-            <td>${formatUsd(row.tax || 0)}</td>
-            <td>${formatUsd(row.total || 0)}</td>
+            <td class="purchase-number">${escapeHtml(String(financials.qty))}</td>
+            <td class="purchase-number">${formatUsd(financials.unitCost)}</td>
+            <td class="purchase-number">${formatUsd(financials.merchandiseSubtotal)}</td>
+            <td class="purchase-number">${formatUsd(financials.shipping)}</td>
+            <td class="purchase-number">${formatUsd(financials.tax)}</td>
+            <td class="purchase-number">${formatUsd(financials.totalSpend)}</td>
             <td><span class="small muted">${stateLabel}</span></td>
           </tr>`;
-        }).join("") : '<tr><td colspan="8" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
+        }).join("") : '<tr><td colspan="10" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
         if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
         if (rangeLabel) rangeLabel.textContent = formatDateRangeLabel(start, end);
       };
@@ -14652,7 +14666,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           event.preventDefault();
           const row = input.closest("tr[data-receipt-row]");
           if (!row) return;
-          const columns = ["date", "purchased", "cost", "qty", "partNumber", "shipping", "tax"];
+          const columns = ["date", "purchased", "partNumber", "qty", "cost", "shipping", "tax"];
           const col = input.getAttribute("data-col") || "";
           const idx = columns.indexOf(col);
           if (idx < 0) return;
@@ -14855,18 +14869,19 @@ const appendEmptyRow = (focusFirst = false)=>{
           const workbook = buildWorkbookFromTable({
             title: "Purchase History — Weekly Export",
             subtitle: weekRange,
-            headerRows: [["Date", "Purchased", "Cost", "Qty", "Part number", "Shipping", "Tax", "Total"]],
+            headerRows: [["Date", "Purchased Item", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
             bodyRows: rows.map(row => [
               row.date || "—",
               row.purchased || "—",
-              Number(row.cost || 0).toFixed(2),
-              Number(row.qty || 0).toFixed(2),
               row.partNumber || "—",
-              Number(row.shipping || 0).toFixed(2),
-              Number(row.tax || 0).toFixed(2),
-              Number(computeRowTotal(row) || 0).toFixed(2)
+              getPurchaseFinancials(row).qty.toFixed(2),
+              getPurchaseFinancials(row).unitCost.toFixed(2),
+              getPurchaseFinancials(row).merchandiseSubtotal.toFixed(2),
+              getPurchaseFinancials(row).shipping.toFixed(2),
+              getPurchaseFinancials(row).tax.toFixed(2),
+              getPurchaseFinancials(row).totalSpend.toFixed(2)
             ]),
-            footerRows: [["", "", "", "", "", "", "Subtotal", Number(subtotal || 0).toFixed(2)]]
+            footerRows: [["", "", "", "", "", "", "", "Week Total Spend", Number(subtotal || 0).toFixed(2)]]
           });
           downloadWorkbook(`receipt-week-${entry.key || "week"}.xls`, workbook);
         });
@@ -15028,17 +15043,19 @@ const appendEmptyRow = (focusFirst = false)=>{
           const workbook = buildWorkbookFromTable({
             title: "Purchase History — Date Range Export",
             subtitle: formatDateRangeLabel(start, end),
-            headerRows: [["Date", "Purchased", "Qty", "Part number", "Shipping", "Tax", "Total"]],
+            headerRows: [["Date", "Purchased Item", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
             bodyRows: rows.map(row => [
               row.date || "—",
               row.purchased || "—",
-              Number(row.qty || 0).toFixed(2),
               row.partNumber || "—",
-              Number(row.shipping || 0).toFixed(2),
-              Number(row.tax || 0).toFixed(2),
-              Number(row.total || 0).toFixed(2)
+              getPurchaseFinancials(row).qty.toFixed(2),
+              getPurchaseFinancials(row).unitCost.toFixed(2),
+              getPurchaseFinancials(row).merchandiseSubtotal.toFixed(2),
+              getPurchaseFinancials(row).shipping.toFixed(2),
+              getPurchaseFinancials(row).tax.toFixed(2),
+              getPurchaseFinancials(row).totalSpend.toFixed(2)
             ]),
-            footerRows: [["", "", "", "", "", "Subtotal", Number(subtotal || 0).toFixed(2)]]
+            footerRows: [["", "", "", "", "", "", "", "Range Total Spend", Number(subtotal || 0).toFixed(2)]]
           });
           downloadWorkbook(`receipt-range-${activeRange}.xls`, workbook);
         });
@@ -18295,7 +18312,7 @@ function computeCostModel(){
                   ? effHoursRaw
                   : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0))))));
 
-      const projectNumber = String(job?.projectNumber || "").replace(/[^0-9]/g, "").slice(0, 8);
+      const projectNumber = window.CuttingJobHistory.normalizeProjectKey(job?.projectNumber);
       const categoryDisplay = projectNumber
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
@@ -19594,21 +19611,13 @@ function computeCostModel(){
   }
   const purchaseDataTableRows = [];
   const flattenCentralSpendRows = (weekEntry)=>{
-    const rows = typeof normalizeRows === "function"
-      ? normalizeRows(weekEntry?.rows)
-      : (Array.isArray(weekEntry?.rows) ? weekEntry.rows : []);
+    const rows = Array.isArray(weekEntry?.rows) ? weekEntry.rows : [];
     return rows.map(row => {
-      const dateValue = typeof toIsoDate === "function" ? toIsoDate(row?.date) : String(row?.date || "").slice(0, 10);
+      const dateValue = String(row?.date || "").slice(0, 10);
       const purchased = String(row?.purchased || "").trim();
       const partNumber = String(row?.partNumber || "").trim();
-      const cost = Math.max(0, Number(row?.cost) || 0);
-      const qty = Math.max(0, Number(row?.qty) || 0);
-      const shipping = Math.max(0, Number(row?.shipping) || 0);
-      const tax = Math.max(0, Number(row?.tax) || 0);
-      const total = typeof computeRowTotal === "function"
-        ? Math.max(0, Number(computeRowTotal({ cost, qty, shipping, tax })) || 0)
-        : ((cost * qty) + shipping + tax);
-      return { dateValue, purchased, partNumber, cost, qty, shipping, tax, total };
+      const financials = getPurchaseFinancials(row);
+      return { dateValue, purchased, partNumber, cost:financials.unitCost, qty:financials.qty, merchandiseSubtotal:financials.merchandiseSubtotal, shipping:financials.shipping, tax:financials.tax, total:financials.totalSpend };
     });
   };
   (Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks : []).forEach(weekEntry => {
@@ -19627,6 +19636,7 @@ function computeCostModel(){
       const shipping = Math.max(0, Number(rawRow?.shipping) || 0);
       const tax = Math.max(0, Number(rawRow?.tax) || 0);
       const total = Math.max(0, Number(rawRow?.total) || 0);
+      const merchandiseSubtotal = rawRow.merchandiseSubtotal;
       if (!dateISO && !purchased && !partNumber && total <= 0) return;
       purchaseDataTableRows.push({
         dateISO,
@@ -19637,6 +19647,7 @@ function computeCostModel(){
         shipping,
         tax,
         total,
+        merchandiseSubtotal,
         weekLabel,
         weekKey: key,
         rowIndex
@@ -19652,11 +19663,12 @@ function computeCostModel(){
     weekKey: row.weekKey || "",
     rowIndex: Number.isFinite(row.rowIndex) ? row.rowIndex : -1,
     costLabel: formatterCurrency(row.cost, { decimals: 2 }),
+    merchandiseSubtotalLabel: formatterCurrency(row.merchandiseSubtotal, { decimals: 2 }),
     qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "0",
     partNumber: row.partNumber || "—",
     shippingLabel: formatterCurrency(row.shipping, { decimals: 2 }),
     taxLabel: formatterCurrency(row.tax, { decimals: 2 }),
-    totalLabel: formatterCurrency(row.total, { decimals: row.total < 1000 ? 2 : 0 })
+    totalLabel: formatterCurrency(row.total, { decimals: 2 })
   }));
   const spendByDate = new Map();
   purchaseDataTableRows.forEach(row => {
@@ -20457,12 +20469,14 @@ function renderJobs(){
   const flowHidePreviews = content.querySelector("#jobFlowHidePreviews");
   const flowDialog = flowBackdrop?.querySelector(".job-flow-modal") || null;
 
-  const normalizeProjectNumber = (value)=> String(value || "").replace(/[^0-9]/g, "").slice(0, 8);
+  const normalizeProjectNumber = (value)=> window.CuttingJobHistory.normalizeProjectKey(value);
   const normalizeCategoryKey = (value)=> String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const categoryProjectMap = new Map([["colin","1208"],["lady bird","1241"],["brazos","1247"],["cable trough at t","1249"],["cable trough att","1249"],["at t","1249"],["atm","1251"],["alamo","0000"],["all jobs","0000"]]);
+  const categoryProjectMap = new Map([["colin","1208"],["lady bird","1241"],["brazos","1247"],["cable trough at t","1249"],["cable trough att","1249"],["at t","1249"],["atm","1251"],["alamo","ALAMO"],["company improvements","0000"],["undisclosed project","XXXX"]]);
   const categoryProjectNumber = (name)=>{
     const key = normalizeCategoryKey(name);
     if (!key) return "";
+    const embedded=window.CuttingJobHistory.leadingProject(name)||window.CuttingJobHistory.reversedProject(name);
+    if(embedded)return embedded;
     if (categoryProjectMap.has(key)) return categoryProjectMap.get(key) || "";
     for (const [alias, project] of categoryProjectMap.entries()){ if (key.includes(alias)) return project; }
     return "";
@@ -22745,7 +22759,7 @@ function renderJobs(){
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
     const projectNumberRaw = document.getElementById("jobProjectNumber")?.value ?? "";
-    const projectNumber = String(projectNumberRaw).replace(/[^0-9]/g, "").slice(0, 8);
+    const projectNumber = window.CuttingJobHistory.normalizeProjectKey(projectNumberRaw);
     const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
     const priorityNum = Number(priorityRaw);
     const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
@@ -23812,6 +23826,9 @@ function renderJobs(){
       const j  = cuttingJobs.find(x => String(x?.id) === idStr); if (!j) return;
       const filesBeforeSave = Array.isArray(j.files) ? j.files.slice() : [];
       const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${idStr}"]`)?.value;
+      const projectRaw=String(qs("projectNumber")||"").trim();
+      const projectInput=window.CuttingJobHistory.normalizeProjectKey(projectRaw);
+      if(projectRaw&&!projectInput){toast("Project # must be 1-8 digits, ALAMO, or XXXX.");return;}
       const chargeRaw = qs("chargeRate");
       const chargeVal = chargeRaw === "" || chargeRaw == null ? null : Number(chargeRaw);
       if (chargeVal != null && (!Number.isFinite(chargeVal) || chargeVal < 0)){ toast("Enter a valid charge rate."); return; }
@@ -23834,7 +23851,6 @@ function renderJobs(){
       j.materialQty = Math.max(0, Number(qs("materialQty")) || 0);
       j.startISO = qs("startISO") || j.startISO;
       j.dueISO   = qs("dueISO")   || j.dueISO;
-      const projectInput = String(qs("projectNumber") || "").replace(/[^0-9]/g, "").slice(0, 8);
       if (projectInput) j.projectNumber = projectInput;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${idStr}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;

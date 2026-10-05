@@ -27,6 +27,7 @@
   <script src="js/materialCalculator.js"></script>
   <script src="js/cuttingJobHistory.js"></script>
   <script src="js/cuttingJobImporter.js"></script>
+  <script src="js/cuttingJobImportDownload.js"></script>
   <script src="js/cuttingJobRepair.js"></script>
   <script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"></script>
   <script src="https://js.live.net/v8.0/OneDrive.js"></script>
@@ -165,6 +166,14 @@
     <div id="cuttingJobImportRows" class="cutting-job-import-table-scroll" tabindex="0" aria-label="Cutting-job import preview"></div>
   </dialog>
 
+  <dialog id="cuttingJobImportConfirm" aria-labelledby="cuttingJobImportConfirmTitle">
+    <h3 id="cuttingJobImportConfirmTitle">Confirm reviewed import</h3>
+    <p id="cuttingJobImportConfirmMessage"></p>
+    <p>The backup download will start first. Check your browser Downloads for the file; this page cannot confirm that it finished.</p>
+    <button id="cuttingJobImportConfirmCancel" type="button">Cancel</button>
+    <button id="cuttingJobImportConfirmRun" type="button">Download backup and import</button>
+  </dialog>
+
   <div id="authModal" class="auth-modal-backdrop" style="display:none;">
     <div class="auth-modal-dialog">
       <h3>Sign in to workspace</h3>
@@ -247,6 +256,7 @@
   <script src="js/pump.js"></script>
   <script src="js/maintenance-duplication.js"></script>
   <script src="js/calendar.js"></script>
+  <script src="js/purchaseFinancials.js"></script>
   <script src="js/views.js"></script>
   <script src="js/renderers.js"></script>
   <script src="js/historicalImportUi.js"></script>

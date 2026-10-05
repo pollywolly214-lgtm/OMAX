@@ -10,40 +10,40 @@ function harness(options={}){
   const api=history.createApi(env);
   return{api,env,baseline,get state(){return state;},get cloud(){return cloud;},get saves(){return saves;},get backups(){return backups;},get suspends(){return suspends;},get reads(){return reads;},submit:async(reviewedPreview)=>api.submit("task_setup",null,{confirmed:true,reviewedPreview:reviewedPreview||await api.previewAuthoritativeTaskSetup()})};
 }
-test("authoritative setup preview is non-mutating and classifies all eight ready with none blocked",async()=>{
+test("authoritative setup preview is non-mutating and classifies six ready and two unresolved",async()=>{
   const h=harness(),before=clone(h.state),plan=await h.api.previewAuthoritativeTaskSetup();
-  assert.deepEqual(h.state,before);assert.deepEqual(h.cloud,before);assert.equal(h.reads,1);assert.equal(h.saves,0);assert.equal(h.backups,0);assert.equal(plan.filter(row=>row.status===setup.STATUS.ready).length,8);assert.equal(plan.filter(row=>row.status===setup.STATUS.blocked).length,0);
-  for(const [name,price,minutes,downtimeHours]of [["Transfer Tank Water Pump",70,60,1],["Empty Scrap Bin",0,30,0.5]]){
-    const row=plan.find(row=>row.raw.name===name);assert.equal(row.status,setup.STATUS.ready);assert.deepEqual(row.raw,{name,pn:"",price,minutes,type:"as_required",downtimeHours});
-  }
+  assert.deepEqual(h.state,before);assert.deepEqual(h.cloud,before);assert.equal(h.reads,1);assert.equal(h.saves,0);assert.equal(h.backups,0);assert.equal(plan.filter(row=>row.status===setup.STATUS.ready).length,6);assert.equal(plan.filter(row=>row.status===setup.STATUS.blocked).length,2);
+  assert.match(plan.find(row=>row.raw.name==="Transfer Tank Water Pump").reason,/Part number, parts cost and labor unresolved/);assert.match(plan.find(row=>row.raw.name==="Empty Scrap Bin").reason,/Labor duration unresolved/);
 });
-test("all eight missing creates eight exact native reusable definitions, backup, CAS and server preflight",async()=>{
-  const h=harness(),result=await h.submit();assert.equal(result.saved,true);assert.equal(h.saves,1);assert.equal(h.backups,1);assert.equal(h.suspends,0);assert.equal(result.importedIds.length,8);
-  assert.deepEqual({...result.taskSetup,preflight:undefined},{created:8,alreadyPresent:0,blockedForReview:0,duplicates:0,preflight:undefined});
+test("all six missing creates six exact native reusable definitions, backup, CAS and server preflight",async()=>{
+  const h=harness(),result=await h.submit();assert.equal(result.saved,true);assert.equal(h.saves,1);assert.equal(h.backups,1);assert.equal(h.suspends,0);assert.equal(result.importedIds.length,6);
+  assert.deepEqual({...result.taskSetup,preflight:undefined},{created:6,alreadyPresent:0,blockedForReview:2,duplicates:0,preflight:undefined});
   for(const definition of setup.definitions.filter(row=>!row.reason)){
     const tasks=h.cloud.tasksAsReq.filter(task=>task.name===definition.name);assert.equal(tasks.length,1);const task=tasks[0];assert.equal(task.price,definition.price);assert.equal(task.downtimeHours,definition.minutes/60);assert.equal(task.pn,definition.pn);assert.equal(task.mode,"asreq");assert.equal(task.variant,"template");assert.equal(task.templateId,task.id);assert.equal(task.cat,"root");assert.equal(task.parentTask,null);assert.ok(task.order>20);
     for(const forbidden of ["recurrence","repeatRule","calendarDateISO","manualHistory","completedDates","import_event_id","inventoryId"])assert.equal(Object.hasOwn(task,forbidden),false,forbidden);
     assert.equal(result.taskSetup.preflight.find(row=>row.raw.name===definition.name).matchCount,1);
   }
-  for(const [name,price,downtimeHours]of [["Transfer Tank Water Pump",70,1],["Empty Scrap Bin",0,0.5]]){
-    const task=h.cloud.tasksAsReq.find(task=>task.name===name);assert.equal(task.price,price);assert.equal(task.downtimeHours,downtimeHours);assert.equal(task.pn,"");
-  }
   for(const [key,value]of Object.entries(h.baseline))if(!["syncMeta","tasksAsReq"].includes(key))assert.deepEqual(h.cloud[key],value,key);
+  for(const name of ["Transfer Tank Water Pump","Empty Scrap Bin"])assert.equal(h.cloud.tasksAsReq.some(task=>task.name===name),false);
 });
 test("second setup creates zero additional records and performs zero further backups/saves",async()=>{
-  const h=harness();await h.submit();const before=clone(h.cloud),result=await h.submit();assert.equal(result.saved,false);assert.equal(result.taskSetup.created,0);assert.equal(result.taskSetup.alreadyPresent,8);assert.equal(h.saves,1);assert.equal(h.backups,1);assert.deepEqual(h.cloud,before);
+  const h=harness();await h.submit();const before=clone(h.cloud),result=await h.submit();assert.equal(result.saved,false);assert.equal(result.taskSetup.created,0);assert.equal(result.taskSetup.alreadyPresent,6);assert.equal(h.saves,1);assert.equal(h.backups,1);assert.deepEqual(h.cloud,before);
 });
-test("existing exact task is retained byte-for-byte and only seven missing tasks are created",async()=>{
+test("existing exact task is retained byte-for-byte and only five missing tasks are created",async()=>{
   const initial=base(),existing={id:"existing-salt",name:"Refill Salt",mode:"asreq",price:777,downtimeHours:3,pn:"different",manualHistory:[{dateISO:"2025-01-01"}],recurrence:{enabled:false}};initial.tasksAsReq=[existing];
-  const h=harness({initial}),result=await h.submit();assert.equal(result.taskSetup.created,7);assert.equal(result.taskSetup.alreadyPresent,1);assert.deepEqual(h.cloud.tasksAsReq.find(task=>task.id===existing.id),existing);
+  const h=harness({initial}),result=await h.submit();assert.equal(result.taskSetup.created,5);assert.equal(result.taskSetup.alreadyPresent,1);assert.deepEqual(h.cloud.tasksAsReq.find(task=>task.id===existing.id),existing);
 });
 test("duplicate exact names are individually blocked while other eligible tasks may be created",async()=>{
   const initial=base();initial.tasksAsReq=[{id:"one",name:"Nozzle Nut",mode:"asreq"},{id:"two",name:"Nozzle Nut",mode:"asreq"}];const h=harness({initial}),plan=await h.api.previewAuthoritativeTaskSetup();assert.equal(plan.find(row=>row.raw.name==="Nozzle Nut").status,setup.STATUS.duplicate);
-  const result=await h.submit(plan);assert.equal(result.taskSetup.created,7);assert.equal(result.taskSetup.duplicates,1);assert.equal(h.cloud.tasksAsReq.filter(task=>task.name==="Nozzle Nut").length,2);
+  const result=await h.submit(plan);assert.equal(result.taskSetup.created,5);assert.equal(result.taskSetup.duplicates,1);assert.equal(h.cloud.tasksAsReq.filter(task=>task.name==="Nozzle Nut").length,2);
 });
-test("reviewed task definitions cannot be forged into an eligible plan or appended",()=>{
-  const state=base(),ready=setup.preview(state).filter(row=>row.status===setup.STATUS.ready),forged=clone(ready);forged.find(row=>row.raw.name==="Transfer Tank Water Pump").raw.pn="fabricated";
-  assert.throws(()=>setup.append(state,forged,(definition,order)=>nativeFactory(definition,order,"forged")),/eligibility changed/);assert.equal(state.tasksAsReq.length,0);
+test("unresolved definitions cannot be forged into an eligible plan or appended",()=>{
+  const state=base(),plan=setup.preview(state),ready=plan.filter(row=>row.status===setup.STATUS.ready);
+  for(const name of ["Transfer Tank Water Pump","Empty Scrap Bin"]){
+    const forged=clone(ready),blocked=clone(plan.find(row=>row.raw.name===name));
+    blocked.status=setup.STATUS.ready;Object.assign(blocked.raw,{pn:"reviewed",price:0,minutes:30,downtimeHours:0.5});delete blocked.raw.reason;forged.push(blocked);
+    assert.throws(()=>setup.append(state,forged,(definition,order)=>nativeFactory(definition,order,"forged")),/eligibility changed/);assert.equal(state.tasksAsReq.length,0);
+  }
 });
 test("preview ignores instances, uses exact names, and blocks ambiguous saved task identity",()=>{
   const state=base();state.tasksAsReq=[{id:"i",name:"Nozzle Nut",variant:"instance",templateId:"template"},{id:"lower",name:"refill salt",variant:"template"}];assert.equal(setup.preview(state).find(row=>row.raw.name==="Nozzle Nut").status,setup.STATUS.ready);assert.equal(setup.preview(state).find(row=>row.raw.name==="Refill Salt").status,setup.STATUS.ready);
@@ -72,15 +72,15 @@ test("definite failed save selectively removes unchanged setup tasks and preserv
 });
 test("changed/referenced setup task on definite failure suspends without deleting evidence",async()=>{
   for(const mutate of [state=>state.tasksAsReq[0].price++,state=>state.inventory[0].linkedTaskId=state.tasksAsReq[0].id]){
-    const h=harness({save:({state})=>{mutate(state);return{saved:false,definiteFailure:true,stateWriteAttempted:true};}}),result=await h.submit();assert.equal(result.rollbackReviewRequired,true);assert.equal(h.state.tasksAsReq.length,8);assert.equal(h.suspends,1);
+    const h=harness({save:({state})=>{mutate(state);return{saved:false,definiteFailure:true,stateWriteAttempted:true};}}),result=await h.submit();assert.equal(result.rollbackReviewRequired,true);assert.equal(h.state.tasksAsReq.length,6);assert.equal(h.suspends,1);
   }
 });
 test("ambiguous or thrown save suspends without rollback/retry",async()=>{
-  for(const save of [()=>({saved:false,stateWriteAttempted:true,indeterminate:true}),()=>{throw Error("unknown outcome");}]){const h=harness({save}),result=await h.submit();assert.equal(result.indeterminate,true);assert.equal(h.saves,1);assert.equal(h.suspends,1);assert.equal(h.state.tasksAsReq.length,8);}
+  for(const save of [()=>({saved:false,stateWriteAttempted:true,indeterminate:true}),()=>{throw Error("unknown outcome");}]){const h=harness({save}),result=await h.submit();assert.equal(result.indeterminate,true);assert.equal(h.saves,1);assert.equal(h.suspends,1);assert.equal(h.state.tasksAsReq.length,6);}
 });
-test("post-save altered definition, duplicate, unexpected addition or unrelated mutation suspends",async()=>{
+test("post-save altered definition, duplicate, unresolved addition or unrelated mutation suspends",async()=>{
   for(const mutate of [cloud=>cloud.tasksAsReq[0].downtimeHours++,cloud=>cloud.tasksAsReq.push(clone(cloud.tasksAsReq[0])),cloud=>cloud.tasksAsReq.push({id:"bad",name:"Empty Scrap Bin"}),cloud=>cloud.inventory[0].qtyNew++]){
-    const h=harness({save:({cloud,commit})=>{commit();return{saved:true,stateWriteCompleted:true,stateWriteAttempted:true};},read:({cloud,reads})=>{if(reads===3)mutate(cloud);return clone(cloud);}}),result=await h.submit();assert.equal(result.saved,false);assert.equal(result.saveCompleted,true);assert.equal(h.suspends,1);assert.equal(h.state.tasksAsReq.length,8);
+    const h=harness({save:({cloud,commit})=>{commit();return{saved:true,stateWriteCompleted:true,stateWriteAttempted:true};},read:({cloud,reads})=>{if(reads===3)mutate(cloud);return clone(cloud);}}),result=await h.submit();assert.equal(result.saved,false);assert.equal(result.saveCompleted,true);assert.equal(h.suspends,1);assert.equal(h.state.tasksAsReq.length,6);
   }
 });
 test("missing authoritative state or malformed task collections cannot preview/create",async()=>{
@@ -106,7 +106,7 @@ test("real core environment constructs native IDs and stages exact tasks through
   vm.runInContext("this.state=()=>compactStateForStorage(snapshotState({skipLocalFileCacheSync:true}));",context);cloud=clone(context.state());cloud.syncMeta.rev=7;const before=clone(cloud);
   vm.runInContext(core.slice(core.indexOf("window.historicalImport ="),core.indexOf("window.getWorkspaceAuthorizationDiagnostics")),context);
   const plan=await window.historicalImport.previewAuthoritativeTaskSetup(),result=await window.historicalImport.submit("task_setup",null,{confirmed:true,reviewedPreview:plan});
-  assert.equal(result.saved,true);assert.equal(saves,1);assert.equal(suspends,0);assert.equal(cloud.tasksAsReq.length,8);assert.equal(window._maintOrderCounter,28);assert.equal(new Set(cloud.tasksAsReq.map(task=>task.id)).size,8);
+  assert.equal(result.saved,true);assert.equal(saves,1);assert.equal(suspends,0);assert.equal(cloud.tasksAsReq.length,6);assert.equal(window._maintOrderCounter,26);assert.equal(new Set(cloud.tasksAsReq.map(task=>task.id)).size,6);
   assert.ok(cloud.tasksAsReq.every(task=>task.id.startsWith(task.name.toLowerCase().replace(/[^a-z0-9]+/g,"_")+"_")));
   for(const [key,value]of Object.entries(before))if(!["syncMeta","saveMeta","syncProcessLog","tasksAsReq"].includes(key))assert.equal(history.canonical(cloud[key]),history.canonical(value),key);
 });
@@ -125,6 +125,6 @@ test("operator UI does nothing on render, previews without writes and requires c
   const section=root.children[0],preview=section.querySelector("[data-task-setup-preview]"),review=section.querySelector("[data-task-setup-confirm]"),create=section.querySelector("[data-task-setup-create]"),status=section.querySelector("[data-task-setup-status]");
   assert.equal(h.reads,0);assert.equal(h.saves,0);await create.events.click();assert.equal(kinds.length,0);
   await preview.events.click();assert.equal(h.reads,1);assert.equal(h.saves,0);assert.equal(create.disabled,true);await create.events.click();assert.equal(kinds.length,0);
-  review.checked=true;review.events.change();assert.equal(create.disabled,false);await create.events.click();assert.deepEqual(kinds,["task_setup"]);assert.equal(h.saves,1);assert.match(status.textContent,/Created: 8; Already Present: 0; Blocked for Review: 0; Duplicates: 0/);assert.equal(create.disabled,true);assert.equal(review.checked,false);
-  const preflight=section.querySelector("[data-task-setup-rows]").children;assert.equal(preflight.length,8);assert.equal(preflight.filter(tr=>tr.children[6].textContent===setup.STATUS.present).length,8);assert.equal(preflight.filter(tr=>tr.children[6].textContent===setup.STATUS.blocked).length,0);
+  review.checked=true;review.events.change();assert.equal(create.disabled,false);await create.events.click();assert.deepEqual(kinds,["task_setup"]);assert.equal(h.saves,1);assert.match(status.textContent,/Created: 6; Already Present: 0; Blocked for Review: 2; Duplicates: 0/);assert.equal(create.disabled,true);assert.equal(review.checked,false);
+  const preflight=section.querySelector("[data-task-setup-rows]").children;assert.equal(preflight.length,8);assert.equal(preflight.filter(tr=>tr.children[6].textContent===setup.STATUS.present).length,6);assert.equal(preflight.filter(tr=>tr.children[6].textContent===setup.STATUS.blocked).length,2);
 });
