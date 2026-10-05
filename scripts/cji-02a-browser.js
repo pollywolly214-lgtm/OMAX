@@ -8,13 +8,13 @@ const row={import_event_id:"browser-cji02a",record_status:"active",job_name:"Bro
 const checks=[];
 async function main(){
   const browser=await chromium.launch({channel:"msedge",headless:true});
-  async function scenario(name,mode,verify,{legacy=false,rows=[row]}={}){
+  async function scenario(name,mode,verify,{legacy=false,rows=[row],weeklyTimestampDrift=false}={}){
     const context=await browser.newContext({acceptDownloads:true,serviceWorkers:"block"}),page=await context.newPage(),errors=[];
     page.setDefaultTimeout(30000);page.on("pageerror",error=>errors.push(error.message));
     await context.route("**/*",route=>new URL(route.request().url()).hostname==="localhost"?route.continue():route.abort());
     try{
       await page.goto("http://localhost:8000/?devsafe=1");await page.waitForFunction(()=>window.__initialAdoptComplete===true);
-      await page.evaluate(async legacy=>{
+      await page.evaluate(async({legacy,weeklyTimestampDrift})=>{
         if(!window.OMAXDevSafe.active)throw Error("Disposable backend required");
         location.hash="#/jobs";route();
         localStorage.setItem("job_material_pricing_v1",JSON.stringify({wasteFactor:10,materials:[{id:"steel",name:"Steel",density:.283,pricePerLb:.8}]}));
@@ -23,8 +23,13 @@ async function main(){
           window.cuttingJobs=Array.from({length:11},(_,i)=>({id:"old-"+i,name:"Original cut "+i,projectNumber:"0000",cat:"job_project_0000",cutNumber:"C"+String(i+1).padStart(3,"0"),startISO:"2020-01-01",files:[]}));
           cuttingJobs=window.cuttingJobs;
         }
+        if(weeklyTimestampDrift){
+          window.weeklyCostReports=[{id:"browser-week",weekKey:"2026-09-28",weekStartISO:"2026-09-28",weekEndISO:"2026-10-04",totalCutCost:123.45,totalMaintenanceCost:12,cutByCategory:{Blanco:{cost:123.45}},generatedAtISO:"2026-10-02T19:52:35.090Z"}];
+          weeklyCostReports=window.weeklyCostReports;
+        }
         const saved=await saveCloudNow();if(!saved.saved)throw Error(JSON.stringify(saved));
         window.__cjiBefore=await readCurrentCloudStateReadOnly();window.__cjiTrace=[];window.__cjiSaves=0;
+        if(weeklyTimestampDrift)window.weeklyCostReports[0].generatedAtISO="2026-10-02T20:20:07.475Z";
         window.__cjiDone=new Promise(resolve=>window.__cjiResolveDone=resolve);
         window.__cjiSaveStarted=new Promise(resolve=>window.__cjiResolveSaveStarted=resolve);
         const api=window.cuttingJobImporter;
@@ -45,7 +50,9 @@ async function main(){
           window.__cjiTrace.push({stage:"read",active:navigator.userActivation.isActive});
           if(window.__cjiReadError)throw Error("Fixture cloud read rejection");
           if(window.__cjiDelayRead)await new Promise(resolve=>setTimeout(resolve,window.__cjiDelayRead));
-          const result=await read();if(window.__cjiServerDrift)result.syncMeta.rev++;return result;
+          const result=await read();if(window.__cjiServerDrift)result.syncMeta.rev++;
+          if(window.__cjiSaves&&window.__cjiPostSaveWeeklyValueDrift)result.weeklyCostReports[0].totalCutCost++;
+          return result;
         };
         const save=saveCloudNow;
         saveCloudNow=async options=>{
@@ -55,7 +62,7 @@ async function main(){
           if(window.__cjiDefiniteFailure)return{saved:false,stateWriteAttempted:true,definiteFailure:true,error:"Fixture CAS rejection"};
           return save(options);
         };
-      },legacy);
+      },{legacy,weeklyTimestampDrift});
       if(mode==="poller")await page.evaluate(()=>{window.__unrelatedPoll=setInterval(()=>{document.getElementById("cuttingJobImportStatus").textContent;},10);});
       if(mode==="observer")await page.evaluate(()=>{window.__unrelatedObserver=new MutationObserver(()=>{document.getElementById("cuttingJobImportStatus").textContent;});window.__unrelatedObserver.observe(document.getElementById("cuttingJobImportStatus"),{childList:true,subtree:true});});
       await page.evaluate(()=>openReviewedCuttingJobImporter());
@@ -83,6 +90,25 @@ async function main(){
     assert.deepEqual(unrelated(result.cloud),unrelated(result.before));return result;
   };
   try{
+    for(const outcome of ["timestamp only","meaningful post-save drift"]){
+      await scenario("weekly generated timestamp baseline: "+outcome,"none",async page=>{
+        assert.match(await page.locator("#cuttingJobImportStatus").textContent(),/Ready:/);
+        await page.evaluate(outcome=>{window.__cjiTrace=[];window.__cjiPostSaveWeeklyValueDrift=outcome==="meaningful post-save drift";},outcome);
+        const pending=page.waitForEvent("download");await page.locator("#cuttingJobImportConfirmRun").click();const download=await pending;
+        const filename=path.join(output,"weekly-generated-"+outcome.replaceAll(" ","-")+"-backup.json");await download.saveAs(filename);assert.equal(await download.failure(),null);
+        const backup=JSON.parse(fs.readFileSync(filename,"utf8"));assert.equal(backup.weeklyCostReports[0].generatedAtISO,"2026-10-02T19:52:35.090Z");assert.equal(backup.weeklyCostReports[0].totalCutCost,123.45);
+        await final(page);
+        const result=await page.evaluate(async()=>({cloud:await readCurrentCloudStateReadOnly(),before:window.__cjiBefore,local:window.weeklyCostReports,trace:window.__cjiTrace,saves:window.__cjiSaves,recovery:window.__recoveryInspectMode,autosaveDisabled:window.__autosaveDisabled,result:JSON.parse(document.getElementById("cuttingJobImportRows").dataset.lastImportResult)}));
+        assert.equal(result.saves,1);assert.equal(result.trace[0].stage,"download");assert.equal(result.trace[0].active,true);
+        assert.equal(result.local[0].generatedAtISO,"2026-10-02T20:20:07.475Z");assert.equal(result.cloud.weeklyCostReports[0].generatedAtISO,"2026-10-02T20:20:07.475Z");
+        if(outcome==="timestamp only"){
+          assert.match(await page.locator("#cuttingJobImportStatus").textContent(),/^Import complete/);assert.equal(result.result.saveCompleted,true);assert.equal(result.result.verificationCompleted,true);assert.equal(Boolean(result.recovery),false);assert.equal(Boolean(result.autosaveDisabled),false);
+          assert.deepEqual(result.cloud.weeklyCostReports,[{...result.before.weeklyCostReports[0],generatedAtISO:"2026-10-02T20:20:07.475Z"}]);assert.equal(result.cloud.cuttingJobs.length,1);
+        }else{
+          assert.match(await page.locator("#cuttingJobImportStatus").textContent(),/^Import suspended/);assert.equal(result.result.saveIndeterminate,true);assert.equal(result.result.rollbackAttempted,false);assert.equal(result.recovery,true);assert.equal(result.autosaveDisabled,true);assert.equal(await page.locator("#cuttingJobImportPreview").isDisabled(),true);
+        }
+      },{weeklyTimestampDrift:true});
+    }
     const legacyRows=[{...row,project_number:"0000",category:"Company Improvements"}];
     for(const outcome of ["success","definite failure","indeterminate"]){
       await scenario("legacy 0000 name-only adoption: "+outcome,"none",async page=>{

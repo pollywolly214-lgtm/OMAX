@@ -4434,12 +4434,12 @@ async function readCuttingJobImportCloudState(){
 async function prepareCuttingJobImportBackup(){
   if(!window.cuttingJobImporter?.canPrepareBackup())throw Error("Authenticated current cloud baseline required.");
   const baseline=await readCuttingJobImportCloudState();
-  const business=value=>Object.fromEntries(Object.entries(value||{}).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
+  const business=value=>Object.fromEntries(Object.entries(window.CuttingJobImporter.normalizeComparisonState(value)||{}).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
   const current=compactStateForStorage(snapshotState({skipLocalFileCacheSync:true}));
   if(!baseline||Number(baseline.syncMeta?.rev||0)!==Number(window.__loadedCloudRevisionForSaveGuard||0)||stableStringify(business(current))!==stableStringify(business(baseline)))throw Error("Authoritative baseline changed while preparing backup; refresh and preview again.");
   const materialSettingsRaw=localStorage.getItem("job_material_pricing_v1");
   let materialSettings=null;try{materialSettings=JSON.parse(materialSettingsRaw||"null");}catch(_){}
-  const prepared={baselineSignature:stableStringify(baseline),businessSignature:stableStringify(business(baseline)),materialSettingsRaw,revision:Number(baseline.syncMeta?.rev||0)};
+  const prepared={baselineSignature:stableStringify(window.CuttingJobImporter.normalizeComparisonState(baseline)),businessSignature:stableStringify(business(baseline)),materialSettingsRaw,revision:Number(baseline.syncMeta?.rev||0)};
   prepared.download=window.CuttingJobImportDownload.prepare(`omax-cutting-job-import-backup-${Date.now()}.json`,{...baseline,cjiLocalMaterialSettings:materialSettings});
   prepared.validate=()=>{
     if(!window.cuttingJobImporter.canPrepareBackup()||Number(window.__loadedCloudRevisionForSaveGuard||0)!==prepared.revision||localStorage.getItem("job_material_pricing_v1")!==materialSettingsRaw||stableStringify(business(compactStateForStorage(snapshotState({skipLocalFileCacheSync:true}))))!==prepared.businessSignature)throw Error("Prepared backup or local review is stale; preview again.");
@@ -4463,7 +4463,7 @@ window.cuttingJobImporter = window.CuttingJobImporter?.createApi({
   revalidateBaseline:async()=>{
     if(!canWriteCloud("cutting-job import")||!FB.docRef||!FB.user)return false;
     const latest=await readCuttingJobImportCloudState();
-    const business=state=>Object.fromEntries(Object.entries(state||{}).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
+    const business=state=>Object.fromEntries(Object.entries(window.CuttingJobImporter.normalizeComparisonState(state)||{}).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
     const current=compactStateForStorage(snapshotState({skipLocalFileCacheSync:true}));
     const valid=latest&&Number(latest.syncMeta?.rev||0)===Number(window.__loadedCloudRevisionForSaveGuard||0)&&stableStringify(business(current))===stableStringify(business(latest));
     if(valid)window.__cjiAuthoritativeBaseline=cloneStructured(latest);
@@ -4474,13 +4474,13 @@ window.cuttingJobImporter = window.CuttingJobImporter?.createApi({
     if(!prepared||backupReceipt.triggerStarted!==true)throw Error("Mandatory backup download could not be started from the confirmation click.");
     cuttingJobImportBackupReceipts.delete(backupReceipt);
     const state=await readCuttingJobImportCloudState();
-    if(!state||stableStringify(state)!==stableStringify(window.__cjiAuthoritativeBaseline)||stableStringify(state)!==prepared.baselineSignature||localStorage.getItem("job_material_pricing_v1")!==prepared.materialSettingsRaw)throw Error("Authoritative baseline or backup changed before import; preview again.");
+    if(!state||stableStringify(window.CuttingJobImporter.normalizeComparisonState(state))!==stableStringify(window.CuttingJobImporter.normalizeComparisonState(window.__cjiAuthoritativeBaseline))||stableStringify(window.CuttingJobImporter.normalizeComparisonState(state))!==prepared.baselineSignature||localStorage.getItem("job_material_pricing_v1")!==prepared.materialSettingsRaw)throw Error("Authoritative baseline or backup changed before import; preview again.");
     return true;
   },
   verifyCloud:async({plannedIds,expectedState,expectedCategories})=>{
     const cloud=await readCuttingJobImportCloudState();
     const jobs=[...(cloud?.cuttingJobs||[]),...(cloud?.completedCuttingJobs||[])];
-    const unrelated=value=>Object.fromEntries(Object.entries(value||{}).filter(([key])=>!["cuttingJobs","completedCuttingJobs","jobFolders","syncMeta","saveMeta","syncProcessLog"].includes(key)));
+    const unrelated=value=>Object.fromEntries(Object.entries(window.CuttingJobImporter.normalizeComparisonState(value)||{}).filter(([key])=>!["cuttingJobs","completedCuttingJobs","jobFolders","syncMeta","saveMeta","syncProcessLog"].includes(key)));
     return Boolean(cloud)&&stableStringify(cloud.jobFolders)===stableStringify(expectedCategories)&&stableStringify(cloud.cuttingJobs)===stableStringify(expectedState.cuttingJobs)&&stableStringify(cloud.completedCuttingJobs)===stableStringify(expectedState.completedCuttingJobs)&&plannedIds.every(id=>jobs.filter(job=>job.import_event_id===id).length===1)&&stableStringify(unrelated(cloud))===stableStringify(unrelated(window.__cjiAuthoritativeBaseline));
   },
   suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastImportVerificationError=reason;renderRecoveryDiagnosticsPanel();},

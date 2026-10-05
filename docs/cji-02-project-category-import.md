@@ -163,3 +163,46 @@ rg -n '0000|1111|Undisclosed Project|Company Improvements|PROJECT_CATEGORIES|nor
 Node/DOM suites: project/category 34/34, backup/download 17/17, legacy adoption 29/29, cutting importer 24/24, repair/audit 15/15, selective rollback 15/15, atomic persistence 13/13, recovery 23/23: **170 cases, zero failures**. Node's aggregate runner reports 133 entries because two older script suites appear as one entry each; their internal 24 and 15 cases also pass.
 
 Actual Edge: **14/14 scenarios, zero failures**. The original ten CJI-02A scenarios still pass. Four additional scenarios verify successful legacy name-only adoption, definite CAS rejection with exact rollback, indeterminate retention/suspension, and independent XXXX creation while the legacy 0000 folder exists. Real downloads contain the original legacy folder name and 11 original jobs. Accepted downloads start in active trusted user activation; success verifies saved folder metadata and rerun idempotency. Runs use the full localhost app with disposable devsafe state and all external requests blocked, without DevTools. Results and backups remain in ignored `artifacts/cji-02a/`. No production Firebase import, npm command, new branch/PR, or merge was performed. Shop production/browser-policy acceptance remains untested.
+
+## CJI-02C: comparison-only generated report timestamps
+
+Continued on the existing branch and PR #490 from the required `f999bed5efdbf5fe4df58577c4ebf9015cdce53f`, after verifying branch, exact HEAD, and clean status. The user reported that the real Vercel preview stopped at “Import stopped — preparing backup: Authoritative baseline changed while preparing backup; refresh and preview again.” The supplied read-only diagnostics had matching loaded/cloud revision `1790970759830`, matching collection counts, recovery mode false, and autosave enabled. The single recursive difference was `$.weeklyCostReports[0].generatedAtISO`: local `2026-10-02T20:20:07.475Z` versus cloud `2026-10-02T19:52:35.090Z`. These production diagnostics were supplied by the user; no production state was fetched or imported during this task.
+
+Code inspection before editing confirmed the assumption: `computeCostModel()` in `js/renderers.js` creates each weekly bucket using `weekKey`, `weekStartISO`, and `weekEndISO`, writes `generatedAtISO: new Date().toISOString()`, derives financial totals from cut/maintenance items, sorts by weekStartISO, then refreshes `window.weeklyCostReports`. The report timestamp is generation metadata, with no use as report identity, financial value, or revision/CAS identity. `snapshotState()` copies the live report entries; the save guard uses `syncMeta.rev` and expectedRevision. Other generatedAtISO properties elsewhere in the application have not been generalized into this exception.
+
+`CuttingJobImporter.normalizeComparisonState()` is the single narrow helper. It clones input data and creates comparison-only report entries without their direct generatedAtISO property, **only when weeklyCostReports is an array**. Null/primitive/array entries and non-array weeklyCostReports retain their original shape. Nested generatedAtISO properties, top-level timestamps and timestamps in other collections remain exact. Shared references are isolated so ignoring a weekly entry's timestamp cannot ignore that property in another collection. Frozen input tests confirm there is no mutation.
+
+The same helper is used at all reviewed Cutting Job import comparison sites:
+
+- `prepareCuttingJobImportBackup()`: current compact snapshot versus fresh cloud business state, and prepared baseline/business signatures.
+- The prepared backup's `validate()`: local state versus the reviewed signature immediately before the trusted synchronous download.
+- The import adapter's `revalidateBaseline()`: fresh authoritative state before staging.
+- The backup receipt adapter: cloud re-read versus both the fresh authoritative baseline and prepared signature.
+- Importer's `protectedSnapshot()` / `compareProtected()`: comparison of unrelated protected fields during staging.
+- The import adapter's `verifyCloud()`: post-save unrelated protected data versus the authoritative baseline. Jobs, completed jobs, folders, and unique import_event_id checks remain exact and are not passed through a broader exception.
+
+All weekly business content remains strict: array length/order, IDs, week keys/dates/periods, totals, dollar values, categories, cut items, amounts, and arbitrary other fields. All other protected data, project/category relationships, materials, reviewed-preview identity, backup receipt ownership, revision/CAS, double-click prevention, rollback, and indeterminate suspension remain enforced. A meaningful post-save drift fails verification and suspends writes without retry or rollback of committed evidence.
+
+The helper never writes to window.weeklyCostReports, snapshot data, backup payloads, cloud state, or the Firebase save payload. Backups still contain the cloud's original timestamp. Ordinary application save behavior still preserves the live generated timestamp; it is neither deleted nor replaced by the comparison helper. The actual Edge fixture verifies the downloaded timestamp A and saved/live timestamp B are both present, with every other report field unchanged.
+
+Verification on October 5, 2026 (all PASS, zero failures; no package.json, no npm):
+
+```powershell
+node --check js/core.js
+node --check js/cuttingJobImporter.js
+node --check tests/cji-02-project-category-import.test.js
+node --check tests/cji-02a-backup-action.test.js
+node --check tests/cji-02c-comparison-state.test.js
+node --check scripts/cji-02a-browser.js
+node --test tests/cji-02-project-category-import.test.js tests/cji-02a-backup-action.test.js tests/cji-02b-legacy-category-adoption.test.js tests/cji-02c-comparison-state.test.js tests/cutting-job-import.test.js tests/cji02-history-repair.test.js tests/import-selective-rollback.test.js tests/atomic-persistence.test.js tests/recovery-import.test.js
+node scripts/devsafe-server.js
+# In a second terminal:
+$env:OMAX_PLAYWRIGHT_PATH='C:\Users\Ryder\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright'
+node scripts/cji-02a-browser.js
+git diff --check
+git diff --cached --check
+```
+
+Node/DOM: **205 cases passed** (the prior 170 plus 35 focused CJI-02C cases). Node's aggregate reports 168 entries because the older cutting-import and repair script suites each count as one entry rather than their internal 24 and 15 cases. The focused matrix exercises production adapter code and verifies timestamp-only/multiple/missing timestamp equality, non-mutating frozen/shared data, strict meaningful drift before and after save, unchanged backup payloads, receipt checks, staging protection, and revision mismatch. All CJI-02A/B cases still pass, including legacy 0000 ID-preserving rename, independent XXXX, and historical 1111 handling.
+
+Actual Edge: **16/16 scenarios passed** using the disposable full localhost app with external requests blocked. Two new no-watcher scenarios use cloud timestamp A and local timestamp B: preview prepares the backup, the trusted final click starts a real inspected download, fresh baseline and receipt checks pass, and timestamp-only post-save verification completes with no recovery/autosave suspension. A second scenario injects a meaningful dollar drift in the post-save server read and correctly suspends after exactly one save, with staged evidence retained. The previous 14 backup/action/legacy/XXXX scenarios pass unchanged. No DevTools, console/status polling during normal submission, production Firebase import, new branch/PR, or merge was performed. Results and downloaded fixture backups are retained in ignored `artifacts/cji-02a/`. Actual shop Vercel acceptance of this fix remains untested.
