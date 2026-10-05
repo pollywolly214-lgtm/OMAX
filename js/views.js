@@ -1,4 +1,19 @@
 /* ========================= VIEWS ========================== */
+function getCuttingJobUnlinkedCloudFileIds(jobId){
+  const jobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])];
+  const job = jobs.find(entry => String(entry?.id) === String(jobId));
+  return Array.isArray(job?.unlinkedCloudFileIds) ? job.unlinkedCloudFileIds : [];
+}
+
+function isCuttingJobCloudFileUnlinked(jobId, fileId){
+  return getCuttingJobUnlinkedCloudFileIds(jobId).includes(fileId);
+}
+
+function filterAttachedCuttingJobCloudFiles(jobId, files){
+  const unlinked = new Set(getCuttingJobUnlinkedCloudFileIds(jobId));
+  return (Array.isArray(files) ? files : []).filter(file => !unlinked.has(file.fileId));
+}
+
 function renderAverageHoursBanner(contextLabel){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const avg = (typeof getAverageDailyCutHours === "function") ? Number(getAverageDailyCutHours()) : NaN;
@@ -1972,11 +1987,12 @@ function viewCosts(model){
             <button type="button" class="btn secondary" data-receipt-export-range>Export range (CSV)</button>
           </div>
           <p class="small muted" data-receipt-week-range>—</p>
+          <p class="small muted" data-receipt-week-allocation-note hidden>Historical shipping and tax may be allocated across items from the same original order.</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-week-table">
-              <thead><tr><th>Date</th><th>Purchased</th><th>Cost</th><th>Qty</th><th>Part number</th><th>Inventory link</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Date</th><th>Purchased Item</th><th>Part #</th><th class="purchase-number">Qty</th><th class="purchase-number">Unit Cost</th><th class="purchase-number">Item Subtotal</th><th class="purchase-number">Shipping</th><th class="purchase-number">Tax</th><th class="purchase-number">Total Spend</th><th>Inventory link</th><th>Actions</th></tr></thead>
               <tbody data-receipt-week-rows></tbody>
-              <tfoot><tr><th colspan="8">Subtotal</th><th data-receipt-week-subtotal>$0.00</th><th></th></tr></tfoot>
+              <tfoot><tr><th colspan="8">Week Total Spend</th><th class="purchase-number" data-receipt-week-subtotal>$0.00</th><th colspan="2"></th></tr></tfoot>
             </table>
           </div>
           <div class="cost-receipt-summary-controls">
@@ -1993,11 +2009,12 @@ function viewCosts(model){
             </label>
           </div>
           <p class="small muted" data-receipt-range-label>—</p>
+          <p class="small muted" data-receipt-range-allocation-note hidden>Historical shipping and tax may be allocated across items from the same original order.</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-summary-table">
-              <thead><tr><th>Date</th><th>Purchased</th><th>Qty</th><th>Part number</th><th>Shipping</th><th>Tax</th><th>Total</th><th>Link status</th></tr></thead>
+              <thead><tr><th>Date</th><th>Purchased Item</th><th>Part #</th><th class="purchase-number">Qty</th><th class="purchase-number">Unit Cost</th><th class="purchase-number">Item Subtotal</th><th class="purchase-number">Shipping</th><th class="purchase-number">Tax</th><th class="purchase-number">Total Spend</th><th>Link status</th></tr></thead>
               <tbody data-receipt-range-rows></tbody>
-              <tfoot><tr><th colspan="6">Subtotal</th><th data-receipt-range-subtotal>$0.00</th><th></th></tr></tfoot>
+              <tfoot><tr><th colspan="8">Range Total Spend</th><th class="purchase-number" data-receipt-range-subtotal>$0.00</th><th></th></tr></tfoot>
             </table>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
@@ -2318,12 +2335,13 @@ function viewCosts(model){
                       <th>Purchase date</th>
                       <th>Purchased item</th>
                       <th>Week</th>
-                      <th>Cost</th>
-                      <th>Qty</th>
                       <th>Part #</th>
-                      <th>Shipping</th>
-                      <th>Tax</th>
-                      <th>Total spend</th>
+                      <th class="purchase-number">Qty</th>
+                      <th class="purchase-number">Unit Cost</th>
+                      <th class="purchase-number">Item Subtotal</th>
+                      <th class="purchase-number">Shipping</th>
+                      <th class="purchase-number">Tax</th>
+                      <th class="purchase-number">Total Spend</th>
                     </tr>
                   </thead>
                   <tbody data-spend-table-body>
@@ -2332,14 +2350,15 @@ function viewCosts(model){
                         <td>${esc(row.dateISO || "—")}</td>
                         <td>${esc(row.purchased || "—")}</td>
                         <td>${esc(row.weekLabel || "—")}</td>
-                        <td>${esc(row.costLabel || "$0.00")}</td>
-                        <td>${esc(row.qtyLabel || "0")}</td>
                         <td>${esc(row.partNumber || "—")}</td>
-                        <td>${esc(row.shippingLabel || "$0.00")}</td>
-                        <td>${esc(row.taxLabel || "$0.00")}</td>
-                        <td>${esc(row.totalLabel || "$0.00")}</td>
+                        <td class="purchase-number">${esc(row.qtyLabel || "0")}</td>
+                        <td class="purchase-number">${esc(row.costLabel || "$0.00")}</td>
+                        <td class="purchase-number">${esc(row.merchandiseSubtotalLabel || "$0.00")}</td>
+                        <td class="purchase-number">${esc(row.shippingLabel || "$0.00")}</td>
+                        <td class="purchase-number">${esc(row.taxLabel || "$0.00")}</td>
+                        <td class="purchase-number">${esc(row.totalLabel || "$0.00")}</td>
                       </tr>
-                    `).join("") : `<tr><td colspan="9" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>`}
+                    `).join("") : `<tr><td colspan="10" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>`}
                   </tbody>
                 </table>
               </div>
@@ -2969,10 +2988,13 @@ function viewJobs(){
     }
     return { name, href, mode: "message", content: "Preview unavailable for this file type.", expectedPath, rootLocation, source, rootId, rootHint };
   };
-  const cloudPresentationForJob = jobId => window.cfr05CloudPresentation?.peek?.(String(jobId || "")) || null;
-  const buildCloudFileMarkup = jobId => {
+  const cloudPresentationForJob = jobId => {
+    const state = window.cfr05CloudPresentation?.peek?.(String(jobId ?? ""));
+    return state ? { ...state, files:filterAttachedCuttingJobCloudFiles(jobId, state.files) } : null;
+  };
+  const buildCloudFileMarkup = (jobId, { editing = false } = {}) => {
     const state = cloudPresentationForJob(jobId);
-    const jobKey = String(jobId || "");
+    const jobKey = String(jobId ?? "");
     if (!state){
       return `<div class="job-cloud-files small muted" data-cloud-files-presentation data-cfr05-cloud-job-id="${esc(jobKey)}">Checking secure cloud files…</div>`;
     }
@@ -3002,8 +3024,10 @@ function viewJobs(){
         previewMarkup = `<div class="job-cloud-preview-target small muted" data-cfr05-preview-target data-cfr05-job-id="${esc(jobKey)}" data-cfr05-file-id="${esc(selected.fileId)}" data-cfr05-sha256="${esc(selected.sha256)}">DXF preview loads when visible…</div><div class="job-file-preview-name">${esc(selected.originalName)}</div><div class="small muted">${esc(detail)}</div>${download}`;
       }
     }
-    const otherRows = otherFiles.map(file=>{const size=Number(file.sizeBytes)/1024;return `<li><span>${esc(file.originalName)}</span><span class="small muted">${esc(String(file.extension||"").toUpperCase())} · ${Number.isFinite(size)?`${size.toFixed(1)} KB`:"size unavailable"} · verified</span><button type="button" class="link" data-cfr05-presented-open="${esc(file.fileId)}" data-cfr05-job-id="${esc(jobKey)}">Download/Open</button></li>`;}).join("");
-    return `<div class="job-cloud-files" data-cloud-files-presentation data-cfr05-cloud-job-id="${esc(jobKey)}"><div class="job-file-source-badge">Secure cloud</div>${selector}${previewMarkup}${otherRows?`<ul class="job-file-list">${otherRows}</ul>`:""}</div>`;
+    const removeButton = file => editing ? `<button type="button" class="link" data-unlink-cloud-file="${esc(file.fileId)}" data-cfr05-job-id="${esc(jobKey)}">Remove from job</button>` : "";
+    const dxfRows = editing ? dxfFiles.map(file=>`<li><span>${esc(file.originalName)}</span>${removeButton(file)}</li>`).join("") : "";
+    const otherRows = otherFiles.map(file=>{const size=Number(file.sizeBytes)/1024;return `<li><span>${esc(file.originalName)}</span><span class="small muted">${esc(String(file.extension||"").toUpperCase())} · ${Number.isFinite(size)?`${size.toFixed(1)} KB`:"size unavailable"} · verified</span><button type="button" class="link" data-cfr05-presented-open="${esc(file.fileId)}" data-cfr05-job-id="${esc(jobKey)}">Download/Open</button>${removeButton(file)}</li>`;}).join("");
+    return `<div class="job-cloud-files" data-cloud-files-presentation data-cfr05-cloud-job-id="${esc(jobKey)}"><div class="job-file-source-badge">Secure cloud</div>${selector}${previewMarkup}${dxfRows||otherRows?`<ul class="job-file-list">${dxfRows}${otherRows}</ul>`:""}</div>`;
   };
   const buildFileCellMarkup = (jobId, files)=>{
     const previews = (Array.isArray(files) ? files : []).map(filePreviewModel);
@@ -3226,7 +3250,7 @@ function viewJobs(){
   };
 
 
-  const normalizeProjectNumber = (value)=> String(value || "").trim().replace(/[^0-9]/g, "").slice(0, 8);
+  const normalizeProjectNumber = (value)=> window.CuttingJobHistory.normalizeProjectKey(value);
   const projectLabel = (job)=> {
     const value = normalizeProjectNumber(job?.projectNumber);
     return value || "Unassigned";
@@ -4085,7 +4109,7 @@ function viewJobs(){
                   return `<li>${link} ${sourceTag} ${statusTag} ${expectedPath ? `<span class="small muted">— Root: ${esc(rootLabel)} · Relative path: ${esc(expectedPath)} · Root ID: ${esc(String(f?.rootId || "Not verified").slice(0,16))}</span>` : ""} ${pathAction} ${linkAction} <button type="button" class="link" data-remove-file="${job.id}" data-file-index="${idx}">Remove</button></li>`;
                 }).join("") : (cloudPresentationForJob(job.id)?.files?.length ? "" : `<li class="muted">No local/reference files attached</li>`)}
               </ul>
-              ${buildCloudFileMarkup(job.id)}
+              ${buildCloudFileMarkup(job.id, { editing:true })}
             </div>
             <div class="job-edit-actions">
               <button type="button" data-history-save="${job.id}">Save</button>
@@ -4218,7 +4242,7 @@ function viewJobs(){
       : (cloudPresentationForJob(j.id)?.files?.length ? "" : `<p class="job-file-menu-empty small muted">No local/reference files attached</p>`))
       + buildCloudFileMarkup(j.id)
       + fileMenuActions;
-    const editing = editingJobs.has(j.id);
+    const editing = editingJobs.has(String(j.id));
     const jobId = j?.id != null ? String(j.id) : "";
     const priorityValue = priorityForJob(j);
     const cachedEff = jobId && efficiencyCache instanceof Map ? efficiencyCache.get(jobId) : null;
@@ -4445,7 +4469,7 @@ function viewJobs(){
                 <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-j="costRate" data-id="${j.id}" value="${Number.isFinite(costRate) ? costRate : 45}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
-                <label>Project #<input type="text" data-j="projectNumber" data-id="${j.id}" inputmode="numeric" maxlength="8" value="${esc(projectLabel(j) === "Unassigned" ? "" : projectLabel(j))}"></label>
+                <label>Project #<input type="text" data-j="projectNumber" data-id="${j.id}" inputmode="text" maxlength="8" value="${esc(projectLabel(j) === "Unassigned" ? "" : projectLabel(j))}"></label>
                 <label>Priority<select data-j="priority" data-id="${j.id}">${priorityOptionsMarkup(priorityValue)}</select></label>
                 <label>Category<select data-j="cat" data-id="${j.id}" data-job-category-select>
                   ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
@@ -4523,7 +4547,7 @@ function viewJobs(){
                     return `<li>${link} ${sourceTag} ${statusTag} ${expectedPath ? `<span class="small muted">— Root: ${esc(rootLabel)} · Relative path: ${esc(expectedPath)} · Root ID: ${esc(String(f?.rootId || "Not verified").slice(0,16))}</span>` : ""} ${pathAction} ${linkAction} <button type="button" class="link" data-remove-file="${j.id}" data-file-index="${idx}">Remove</button></li>`;
                   }).join("") : (cloudPresentationForJob(j.id)?.files?.length ? "" : `<li class=\"muted\">No local/reference files attached</li>`)}
                 </ul>
-                ${buildCloudFileMarkup(j.id)}
+                ${buildCloudFileMarkup(j.id, { editing:true })}
               </div>
               <div class="job-edit-actions">
                 <button type="button" data-save-job="${j.id}">Save</button>
@@ -4628,7 +4652,7 @@ function viewJobs(){
             <input type="date" id="jobDue" required value="${esc(addJobDraftField("due", defaultJobDateISO))}">
           </label>
           <label>Project #
-            <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="numeric" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
+            <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="text" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
           </label>
           <div class="job-category-field">
             <label for="jobCategory">Category</label>

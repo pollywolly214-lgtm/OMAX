@@ -820,7 +820,7 @@ function isProtectedBusinessDataKey(key){
   return /(tasksinterval|tasksasreq|completeddates|manualhistory|calendardateiso|recurrence|removedoccurrences|occurrenceoverrides|maintenancetasksv2|maintenanceoccurrencesv2|maintenancecalendarinstancesv2|settingsfolders|folders|inventory|inventoryfolders|inventorymaterials|inventorytransactions|orderrequests|receipttrackerweeks|weeklycostreports|purchase|vendor|tolerance|inspection|quality|layout|dashboardlayout|costlayout|joblayout|tolerancelayout)/i.test(normalized);
 }
 
-function sanitizeValueForStorage(value, { dropHeavyHistory = false } = {}){
+function sanitizeValueForStorage(value, { dropHeavyHistory = false, provenanceScope = "" } = {}){
   if (Array.isArray(value)) return value.map(v => sanitizeValueForStorage(v, { dropHeavyHistory }));
   if (!value || typeof value !== "object"){
     if (typeof value === "string" && (value.startsWith("data:image") || value.length > 200000)) return "";
@@ -829,13 +829,21 @@ function sanitizeValueForStorage(value, { dropHeavyHistory = false } = {}){
   const out = {};
   for (const [k,v] of Object.entries(value)){
     const key = String(k || "");
-    if (/^(__|debug|cache|preview)/i.test(key)) continue;
+    // Workbook parser markers are immutable reviewed-source evidence here,
+    // not runtime caches. Keep only their bounded eligible forms, and only
+    // directly inside importProvenance.sourceRecord. Firewall rules still apply.
+    const sourceMarker = provenanceScope === "source" && (
+      (key === "__sourceRowNumber" && (v === null || (Number.isSafeInteger(v) && v > 0 && v <= 1048576)))
+      || (key === "__recoveryProblems" && Array.isArray(v) && v.length === 0)
+    );
+    if (/^(__|debug|cache|preview)/i.test(key) && !sourceMarker) continue;
     if (dropHeavyHistory && !isProtectedBusinessDataKey(key) && /(syncprocesslog|logs|deleteditems|reports|rollups|savelogs)/i.test(key)) continue;
     if (typeof v === "string" && (isLikelyEmbeddedFileContent(key, v) || v.length > 200000)){
       if (isSafeMetadataString(key, v)) out[key] = v;
       continue;
     }
-    out[k] = sanitizeValueForStorage(v, { dropHeavyHistory });
+    const nextScope = key === "importProvenance" ? "import" : (provenanceScope === "import" && key === "sourceRecord" ? "source" : "");
+    out[k] = sanitizeValueForStorage(v, { dropHeavyHistory, provenanceScope:nextScope });
   }
   return out;
 }
@@ -3511,8 +3519,9 @@ function normalizeJobFolders(raw){
       const name = typeof entry.name === "string" ? entry.name : "";
       const order = Number.isFinite(entry.order) ? Number(entry.order) : 0;
       const color = normalizeHexColor(entry.color);
-      const folderEntry = { id, name, parent, order };
+      const folderEntry = { ...entry, id, name, parent, order };
       if (color) folderEntry.color = color;
+      if (entry.projectNumber != null) folderEntry.projectNumber = String(entry.projectNumber);
       normalized.push(folderEntry);
     }
   }
@@ -4353,6 +4362,23 @@ function getCloudCutFileStorageDiagnostics(){
 
 window.auditCuttingFileContentExposure = auditCuttingFileContentExposure;
 window.getCloudCutFileStorageDiagnostics = getCloudCutFileStorageDiagnostics;
+window.runMaintenanceCalendarMutation = window.OMAXMaintenanceCalendarIntegrity.createMutationRunner({
+  state:()=>compactStateForStorage(snapshotState({skipLocalFileCacheSync:true})),
+  readCloud:()=>readCurrentCloudStateReadOnly(),
+  loadedRevision:()=>Number(window.__loadedCloudRevisionForSaveGuard||0),
+  canWrite:()=>canWriteCloud("maintenance calendar action"),
+  apply:(key,value)=>{window[key]=value;refreshGlobalCollections();},
+  save:options=>saveCloudNow(options),
+  checkpoint:()=>({undo:undoStack.slice(),redo:redoStack.slice(),current:currentSnapshotJSON}),
+  restoreCheckpoint:checkpoint=>{
+    undoStack.splice(0,undoStack.length,...checkpoint.undo);redoStack.splice(0,redoStack.length,...checkpoint.redo);currentSnapshotJSON=checkpoint.current;
+    persistLocalStateBackup(snapshotState({skipLocalFileCacheSync:true}));
+  },
+  suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastImportVerificationError=reason;renderRecoveryDiagnosticsPanel();}
+});
+window.inspectMaintenanceCalendarIntegrity = (options={})=>window.OMAXMaintenanceCalendarIntegrity.inspect(window,{...options,projectedRepeatRows:window.__maintenanceCalendarProjectedRepeatRows||[]});
+window.inspectMaintenanceCalendarCloud = async (options={})=>window.OMAXMaintenanceCalendarIntegrity.inspect(await readCurrentCloudStateReadOnly(),options);
+
 window.historicalImport = window.OMAXHistoricalImport.createApi({
   state:()=>compactStateForStorage(snapshotState({ skipLocalFileCacheSync:true })),
   canWrite:()=>canWriteCloud("historical reconciliation") && Boolean(FB.user),
@@ -4360,7 +4386,11 @@ window.historicalImport = window.OMAXHistoricalImport.createApi({
   loadedRevision:()=>Number(window.__loadedCloudRevisionForSaveGuard || 0),
   scan:scanAuthoritativeCutFileContent,
   backup:async state=>exportJsonDownload(`omax-pre-import-${Date.now()}.json`,{ state, integrity:buildDataIntegritySummary(state), syncMeta:state.syncMeta }),
-  apply:(key,value)=>{window[key]=value;refreshGlobalCollections();},
+  createTask:(definition,order)=>window.OMAXMaintenanceRecoveryTaskSetup.buildAsRequiredTask({
+    id:genId(definition.name),name:definition.name,manualLink:"",storeLink:"",pn:definition.pn,price:definition.price,note:"",
+    cat:typeof window.ROOT_FOLDER_ID==="string"?window.ROOT_FOLDER_ID:"root",parentTask:null,order,downtimeHours:definition.downtimeHours
+  }),
+  apply:(key,value)=>{window[key]=value;refreshGlobalCollections();if(key==="tasksAsReq")window._maintOrderCounter=value.reduce((max,task)=>Math.max(max,Number(task?.order)||0),Number(window._maintOrderCounter)||0);},
   save:options=>saveCloudNow(options),
   suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastImportVerificationError=reason;renderRecoveryDiagnosticsPanel();}
 });
@@ -4425,6 +4455,51 @@ function getCuttingJobImporterState(){
   ["tasksInterval","tasksAsReq","settingsFolders","appConfig","weeklyCostReports","purchases","inventory","inventoryFolders","inventoryMaterials","receiptTrackerWeeks","orderRequests","dailyCutHours","totalHistory","garnetCleanings","pumpEff","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","dashboardLayout","costLayout","jobLayout","deletedItems"].forEach(key=>Object.defineProperty(state,key,{get:()=>window[key]}));
   return state;
 }
+function createCuttingJobImportPreviewTrace(){
+  const report={loadedRevision:Number(window.__loadedCloudRevisionForSaveGuard||0),initialMutationVersion:typeof lastLocalMutationAt==="number"?lastLocalMutationAt:0,samples:[]};
+  let previous=null;
+  const addSample=sample=>{if(report.samples.length<10)report.samples.push(sample);};
+  return{report,addSample,record:phase=>{
+    const snapshot=compactStateForStorage(snapshotState({skipLocalFileCacheSync:true}));
+    const data=Object.fromEntries(Object.entries(window.CuttingJobImporter.normalizeComparisonState(snapshot)||{}).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key))),signature=stableStringify(data);
+    addSample({phase,loadedRevision:Number(window.__loadedCloudRevisionForSaveGuard||0),signatureLength:signature.length,fingerprint:window.CuttingJobImporter.comparisonFingerprint(signature),firstChangedPath:previous?window.CuttingJobImporter.firstDifferencePath(previous,data):""});
+    previous=data;
+  }};
+}
+function settleCuttingJobImportPreview(){
+  // Cross queued microtasks, two rendering frames, and the following task.
+  // This drains already scheduled UI work without invoking a renderer or save.
+  return new Promise((resolve,reject)=>{
+    let frame=null,task=null,finished=false;
+    const finish=error=>{if(finished)return;finished=true;clearTimeout(timeout);if(task!=null)clearTimeout(task);if(frame!=null&&typeof cancelAnimationFrame==="function")cancelAnimationFrame(frame);error?reject(error):resolve();};
+    const timeout=setTimeout(()=>finish(Error("Preview preparation render cycle did not settle within 1 second; preview again.")),1000);
+    Promise.resolve().then(()=>{
+      if(finished)return;
+      if(typeof requestAnimationFrame!=="function"){task=setTimeout(()=>finish(),0);return;}
+      frame=requestAnimationFrame(()=>{if(finished)return;frame=requestAnimationFrame(()=>{if(finished)return;task=setTimeout(()=>finish(),0);});});
+    });
+  });
+}
+// Only receipts issued by a synchronous trusted confirmation click are accepted.
+const cuttingJobImportBackupReceipts=new WeakMap();
+async function readCuttingJobImportCloudState(){
+  let timeout;try{return await Promise.race([readCurrentCloudStateReadOnly(),new Promise((_,reject)=>{timeout=setTimeout(()=>reject(Error("Current cloud read timed out after 30 seconds.")),30000);})]);}finally{clearTimeout(timeout);}
+}
+async function prepareCuttingJobImportBackup({previewTrace}={}){
+  if(!window.cuttingJobImporter?.canPrepareBackup())throw Error("Authenticated current cloud baseline required.");
+  const business=value=>Object.fromEntries(Object.entries(window.CuttingJobImporter.normalizeComparisonState(value)||{}).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
+  const stable=await window.CuttingJobImporter.stabilizePreviewBaseline({snapshot:()=>compactStateForStorage(snapshotState({skipLocalFileCacheSync:true})),readCloud:readCuttingJobImportCloudState,loadedRevision:()=>window.__loadedCloudRevisionForSaveGuard,localMutationVersion:()=>typeof lastLocalMutationAt==="number"?lastLocalMutationAt:0,settle:settleCuttingJobImportPreview,signature:stableStringify,initialRevision:previewTrace?.report.loadedRevision??window.__loadedCloudRevisionForSaveGuard,initialMutationVersion:previewTrace?.report.initialMutationVersion??(typeof lastLocalMutationAt==="number"?lastLocalMutationAt:0),onSample:previewTrace?.addSample});
+  const baseline=stable.baseline;
+  if(!window.cuttingJobImporter.canPrepareBackup())throw Object.assign(Error("Authenticated current cloud baseline required."),{previewPreparation:stable.diagnostics});
+  const materialSettingsRaw=localStorage.getItem("job_material_pricing_v1");
+  let materialSettings=null;try{materialSettings=JSON.parse(materialSettingsRaw||"null");}catch(_){}
+  const prepared={baselineSignature:stableStringify(window.CuttingJobImporter.normalizeComparisonState(baseline)),businessSignature:stableStringify(business(baseline)),materialSettingsRaw,revision:stable.revision,diagnostics:stable.diagnostics};
+  prepared.download=window.CuttingJobImportDownload.prepare(`omax-cutting-job-import-backup-${Date.now()}.json`,{...baseline,cjiLocalMaterialSettings:materialSettings});
+  prepared.validate=()=>{
+    if(!window.cuttingJobImporter.canPrepareBackup()||Number(window.__loadedCloudRevisionForSaveGuard||0)!==prepared.revision||localStorage.getItem("job_material_pricing_v1")!==materialSettingsRaw||stableStringify(business(compactStateForStorage(snapshotState({skipLocalFileCacheSync:true}))))!==prepared.businessSignature)throw Error("Prepared backup or local review is stale; preview again.");
+  };
+  return prepared;
+}
 window.cuttingJobImporter = window.CuttingJobImporter?.createApi({
   xlsx:window.CjiXlsxParser,
   state:getCuttingJobImporterState,
@@ -4441,28 +4516,29 @@ window.cuttingJobImporter = window.CuttingJobImporter?.createApi({
   authenticatedBaseline:()=>Boolean(canWriteCloud("cutting-job import")&&FB.ready&&FB.user&&FB.docRef&&window.__lastLoadedCloudState&&!window.__localBackupOnlyMode),
   revalidateBaseline:async()=>{
     if(!canWriteCloud("cutting-job import")||!FB.docRef||!FB.user)return false;
-    const latest=await readCurrentCloudStateReadOnly();
-    const business=state=>Object.fromEntries(Object.entries(state||{}).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
+    const latest=await readCuttingJobImportCloudState();
+    const business=state=>Object.fromEntries(Object.entries(window.CuttingJobImporter.normalizeComparisonState(state)||{}).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
     const current=compactStateForStorage(snapshotState({skipLocalFileCacheSync:true}));
     const valid=latest&&Number(latest.syncMeta?.rev||0)===Number(window.__loadedCloudRevisionForSaveGuard||0)&&stableStringify(business(current))===stableStringify(business(latest));
     if(valid)window.__cjiAuthoritativeBaseline=cloneStructured(latest);
     return Boolean(valid);
   },
-  backup:async()=>{
-    const state=await readCurrentCloudStateReadOnly();
-    if(!state||stableStringify(state)!==stableStringify(window.__cjiAuthoritativeBaseline))throw Error("Authoritative baseline changed before backup; preview again.");
-    let materialSettings=null;try{materialSettings=JSON.parse(localStorage.getItem("job_material_pricing_v1")||"null");}catch(_){}
-    const backup={...state,cjiLocalMaterialSettings:materialSettings};
-    if(!exportJsonDownload(`omax-cutting-job-import-backup-${Date.now()}.json`,backup))throw new Error("Full-state backup download did not start.");return true;
+  backup:async({backupReceipt}={})=>{
+    const prepared=backupReceipt&&cuttingJobImportBackupReceipts.get(backupReceipt);
+    if(!prepared||backupReceipt.triggerStarted!==true)throw Error("Mandatory backup download could not be started from the confirmation click.");
+    cuttingJobImportBackupReceipts.delete(backupReceipt);
+    const state=await readCuttingJobImportCloudState();
+    if(!state||stableStringify(window.CuttingJobImporter.normalizeComparisonState(state))!==stableStringify(window.CuttingJobImporter.normalizeComparisonState(window.__cjiAuthoritativeBaseline))||stableStringify(window.CuttingJobImporter.normalizeComparisonState(state))!==prepared.baselineSignature||localStorage.getItem("job_material_pricing_v1")!==prepared.materialSettingsRaw)throw Error("Authoritative baseline or backup changed before import; preview again.");
+    return true;
   },
-  verifyCloud:async({plannedIds,expectedState})=>{
-    const cloud=await readCurrentCloudStateReadOnly();
+  verifyCloud:async({plannedIds,expectedState,expectedCategories})=>{
+    const cloud=await readCuttingJobImportCloudState();
     const jobs=[...(cloud?.cuttingJobs||[]),...(cloud?.completedCuttingJobs||[])];
-    const unrelated=value=>Object.fromEntries(Object.entries(value||{}).filter(([key])=>!["cuttingJobs","completedCuttingJobs","jobFolders","syncMeta","saveMeta","syncProcessLog"].includes(key)));
-    return Boolean(cloud)&&stableStringify(cloud.cuttingJobs)===stableStringify(expectedState.cuttingJobs)&&stableStringify(cloud.completedCuttingJobs)===stableStringify(expectedState.completedCuttingJobs)&&plannedIds.every(id=>jobs.filter(job=>job.import_event_id===id).length===1)&&stableStringify(unrelated(cloud))===stableStringify(unrelated(window.__cjiAuthoritativeBaseline));
+    const unrelated=value=>Object.fromEntries(Object.entries(window.CuttingJobImporter.normalizeComparisonState(value)||{}).filter(([key])=>!["cuttingJobs","completedCuttingJobs","jobFolders","syncMeta","saveMeta","syncProcessLog"].includes(key)));
+    return Boolean(cloud)&&stableStringify(cloud.jobFolders)===stableStringify(expectedCategories)&&stableStringify(cloud.cuttingJobs)===stableStringify(expectedState.cuttingJobs)&&stableStringify(cloud.completedCuttingJobs)===stableStringify(expectedState.completedCuttingJobs)&&plannedIds.every(id=>jobs.filter(job=>job.import_event_id===id).length===1)&&stableStringify(unrelated(cloud))===stableStringify(unrelated(window.__cjiAuthoritativeBaseline));
   },
   suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastImportVerificationError=reason;renderRecoveryDiagnosticsPanel();},
-  saveCloudNow:()=>saveCloudNow()
+  saveCloudNow:options=>saveCloudNow(options)
 });
 const cuttingJobRepairBackup=async()=>{const state=snapshotState({skipLocalFileCacheSync:true});let materialSettings=null;try{materialSettings=JSON.parse(localStorage.getItem("job_material_pricing_v1")||"null");}catch(_){}if(!exportJsonDownload(`omax-cutting-job-repair-backup-${Date.now()}.json`,{...state,cjiLocalMaterialSettings:materialSettings}))throw new Error("Full-state backup download did not start.");return true;};
 const cuttingJobRepairEnv={state:getCuttingJobImporterState,categories:()=>window.jobFolders||[],baseline:()=>window.__lastLoadedCloudState,setCategories:value=>{setJobFolders(value);jobFolders=window.jobFolders;},revalidateBaseline:async()=>{if(!FB.docRef||!FB.user)return false;const snap=await FB.docRef.get();if(!snap.exists)return false;return Number((snap.data()||{}).syncMeta?.rev||0)===Number((window.__lastLoadedCloudState||{}).syncMeta?.rev||0);},backup:cuttingJobRepairBackup,saveCloudNow:()=>saveCloudNow()};
@@ -4471,18 +4547,54 @@ window.auditCuttingJobHistoryRepair=()=>runReadOnlyCuttingJobRepairAudit();
 window.runCuttingJobHistoryRepair=()=>window.CuttingJobRepair.repair(cuttingJobRepairEnv,{confirmed:true});
 (function installCuttingJobImporterAdmin(){
   const dialog=document.getElementById("cuttingJobImportAdmin"),close=document.getElementById("cuttingJobImportClose"),file=document.getElementById("cuttingJobImportFile"),previewBtn=document.getElementById("cuttingJobImportPreview"),reviewed=document.getElementById("cuttingJobImportReviewed"),run=document.getElementById("cuttingJobImportRun"),status=document.getElementById("cuttingJobImportStatus"),rows=document.getElementById("cuttingJobImportRows");
-  if(!dialog||!close||!file||!previewBtn||!reviewed||!run||!status||!rows||!window.cuttingJobImporter)return;const repairAudit=document.getElementById("cuttingJobRepairAudit"),repairRun=document.getElementById("cuttingJobRepairRun");let parsed=null,classified=null,lastTrigger=null,lastRepairAudit=null;const safe=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
-  const readyRows=()=>Array.isArray(classified)?classified.filter(x=>x.status==="ready"):[],syncRun=()=>{run.disabled=!parsed||!classified||readyRows().length===0||!reviewed.checked||window.cuttingJobImporter.isBusy();},clearReview=()=>{reviewed.checked=false;syncRun();},lock=value=>{file.disabled=value;previewBtn.disabled=value;reviewed.disabled=value;if(value)run.disabled=true;else syncRun();};
+  if(!dialog||!close||!file||!previewBtn||!reviewed||!run||!status||!rows||!window.cuttingJobImporter)return;const repairAudit=document.getElementById("cuttingJobRepairAudit"),repairRun=document.getElementById("cuttingJobRepairRun");let parsed=null,classified=null,lastTrigger=null,lastRepairAudit=null,preparedBackup=null,actionBusy=false,actionSuspended=false;const safe=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
+  const confirmDialog=document.getElementById("cuttingJobImportConfirm"),confirmRun=document.getElementById("cuttingJobImportConfirmRun"),confirmCancel=document.getElementById("cuttingJobImportConfirmCancel"),confirmMessage=document.getElementById("cuttingJobImportConfirmMessage");
+  if(!confirmDialog||!confirmRun||!confirmCancel||!confirmMessage)return;
+  const progress=stage=>{rows.dataset.lastImportStage=stage;status.textContent=stage;};
+  const discardBackup=()=>{preparedBackup?.download.dispose();preparedBackup=null;};
+  const readyRows=()=>Array.isArray(classified)?classified.filter(x=>x.status==="ready"):[],syncRun=()=>{run.disabled=actionBusy||actionSuspended||!preparedBackup||!parsed||!classified||readyRows().length===0||!reviewed.checked||window.cuttingJobImporter.isBusy();},clearReview=()=>{reviewed.checked=false;syncRun();},lock=value=>{close.disabled=value;confirmRun.disabled=value;confirmCancel.disabled=value;file.disabled=value;previewBtn.disabled=value;reviewed.disabled=value;if(value)run.disabled=true;else syncRun();};
   const openDialog=trigger=>{lastTrigger=trigger||null;if(!dialog.open)dialog.showModal();requestAnimationFrame(()=>{try{file.focus({preventScroll:true});}catch(_){file.focus();}});};
-  const closeDialog=()=>{if(dialog.open)dialog.close();if(lastTrigger?.isConnected)lastTrigger.focus();lastTrigger=null;};
+  const closeDialog=()=>{if(actionBusy)return;discardBackup();clearReview();if(dialog.open)dialog.close();if(lastTrigger?.isConnected)lastTrigger.focus();lastTrigger=null;};
   document.addEventListener("click",event=>{const trigger=event.target?.closest?.("[data-cutting-job-import-open]");if(trigger){event.preventDefault();openDialog(trigger);}});
   close.addEventListener("click",closeDialog);dialog.addEventListener("cancel",event=>{event.preventDefault();closeDialog();});
-  repairAudit?.addEventListener("click",()=>{lastRepairAudit=window.auditCuttingJobHistoryRepair();repairRun.disabled=Boolean(lastRepairAudit.blockingError);status.textContent=lastRepairAudit.blockingError?`Audit blocked: ${lastRepairAudit.blockingError}`:`Read-only audit: ${lastRepairAudit.jobCount} jobs; ${lastRepairAudit.repairPlan.created.length} categories to create; ${lastRepairAudit.repairPlan.renamed.length} to rename; ${lastRepairAudit.repairPlan.assignments.length} assignments reviewed.`;rows.dataset.lastRepairAudit=JSON.stringify(lastRepairAudit);});
+  repairAudit?.addEventListener("click",()=>{lastRepairAudit=window.auditCuttingJobHistoryRepair();repairRun.disabled=Boolean(lastRepairAudit.blockingError);status.textContent=lastRepairAudit.blockingError?`Audit blocked: ${lastRepairAudit.blockingError}`:`Read-only audit: ${lastRepairAudit.jobCount} jobs; ${lastRepairAudit.repairPlan.created.length} categories to create; ${lastRepairAudit.repairPlan.renamed.length} to rename; ${lastRepairAudit.repairPlan.assignments.length} assignments reviewed.`;if(lastRepairAudit.legacy1111.jobIds.length||lastRepairAudit.legacy1111.folderIds.length)status.textContent+=" Historical 1111 review required: "+lastRepairAudit.legacy1111.jobIds.length+" jobs, "+lastRepairAudit.legacy1111.folderIds.length+" folders (no migration).";if(lastRepairAudit.categoryOwnershipDiagnostics?.length)status.textContent+=" "+lastRepairAudit.categoryOwnershipDiagnostics.map(item=>item.message).join(" ");rows.dataset.lastRepairAudit=JSON.stringify(lastRepairAudit);});
   repairRun?.addEventListener("click",async()=>{if(!lastRepairAudit||lastRepairAudit.blockingError||!window.confirm("Download a full backup, repair the audited category assignments, and resequence every cut?"))return;repairRun.disabled=true;status.textContent="Revalidating, backing up, repairing, and saving…";const result=await window.runCuttingJobHistoryRepair();rows.dataset.lastRepairResult=JSON.stringify(result);status.textContent=result.saveCompleted?`Repair saved: ${result.assignments.length} jobs assigned and ${result.resequence.total} cuts numbered.`:result.saveIndeterminate?"Repair save outcome indeterminate. Refresh and read-verify; do not retry.":`Repair not completed: ${result.error}`;lastRepairAudit=null;});
   window.openReviewedCuttingJobImporter=()=>openDialog(null);window.closeReviewedCuttingJobImporter=closeDialog;
-  file.addEventListener("change",()=>{parsed=null;classified=null;rows.innerHTML="";clearReview();});reviewed.addEventListener("change",syncRun);
-  previewBtn.addEventListener("click",async()=>{clearReview();if(!file.files?.[0]){status.textContent="Choose an import file.";return;}lock(true);try{parsed=await window.cuttingJobImporter.parseFile(file.files[0]);classified=window.cuttingJobImporter.preview(parsed);const th=(label,cls="")=>`<th class="${cls}">${label}</th>`,td=(value,cls="")=>`<td class="${cls}">${safe(value)}</td>`;rows.innerHTML=`<table><thead><tr>${th("Row","cji-col-number")}${th("Event")}${th("Raw dimensions")}${th("Length ft","cji-col-number")}${th("Width ft","cji-col-number")}${th("Material","cji-col-material")}${th("Density","cji-col-number")}${th("$/lb","cji-col-number")}${th("Waste","cji-col-number")}${th("Weight lb","cji-col-number")}${th("Material cost","cji-col-number")}${th("Cost status")}${th("Status")}${th("Reasons","cji-col-text")}${th("Warnings","cji-col-text")}${th("Notes","cji-col-text")}</tr></thead><tbody>${classified.map(x=>{const c=x.calculation,material=c.previewMaterialName||x.row.material||"Missing / unresolved",kind=c.materialMatchKind||"unresolved";return `<tr>${td(x.raw.__sourceRowNumber||x.index+1,"cji-col-number")}${td(x.row.import_event_id)}${td(c.rawDimensions)}${td(c.pathLengthFt??"—","cji-col-number")}${td(c.pathWidthFt??"—","cji-col-number")}<td class="cji-col-material">${safe(material)}<span class="cji-material-kind">${safe(kind)}</span></td>${td(c.density??"—","cji-col-number")}${td(c.pricePerLb??"—","cji-col-number")}${td(c.wasteFactor==null?"—":`${c.wasteFactor}%`,"cji-col-number")}${td(c.calculatedWeight==null?"—":c.calculatedWeight.toFixed(2),"cji-col-number")}${td(c.calculatedMaterialCost==null?"—":`$${c.calculatedMaterialCost.toFixed(2)}`,"cji-col-number")}${td(c.costStatus)}${td(x.status)}${td(x.reasons.join(" "),"cji-col-text")}${td(x.warnings.join(" "),"cji-col-text")}${td(x.row.review_notes||"—","cji-col-text")}</tr>`;}).join("")}</tbody></table>`;const count=predicate=>classified.filter(predicate).length,plan=window.CuttingJobImporter.definitionPlan(classified),summary=[["Parsed",classified.length],["Ready",count(x=>x.status==="ready")],["Unresolved",count(x=>x.status==="unresolved")],["A36 assumed",count(x=>x.materialResolution.assumed&&x.materialResolution.status==="matched")],["Exact reuse",count(x=>x.calculation.materialMatchKind==="exact")],["Alias reuse",count(x=>x.calculation.materialMatchKind==="alias")],["RC50 unresolved",count(x=>/^RC50$/i.test(x.row.material)&&x.status==="unresolved")],["Cost complete",count(x=>x.calculation.costStatus==="cost-complete")],["Cost incomplete",count(x=>x.calculation.costStatus==="cost-incomplete")],["Categories create/reuse",`${plan.newCategories.length}/${plan.existingCategories.length}`]];status.innerHTML=summary.map(([label,value])=>`<span class="cutting-job-import-summary-item"><strong>${safe(label)}:</strong> ${safe(value)}</span>`).join("");}catch(error){parsed=null;classified=null;rows.innerHTML="";status.textContent=String(error?.message||error);}finally{clearReview();lock(false);}});
-  run.addEventListener("click",async()=>{const ready=readyRows();if(!parsed||!reviewed.checked||!ready.length)return;const active=ready.filter(x=>x.row.record_status==="active").length,completed=ready.filter(x=>x.row.record_status==="completed").length,plan=window.CuttingJobImporter.definitionPlan(classified),unresolved=classified.filter(x=>x.status==="unresolved").length,message=`Append ${ready.length} ready jobs: ${active} active, ${completed} completed. Create ${plan.newCategories.length} and reuse ${plan.existingCategories.length} categories. Create ${plan.newMaterials.length} and reuse ${plan.existingMaterials.length} materials. ${unresolved} unresolved rows remain excluded. Continue?`;if(!window.confirm(message)){clearReview();return;}lock(true);status.textContent="Revalidating and saving…";try{const result=await window.cuttingJobImporter.submit(parsed,{confirmed:true,reviewedPreview:classified});status.textContent=result.saveCompleted?`Imported ${result.importedEventIds.length} reviewed jobs.`:result.saveIndeterminate?"Save outcome indeterminate. Refresh and read-verify before any retry.":`Import not completed: ${result.saveError}`;rows.dataset.lastImportResult=JSON.stringify({...result,saveError:String(result.saveError||"")});}finally{clearReview();lock(false);}});
+  file.addEventListener("change",()=>{discardBackup();parsed=null;classified=null;rows.innerHTML="";clearReview();});reviewed.addEventListener("change",syncRun);
+  previewBtn.addEventListener("click",async()=>{if(actionBusy||actionSuspended)return;discardBackup();clearReview();progress("Preparing backup…");if(!file.files?.[0]){status.textContent="Choose an import file.";return;}actionBusy=true;lock(true);let previewTrace=null;delete rows.dataset.lastPreviewPreparation;try{previewTrace=createCuttingJobImportPreviewTrace();previewTrace.record("preview-start");parsed=await window.cuttingJobImporter.parseFile(file.files[0]);previewTrace.record("parsed");classified=window.cuttingJobImporter.preview(parsed);previewTrace.record("classified");const th=(label,cls="")=>`<th class="${cls}">${label}</th>`,td=(value,cls="")=>`<td class="${cls}">${safe(value)}</td>`;rows.innerHTML=`<table><thead><tr>${th("Row","cji-col-number")}${th("Event")}${th("Project")}${th("Category")}${th("Category status")}${th("Raw dimensions")}${th("Length ft","cji-col-number")}${th("Width ft","cji-col-number")}${th("Material","cji-col-material")}${th("Density","cji-col-number")}${th("$/lb","cji-col-number")}${th("Waste","cji-col-number")}${th("Weight lb","cji-col-number")}${th("Material cost","cji-col-number")}${th("Cost status")}${th("Status")}${th("Reasons","cji-col-text")}${th("Warnings","cji-col-text")}${th("Notes","cji-col-text")}</tr></thead><tbody>${classified.map(x=>{const c=x.calculation,material=c.previewMaterialName||x.row.material||"Missing / unresolved",kind=c.materialMatchKind||"unresolved";return `<tr>${td(x.raw.__sourceRowNumber||x.index+1,"cji-col-number")}${td(x.row.import_event_id)}${td(x.row.project_number)}${td(x.categoryResolution.categoryName||x.row.category)}${td(["conflict","ambiguous"].includes(x.categoryResolution.status)?"Conflict / Review":x.categoryResolution.status==="matched"?"Existing":x.status==="ready"?(x.categoryResolution.status==="rename"?"Rename existing":"Will create"):"Review")}${td(c.rawDimensions)}${td(c.pathLengthFt??"—","cji-col-number")}${td(c.pathWidthFt??"—","cji-col-number")}<td class="cji-col-material">${safe(material)}<span class="cji-material-kind">${safe(kind)}</span></td>${td(c.density??"—","cji-col-number")}${td(c.pricePerLb??"—","cji-col-number")}${td(c.wasteFactor==null?"—":`${c.wasteFactor}%`,"cji-col-number")}${td(c.calculatedWeight==null?"—":c.calculatedWeight.toFixed(2),"cji-col-number")}${td(c.calculatedMaterialCost==null?"—":`$${c.calculatedMaterialCost.toFixed(2)}`,"cji-col-number")}${td(c.costStatus)}${td(x.status)}${td(x.reasons.join(" "),"cji-col-text")}${td(x.warnings.join(" "),"cji-col-text")}${td(x.row.review_notes||"—","cji-col-text")}</tr>`;}).join("")}</tbody></table>`;previewTrace.record("rendered");const count=predicate=>classified.filter(predicate).length,plan=window.CuttingJobImporter.definitionPlan(classified),summary=[["Legacy category review",plan.categoryOwnershipDiagnostics.length],["Parsed",classified.length],["Ready",count(x=>x.status==="ready")],["Unresolved",count(x=>x.status==="unresolved")],["A36 assumed",count(x=>x.materialResolution.assumed&&x.materialResolution.status==="matched")],["Exact reuse",count(x=>x.calculation.materialMatchKind==="exact")],["Alias reuse",count(x=>x.calculation.materialMatchKind==="alias")],["RC50 unresolved",count(x=>/^RC50$/i.test(x.row.material)&&x.status==="unresolved")],["Cost complete",count(x=>x.calculation.costStatus==="cost-complete")],["Cost incomplete",count(x=>x.calculation.costStatus==="cost-incomplete")],["Categories create/rename/reuse",`${plan.newCategories.length}/${plan.renamedCategories.length}/${plan.existingCategories.length}`]];rows.dataset.categoryOwnershipReview=JSON.stringify(plan.categoryOwnershipDiagnostics);previewTrace.record("definition-plan");if(readyRows().length){previewTrace.record("prepare-entry");preparedBackup=await prepareCuttingJobImportBackup({previewTrace});if(JSON.stringify(window.cuttingJobImporter.preview(parsed))!==JSON.stringify(classified))throw Error("Reviewed preview changed while preparing backup; preview again.");}rows.dataset.lastPreviewPreparation=JSON.stringify({...preparedBackup?.diagnostics,status:preparedBackup?"ready":"no-ready-rows",samples:previewTrace.report.samples});status.innerHTML=summary.map(([label,value])=>`<span class="cutting-job-import-summary-item"><strong>${safe(label)}:</strong> ${safe(value)}</span>`).join("");}catch(error){rows.dataset.lastPreviewPreparation=JSON.stringify({...(error.previewPreparation||preparedBackup?.diagnostics),status:"blocked",samples:previewTrace?.report.samples||[],error:window.CuttingJobImportDownload.boundedError(error)});discardBackup();parsed=null;classified=null;rows.innerHTML="";status.textContent=`Import stopped — preparing backup: ${window.CuttingJobImportDownload.boundedError(error)}`;}finally{actionBusy=false;clearReview();lock(false);}});
+  run.addEventListener("click",()=>{
+    const ready=readyRows();if(run.disabled||actionBusy||actionSuspended||!parsed||!reviewed.checked||!ready.length||!preparedBackup)return;
+    const plan=window.CuttingJobImporter.definitionPlan(classified);
+    confirmMessage.textContent=`Append ${ready.length} ready jobs: ${ready.filter(x=>x.row.record_status==="active").length} active, ${ready.filter(x=>x.row.record_status==="completed").length} completed. Create ${plan.newCategories.length}, rename ${plan.renamedCategories.length}, and reuse ${plan.existingCategories.length} categories. ${plan.renamedCategories.map(change=>change.from+" -> "+change.to+" ("+change.id+")").join("; ")} ${classified.filter(x=>x.status==="unresolved").length} unresolved rows remain excluded.`;
+    confirmDialog.showModal();
+  });
+  confirmCancel.addEventListener("click",()=>{if(!actionBusy){confirmDialog.close();clearReview();}});
+  confirmDialog.addEventListener("cancel",event=>{event.preventDefault();if(!actionBusy){confirmDialog.close();clearReview();}});
+  confirmRun.addEventListener("click",async event=>{
+    if(actionBusy||actionSuspended||!preparedBackup||!reviewed.checked||!parsed)return;
+    actionBusy=true;lock(true);let stage="Preparing backup…",submissionStarted=false;
+    const report=value=>{stage=value;progress(value);};
+    try{
+      report(stage);preparedBackup.validate();
+      if(JSON.stringify(window.cuttingJobImporter.preview(parsed))!==JSON.stringify(classified))throw Error("Reviewed preview changed; preview again.");
+      report("Downloading backup…");
+      // No await, timer, cloud read, or native confirm between this trusted click and trigger.
+      const backupReceipt=preparedBackup.download.trigger(event);
+      cuttingJobImportBackupReceipts.set(backupReceipt,preparedBackup);
+      rows.dataset.lastBackupResult=JSON.stringify(backupReceipt);
+      confirmDialog.close();submissionStarted=true;
+      const result=await window.cuttingJobImporter.submit(parsed,{confirmed:true,reviewedPreview:classified,backupReceipt,expectedRevision:preparedBackup.revision,onProgress:report});
+      rows.dataset.lastImportResult=JSON.stringify({...result,saveError:window.CuttingJobImportDownload.boundedError(result.saveError)});
+      actionSuspended=result.saveIndeterminate||result.rollbackReviewRequired||false;
+      progress(result.saveCompleted?`Import complete — ${result.importedEventIds.length} reviewed jobs. Backup download started; check browser Downloads.`:actionSuspended?"Import suspended — save outcome requires refresh and read verification; do not retry.":`Import stopped — ${stage}: ${window.CuttingJobImportDownload.boundedError(result.saveError)}`);
+    }catch(error){
+      if(submissionStarted){actionSuspended=true;window.__autosaveDisabled=true;window.__recoveryInspectMode=true;}
+      const message=`Import ${actionSuspended?"suspended":"stopped"} — ${stage}: ${window.CuttingJobImportDownload.boundedError(error)}`;
+      progress(message);rows.dataset.lastImportResult=JSON.stringify({stage,saveError:window.CuttingJobImportDownload.boundedError(error),saveIndeterminate:actionSuspended});
+    }finally{
+      discardBackup();actionBusy=false;clearReview();lock(actionSuspended);close.disabled=false;if(confirmDialog.open)confirmDialog.close();
+    }
+  });
 })();
 
 /* ======================== HISTORY ========================= */

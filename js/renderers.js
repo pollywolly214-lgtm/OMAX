@@ -714,12 +714,27 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   const collections = ensureMaintenanceV2Collections();
   const mode = String(opts.mode || "one_time");
   const eventType = String(opts.eventType || "scheduled");
+  if(mode==="one_time"&&eventType==="completed"){
+    const created=createMaintenanceV2FromTemplate(task,{...opts,eventType:"scheduled"});
+    if(!created?.occurrence)return null;
+    const root=created.occurrence;
+    let completed=window.OMAXMaintenanceCalendarIntegrity.resolveOneTime(window,root.id,root).status==="completed"?collections.occurrences.find(entry=>entry?.eventType==="completed"&&entry.rootOccurrenceId===root.id&&entry.instanceId===root.instanceId&&entry.taskId===root.taskId):null;
+    if(!completed){
+      const seed=genId("v2_completed");let eventId=seed,suffix=1;while(collections.occurrences.some(entry=>entry?.id===eventId))eventId=`${seed}_${++suffix}`;
+      completed=window.OMAXMaintenanceRecoveryImport.lifecycleEvent(root,{eventId,eventType:"completed",payload:{...root.payload}});
+      collections.occurrences.unshift(completed);
+    }
+    return{...created,scheduled:root,occurrence:completed};
+  }
   const effectiveDateISO = normalizeDateKey(opts.effectiveDateISO || ymd(new Date()));
   const nowISO = new Date().toISOString();
-  const legacyTaskId = String(task.id);
-  const existingTask = collections.tasks.find(entry => entry && String(entry.legacyTaskId || "") === legacyTaskId) || null;
+  const calendarOnly = opts.calendarOnly === true && mode === "one_time";
+  const legacyTaskId = calendarOnly ? null : String(task.id);
+  const existingTask = collections.tasks.find(entry => entry && (calendarOnly
+    ? String(entry.id) === String(task.id) && entry.legacyTaskId == null
+    : String(entry.legacyTaskId || "") === legacyTaskId)) || null;
   const taskRecord = existingTask || {
-    id: genId("maintenance_task_v2"),
+    id: calendarOnly ? String(task.id) : genId("maintenance_task_v2"),
     system: "v2",
     schemaVersion: 2,
     legacyTaskId,
@@ -735,8 +750,6 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   };
   if (!existingTask){
     collections.tasks.unshift(taskRecord);
-  }else{
-    taskRecord.updatedAtISO = nowISO;
   }
 
   const normalizedRepeatRule = mode === "repeat" ? (opts.repeatRule || null) : null;
@@ -752,16 +765,17 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   };
   const equivalentInstance = collections.instances.find(instance => {
     if (!instance || typeof instance !== "object") return false;
+    if(instance.recoveryImportId)return false;
     if (String(instance.system || "") !== "v2" && Number(instance.schemaVersion || 0) < 2) return false;
     if (String(instance.status || "active") === "stopped") return false;
-    if (String(instance.legacyTaskId || "") !== legacyTaskId) return false;
+    if (calendarOnly ? String(instance.taskId || "") !== String(taskRecord.id) : String(instance.legacyTaskId || "") !== legacyTaskId) return false;
     if (String(instance.instanceMode || "") !== mode) return false;
     if (normalizeDateKey(instance.startDateISO || null) !== effectiveDateISO) return false;
     if (mode === "repeat") return stringifyMaintenanceV2RepeatRule(instance.repeatRule) === stringifyMaintenanceV2RepeatRule(normalizedRepeatRule);
     return collections.occurrences.some(event => event
       && String(event.system || "") === "v2"
       && String(event.instanceId || "") === String(instance.id || "")
-      && String(event.legacyTaskId || "") === legacyTaskId
+      && (calendarOnly ? String(event.taskId || "") === String(taskRecord.id) : String(event.legacyTaskId || "") === legacyTaskId)
       && String(event.eventType || "") === eventType
       && normalizeDateKey(event.effectiveDateISO || event.dateISO || null) === effectiveDateISO
       && !occurrenceHasRemovedLifecycle(event));
@@ -789,7 +803,9 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
   // The equivalent-record branch already returned. These records are new.
   const reusedInstance = false;
   const reusedOccurrence = false;
-  const stableBaseId = `${createMaintenanceV2StablePart(legacyTaskId)}_${createMaintenanceV2StablePart(effectiveDateISO)}_${createMaintenanceV2StablePart(mode)}`;
+  const originalBaseId = `${createMaintenanceV2StablePart(legacyTaskId || taskRecord.id)}_${createMaintenanceV2StablePart(effectiveDateISO)}_${createMaintenanceV2StablePart(mode)}`;
+  let stableBaseId=originalBaseId,identitySuffix=1;
+  while(collections.instances.some(entry=>entry?.id===`maintenance_instance_v2_${stableBaseId}`)||collections.occurrences.some(entry=>entry?.id===`maintenance_occurrence_v2_${stableBaseId}_${createMaintenanceV2StablePart(eventType)}`))stableBaseId=`${originalBaseId}_${++identitySuffix}`;
   const instance = {
     id: `maintenance_instance_v2_${stableBaseId}`,
     system: "v2",
@@ -830,7 +846,7 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
     }
   };
   if (!reusedOccurrence) collections.occurrences.unshift(occurrence);
-  recordMaintenanceV2MutationSource({
+  if (typeof window.recordMaintenanceV2MutationSource === "function") window.recordMaintenanceV2MutationSource({
     helper: "createMaintenanceV2FromTemplate",
     action: reusedInstance || reusedOccurrence ? "deduped_or_reused" : "appended",
     eventType,
@@ -6926,7 +6942,7 @@ function renderDashboard(){
     jobForm?.reset();
     resetGarnetForm();
     resetOneTimeTaskForm();
-    collapseExistingTaskDropdown();
+    if (existingTaskResults) existingTaskResults.hidden = true;
     setContextDate(null);
     pendingGarnetEditId = null;
   }
@@ -7306,14 +7322,12 @@ function renderDashboard(){
       if (typeof saveCloudNow === "function"){
         trace.saveCloudNowCalled = true;
         window.__activeExplicitMaintenanceAddSaveTrace = trace;
-        const result = saveCloudNow();
+        const result = saveCloudNow({expectedRevision:trace.loadedRevBeforeSave});
         trace.saveCloudNowReturnedPromise = !!(result && typeof result.then === "function");
-        if (result && typeof result.then === "function") await result;
-      } else if (typeof saveCloudDebounced === "function"){
-        saveCloudDebounced();
-        if (typeof window.recordMaintenanceV2MutationSource === "function"){
-          window.recordMaintenanceV2MutationSource({ ...payload, action: "save_debounced_fallback" });
-        }
+        const outcome=await result;
+        if(outcome?.saved!==true||outcome?.stateWriteCompleted!==true)throw Error(outcome?.error||"Maintenance cloud save was not confirmed.");
+      } else {
+        throw Error("Awaited maintenance cloud save is unavailable.");
       }
     } catch (err){
       trace.saveThrewError = err?.message || String(err);
@@ -7592,6 +7606,7 @@ function renderDashboard(){
     const note = (oneTimeNoteInput?.value || "").trim();
     const rawDate = (oneTimeDateInput?.value || "").trim();
     const targetISO = rawDate ? ymd(rawDate) : (addContextDateISO || ymd(new Date()));
+    if (!targetISO){ alert("Select a valid calendar date."); return; }
     const condition = note || "One-time maintenance task";
     const task = {
       id: genId(name),
@@ -7612,28 +7627,22 @@ function renderDashboard(){
       note,
       downtimeHours: 1
     };
-    const created = (typeof window.createMaintenanceV2FromTemplate === "function")
-      ? window.createMaintenanceV2FromTemplate(task, {
+    const saved=await window.runMaintenanceCalendarMutation(()=>window.createMaintenanceV2FromTemplate(task, {
         mode: "one_time",
+        calendarOnly: true,
         eventType: "scheduled",
         effectiveDateISO: targetISO,
         note
-      })
-      : null;
-    if (!created){
-      toast("Could not add one-time task. V2 creation failed.");
+      }));
+    const created=saved.created;
+    if (!saved.saved||!created){
+      toast(saved.error||"Could not add one-time task. V2 creation failed.");
       if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] Failed one-time V2 creation", { taskName: name, targetISO });
       return;
     }
     if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 one-time record");
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
-    toast("Saving one-time task…");
-    const saveTrace = await persistExplicitMaintenanceAddSave("calendar_add_one_time_new_task", created, { effectiveDateISO: targetISO });
-    if (saveTrace && saveTrace.remoteVerificationPassed === false){
-      toast("Added locally, but cloud save did not confirm. Do not refresh yet.");
-      return;
-    }
     toast("One-time task added to the calendar");
     closeModal();
     if (typeof refreshDashboardWidgets === "function"){
@@ -7685,13 +7694,14 @@ function renderDashboard(){
     let message = "Maintenance task added";
     let createdV2Record = null;
     if (choice === "one_time"){
-      const created = createMaintenanceV2FromTemplate(task, {
+      const saved=await window.runMaintenanceCalendarMutation(()=>createMaintenanceV2FromTemplate(task, {
         mode: "one_time",
         eventType: "scheduled",
         effectiveDateISO: targetISO,
         note: occurrenceNote
-      });
-      if (!created){ toast("Could not create one-time reminder in V2."); if (window.DEBUG_MODE) console.error("[maintenance-v2-preference] V2 one-time creation failed", { taskId: task.id }); return; }
+      }));
+      const created=saved.created;
+      if (!saved.saved||!created){ toast(saved.error||"Could not create one-time reminder in V2."); return; }
       createdV2Record = created;
       if (window.DEBUG_MODE) console.info("[maintenance-v2-preference] Created V2 one-time record");
       const targetDate = parseDateLocal(targetISO);
@@ -7760,7 +7770,7 @@ function renderDashboard(){
     setContextDate(targetISO);
     renderCalendarPreservingScroll();
     toast("Saving maintenance calendar change…");
-    const saveTrace = await persistExplicitMaintenanceAddSave(`calendar_add_existing_${choice}`, createdV2Record, {
+    const saveTrace = choice==="one_time"?null:await persistExplicitMaintenanceAddSave(`calendar_add_existing_${choice}`, createdV2Record, {
       taskId: task.id,
       legacyTaskId: task.id,
       effectiveDateISO: targetISO
@@ -9218,7 +9228,7 @@ function ensureMaintenanceTaskModalAPI(){
         createdTask = task;
       } else {
         const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
-        const task = Object.assign(base, { mode:"asreq", condition, variant: "template", templateId: id });
+        const task = window.OMAXMaintenanceRecoveryTaskSetup.buildAsRequiredTask(base, condition);
         (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(task);
         createdTask = task;
       }
@@ -10889,6 +10899,7 @@ function renderSettings(){
   const contextMenu = document.getElementById("maintenanceContextMenu");
   wireMaintenanceHistoryImportTool(root);
   renderHistoricalReconciliationTool(root);
+  renderMaintenanceRecoveryTaskSetupTool(root);
   let contextTarget = null;
   let occurrenceNotesTaskId = null;
   let inventoryLinkTask = null;
@@ -11701,7 +11712,7 @@ function renderSettings(){
       createdTask = creation.task;
     }else{
       const condition = (data.get("taskCondition")||"").toString().trim() || "As required";
-      const task = Object.assign(base, { mode:"asreq", condition, variant: "template", templateId: id });
+      const task = window.OMAXMaintenanceRecoveryTaskSetup.buildAsRequiredTask(base, condition);
       const creation = typeof window.createMaintenanceTaskOnce === "function"
         ? window.createMaintenanceTaskOnce(actionToken, task, ()=>{
             (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : (window.tasksAsReq = [])).unshift(task);
@@ -14165,16 +14176,17 @@ function renderCosts(){
       (window.receiptTrackerWeeks || []).forEach(entry => {
         const weekLabel = getWeekLabel(entry);
         normalizeRows(entry?.rows).forEach((row, idx) => {
-          const total = computeRowTotal(row);
+          const financials = getPurchaseFinancials(row);
           flatRows.push({
             dateISO: toIsoDate(row.date) || "",
             purchased: String(row.purchased || ""),
             partNumber: String(row.partNumber || ""),
-            qty: Number(row.qty) || 0,
-            cost: Number(row.cost) || 0,
-            shipping: Number(row.shipping) || 0,
-            tax: Number(row.tax) || 0,
-            total,
+            qty: financials.qty,
+            cost: financials.unitCost,
+            merchandiseSubtotal: financials.merchandiseSubtotal,
+            shipping: financials.shipping,
+            tax: financials.tax,
+            total: financials.totalSpend,
             weekLabel,
             weekKey: String(entry?.key || ""),
             rowIndex: idx
@@ -14183,7 +14195,7 @@ function renderCosts(){
       });
       flatRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
       if (!flatRows.length){
-        spendBody.innerHTML = '<tr><td colspan="9" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
+        spendBody.innerHTML = '<tr><td colspan="10" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
         return;
       }
       spendBody.innerHTML = flatRows.map(row => `
@@ -14191,12 +14203,13 @@ function renderCosts(){
           <td>${escapeHtml(row.dateISO || "—")}</td>
           <td>${escapeHtml(row.purchased || "—")}</td>
           <td>${escapeHtml(row.weekLabel || "—")}</td>
-          <td>${formatUsd(row.cost || 0)}</td>
-          <td>${escapeHtml(String(row.qty || 0))}</td>
           <td>${escapeHtml(row.partNumber || "—")}</td>
-          <td>${formatUsd(row.shipping || 0)}</td>
-          <td>${formatUsd(row.tax || 0)}</td>
-          <td>${formatUsd(row.total || 0)}</td>
+          <td class="purchase-number">${escapeHtml(String(row.qty || 0))}</td>
+          <td class="purchase-number">${formatUsd(row.cost)}</td>
+          <td class="purchase-number">${formatUsd(row.merchandiseSubtotal)}</td>
+          <td class="purchase-number">${formatUsd(row.shipping)}</td>
+          <td class="purchase-number">${formatUsd(row.tax)}</td>
+          <td class="purchase-number">${formatUsd(row.total)}</td>
         </tr>
       `).join("");
     };
@@ -14217,7 +14230,7 @@ function renderCosts(){
       if (max && value > max) return max;
       return value;
     };
-    const computeRowTotal = (row)=> ((Number(row?.cost) || 0) * (Number(row?.qty) || 0)) + (Number(row?.shipping) || 0) + (Number(row?.tax) || 0);
+    const computeRowTotal = (row)=> getPurchaseFinancials(row).totalSpend;
     const escWorkbookHtml = (value)=> String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
@@ -14292,12 +14305,14 @@ function renderCosts(){
     if (receiptOpenBtn instanceof HTMLElement && modal instanceof HTMLElement){
       const weekSelect = modal.querySelector("[data-receipt-week-select]");
       const weekRangeLabel = modal.querySelector("[data-receipt-week-range]");
+      const weekAllocationNote = modal.querySelector("[data-receipt-week-allocation-note]");
       const weekRowsBody = modal.querySelector("[data-receipt-week-rows]");
       const weekSubtotal = modal.querySelector("[data-receipt-week-subtotal]");
       const rangeSelect = modal.querySelector("[data-receipt-range-select]");
       const rangeRowsBody = modal.querySelector("[data-receipt-range-rows]");
       const rangeSubtotal = modal.querySelector("[data-receipt-range-subtotal]");
       const rangeLabel = modal.querySelector("[data-receipt-range-label]");
+      const rangeAllocationNote = modal.querySelector("[data-receipt-range-allocation-note]");
       const closeControls = Array.from(modal.querySelectorAll("[data-receipt-close]"));
       const saveWeekBtn = modal.querySelector("[data-receipt-save-week]");
       const clearAllBtn = modal.querySelector("[data-receipt-clear-all]");
@@ -14470,13 +14485,14 @@ const appendEmptyRow = (focusFirst = false)=>{
         tr.innerHTML = `
           <td><input type="date" data-col="date" min="${escapeHtml(String(getWeekEntry(activeWeekKey)?.startISO || ""))}" max="${escapeHtml(String(getWeekEntry(activeWeekKey)?.endISO || ""))}"></td>
           <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" placeholder="Select existing item"></td>
-          <td><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
-          <td><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
-          <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
+          <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
+          <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
+          <td class="purchase-number" data-col="merchandiseSubtotal">${formatUsd(0)}</td>
           <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00" style="min-width:86px"></td>
           <td><input type="number" min="0" step="0.01" data-col="tax" placeholder="0.00" style="min-width:72px"></td>
-          <td data-col="total">${formatUsd(0)}</td>
+          <td class="purchase-number" data-col="total">${formatUsd(0)}</td>
+          <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
           <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>`;
         weekRowsBody.appendChild(tr);
         if (focusFirst){
@@ -14494,8 +14510,11 @@ const appendEmptyRow = (focusFirst = false)=>{
             shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
             tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
           };
-          const total = computeRowTotal(row);
+          const financials = getPurchaseFinancials(row);
+          const total = financials.totalSpend;
           subtotal += total;
+          const merchandiseCell = tr.querySelector('[data-col="merchandiseSubtotal"]');
+          if (merchandiseCell) merchandiseCell.textContent = formatUsd(financials.merchandiseSubtotal);
           const totalCell = tr.querySelector('[data-col=\"total\"]');
           if (totalCell) totalCell.textContent = formatUsd(total);
         });
@@ -14504,6 +14523,7 @@ const appendEmptyRow = (focusFirst = false)=>{
       const renderWeekRows = ()=>{
         const entry = getWeekEntry(activeWeekKey);
         const rows = normalizeRows(entry.rows);
+        if (weekAllocationNote) weekAllocationNote.hidden = !rows.some(isHistoricalPurchase);
         if (weekRangeLabel){
           weekRangeLabel.textContent = entry.startISO && entry.endISO ? `Date range: ${entry.startISO} to ${entry.endISO}` : "Date range unavailable";
         }
@@ -14512,13 +14532,14 @@ const appendEmptyRow = (focusFirst = false)=>{
           <tr data-receipt-row="1" data-receipt-row-index="${idx}">
             <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}" min="${escapeHtml(String(entry.startISO || ""))}" max="${escapeHtml(String(entry.endISO || ""))}"></td>
             <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" value="${escapeHtml(row.purchased || "")}"></td>
-            <td><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
-            <td><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
-            <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
+            <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
+            <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
+            <td class="purchase-number" data-col="merchandiseSubtotal">${formatUsd(getPurchaseFinancials(row).merchandiseSubtotal)}</td>
             <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}" style="min-width:86px"></td>
             <td><input type="number" min="0" step="0.01" data-col="tax" value="${escapeHtml(String(row.tax || 0))}" style="min-width:72px"></td>
-            <td data-col="total">${formatUsd(computeRowTotal(row))}</td>
+            <td class="purchase-number" data-col="total">${formatUsd(computeRowTotal(row))}</td>
+            <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
             <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>
           </tr>`).join("");
         appendEmptyRow();
@@ -14613,22 +14634,26 @@ const appendEmptyRow = (focusFirst = false)=>{
         if (!(rangeRowsBody instanceof HTMLElement)) return;
         const { start, end } = getRangeWindow(activeRange);
         const rows = buildRangeRows(activeRange);
+        if (rangeAllocationNote) rangeAllocationNote.hidden = !rows.some(isHistoricalPurchase);
         const subtotal = rows.reduce((sum, row) => sum + row.total, 0);
         rangeRowsBody.innerHTML = rows.length ? rows.map(row => {
+          const financials = getPurchaseFinancials(row);
           const linked = !!findInventoryByPartNumber(row.partNumber);
           const stateLabel = linked ? "Linked" : "Unlinked";
           return `
           <tr>
             <td>${escapeHtml(row.date || "—")}</td>
             <td>${escapeHtml(row.purchased || "—")}</td>
-            <td>${escapeHtml(String(row.qty || 0))}</td>
             <td>${escapeHtml(row.partNumber || "—")}</td>
-            <td>${formatUsd(row.shipping || 0)}</td>
-            <td>${formatUsd(row.tax || 0)}</td>
-            <td>${formatUsd(row.total || 0)}</td>
+            <td class="purchase-number">${escapeHtml(String(financials.qty))}</td>
+            <td class="purchase-number">${formatUsd(financials.unitCost)}</td>
+            <td class="purchase-number">${formatUsd(financials.merchandiseSubtotal)}</td>
+            <td class="purchase-number">${formatUsd(financials.shipping)}</td>
+            <td class="purchase-number">${formatUsd(financials.tax)}</td>
+            <td class="purchase-number">${formatUsd(financials.totalSpend)}</td>
             <td><span class="small muted">${stateLabel}</span></td>
           </tr>`;
-        }).join("") : '<tr><td colspan="8" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
+        }).join("") : '<tr><td colspan="10" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
         if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
         if (rangeLabel) rangeLabel.textContent = formatDateRangeLabel(start, end);
       };
@@ -14641,7 +14666,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           event.preventDefault();
           const row = input.closest("tr[data-receipt-row]");
           if (!row) return;
-          const columns = ["date", "purchased", "cost", "qty", "partNumber", "shipping", "tax"];
+          const columns = ["date", "purchased", "partNumber", "qty", "cost", "shipping", "tax"];
           const col = input.getAttribute("data-col") || "";
           const idx = columns.indexOf(col);
           if (idx < 0) return;
@@ -14844,18 +14869,19 @@ const appendEmptyRow = (focusFirst = false)=>{
           const workbook = buildWorkbookFromTable({
             title: "Purchase History — Weekly Export",
             subtitle: weekRange,
-            headerRows: [["Date", "Purchased", "Cost", "Qty", "Part number", "Shipping", "Tax", "Total"]],
+            headerRows: [["Date", "Purchased Item", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
             bodyRows: rows.map(row => [
               row.date || "—",
               row.purchased || "—",
-              Number(row.cost || 0).toFixed(2),
-              Number(row.qty || 0).toFixed(2),
               row.partNumber || "—",
-              Number(row.shipping || 0).toFixed(2),
-              Number(row.tax || 0).toFixed(2),
-              Number(computeRowTotal(row) || 0).toFixed(2)
+              getPurchaseFinancials(row).qty.toFixed(2),
+              getPurchaseFinancials(row).unitCost.toFixed(2),
+              getPurchaseFinancials(row).merchandiseSubtotal.toFixed(2),
+              getPurchaseFinancials(row).shipping.toFixed(2),
+              getPurchaseFinancials(row).tax.toFixed(2),
+              getPurchaseFinancials(row).totalSpend.toFixed(2)
             ]),
-            footerRows: [["", "", "", "", "", "", "Subtotal", Number(subtotal || 0).toFixed(2)]]
+            footerRows: [["", "", "", "", "", "", "", "Week Total Spend", Number(subtotal || 0).toFixed(2)]]
           });
           downloadWorkbook(`receipt-week-${entry.key || "week"}.xls`, workbook);
         });
@@ -15017,17 +15043,19 @@ const appendEmptyRow = (focusFirst = false)=>{
           const workbook = buildWorkbookFromTable({
             title: "Purchase History — Date Range Export",
             subtitle: formatDateRangeLabel(start, end),
-            headerRows: [["Date", "Purchased", "Qty", "Part number", "Shipping", "Tax", "Total"]],
+            headerRows: [["Date", "Purchased Item", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
             bodyRows: rows.map(row => [
               row.date || "—",
               row.purchased || "—",
-              Number(row.qty || 0).toFixed(2),
               row.partNumber || "—",
-              Number(row.shipping || 0).toFixed(2),
-              Number(row.tax || 0).toFixed(2),
-              Number(row.total || 0).toFixed(2)
+              getPurchaseFinancials(row).qty.toFixed(2),
+              getPurchaseFinancials(row).unitCost.toFixed(2),
+              getPurchaseFinancials(row).merchandiseSubtotal.toFixed(2),
+              getPurchaseFinancials(row).shipping.toFixed(2),
+              getPurchaseFinancials(row).tax.toFixed(2),
+              getPurchaseFinancials(row).totalSpend.toFixed(2)
             ]),
-            footerRows: [["", "", "", "", "", "Subtotal", Number(subtotal || 0).toFixed(2)]]
+            footerRows: [["", "", "", "", "", "", "", "Range Total Spend", Number(subtotal || 0).toFixed(2)]]
           });
           downloadWorkbook(`receipt-range-${activeRange}.xls`, workbook);
         });
@@ -18284,7 +18312,7 @@ function computeCostModel(){
                   ? effHoursRaw
                   : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0))))));
 
-      const projectNumber = String(job?.projectNumber || "").replace(/[^0-9]/g, "").slice(0, 8);
+      const projectNumber = window.CuttingJobHistory.normalizeProjectKey(job?.projectNumber);
       const categoryDisplay = projectNumber
         ? `${categoryName} · ${projectNumber}`
         : categoryName;
@@ -18349,12 +18377,11 @@ function computeCostModel(){
       totalCutProfitLabel: formatterCurrency(report.totalCutCost, { showPlus: true, decimals: Math.abs(report.totalCutCost) < 1000 ? 2 : 0 }),
       totalMaintenanceLossLabel: formatterCurrency(-Math.abs(report.totalMaintenanceCost), { showPlus: true, decimals: report.totalMaintenanceCost < 1000 ? 2 : 0 }),
       totalCutHoursLabel: formatHours(report.totalCutHours),
-      weekLabel: `${formatDateLabelShort(new Date(report.weekStartISO))} - ${formatDateLabelShort(new Date(report.weekEndISO))}`
+      weekLabel: `${formatDateLabelShort(parseDateLocal(report.weekStartISO))} - ${formatDateLabelShort(parseDateLocal(report.weekEndISO))}`
     }));
 
-  if (typeof window !== "undefined"){
-    window.weeklyCostReports = weeklyReports.map(item => ({ ...item }));
-  }
+  // These recalculated reports belong to the display model. Rendering must
+  // preserve the authoritative weeklyCostReports collection used by saves.
 
   const summaryCards = [
     {
@@ -19117,7 +19144,7 @@ function computeCostModel(){
       else if (!resolvedDate || resolvedDate !== dateISO) invalidReason = "resolver_date_mismatch";
     }
     if (!invalidReason && typeof window.resolveV2OneTimeOccurrenceState === "function" && !rootOccurrenceId.startsWith("repeat:")){
-      const resolved = window.resolveV2OneTimeOccurrenceState(rootOccurrenceId, { id: rootOccurrenceId, effectiveDateISO: dateISO });
+      const resolved = window.resolveV2OneTimeOccurrenceState(rootOccurrenceId, { id: rootOccurrenceId, effectiveDateISO: dateISO,instanceId,taskId });
       resolvedStatus = String(resolved?.status || "").toLowerCase();
       resolvedDate = toHistoryDateKey(resolved?.displayDateISO || dateISO);
       if (resolvedStatus && resolvedStatus !== "completed") invalidReason = `resolver_status_${resolvedStatus}`;
@@ -19584,21 +19611,13 @@ function computeCostModel(){
   }
   const purchaseDataTableRows = [];
   const flattenCentralSpendRows = (weekEntry)=>{
-    const rows = typeof normalizeRows === "function"
-      ? normalizeRows(weekEntry?.rows)
-      : (Array.isArray(weekEntry?.rows) ? weekEntry.rows : []);
+    const rows = Array.isArray(weekEntry?.rows) ? weekEntry.rows : [];
     return rows.map(row => {
-      const dateValue = typeof toIsoDate === "function" ? toIsoDate(row?.date) : String(row?.date || "").slice(0, 10);
+      const dateValue = String(row?.date || "").slice(0, 10);
       const purchased = String(row?.purchased || "").trim();
       const partNumber = String(row?.partNumber || "").trim();
-      const cost = Math.max(0, Number(row?.cost) || 0);
-      const qty = Math.max(0, Number(row?.qty) || 0);
-      const shipping = Math.max(0, Number(row?.shipping) || 0);
-      const tax = Math.max(0, Number(row?.tax) || 0);
-      const total = typeof computeRowTotal === "function"
-        ? Math.max(0, Number(computeRowTotal({ cost, qty, shipping, tax })) || 0)
-        : ((cost * qty) + shipping + tax);
-      return { dateValue, purchased, partNumber, cost, qty, shipping, tax, total };
+      const financials = getPurchaseFinancials(row);
+      return { dateValue, purchased, partNumber, cost:financials.unitCost, qty:financials.qty, merchandiseSubtotal:financials.merchandiseSubtotal, shipping:financials.shipping, tax:financials.tax, total:financials.totalSpend };
     });
   };
   (Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks : []).forEach(weekEntry => {
@@ -19617,6 +19636,7 @@ function computeCostModel(){
       const shipping = Math.max(0, Number(rawRow?.shipping) || 0);
       const tax = Math.max(0, Number(rawRow?.tax) || 0);
       const total = Math.max(0, Number(rawRow?.total) || 0);
+      const merchandiseSubtotal = rawRow.merchandiseSubtotal;
       if (!dateISO && !purchased && !partNumber && total <= 0) return;
       purchaseDataTableRows.push({
         dateISO,
@@ -19627,6 +19647,7 @@ function computeCostModel(){
         shipping,
         tax,
         total,
+        merchandiseSubtotal,
         weekLabel,
         weekKey: key,
         rowIndex
@@ -19642,11 +19663,12 @@ function computeCostModel(){
     weekKey: row.weekKey || "",
     rowIndex: Number.isFinite(row.rowIndex) ? row.rowIndex : -1,
     costLabel: formatterCurrency(row.cost, { decimals: 2 }),
+    merchandiseSubtotalLabel: formatterCurrency(row.merchandiseSubtotal, { decimals: 2 }),
     qtyLabel: Number.isFinite(row.qty) ? String(row.qty) : "0",
     partNumber: row.partNumber || "—",
     shippingLabel: formatterCurrency(row.shipping, { decimals: 2 }),
     taxLabel: formatterCurrency(row.tax, { decimals: 2 }),
-    totalLabel: formatterCurrency(row.total, { decimals: row.total < 1000 ? 2 : 0 })
+    totalLabel: formatterCurrency(row.total, { decimals: 2 })
   }));
   const spendByDate = new Map();
   purchaseDataTableRows.forEach(row => {
@@ -20172,6 +20194,75 @@ function drawCostChart(canvas, model, show){
 let cachedActiveWJCutsRoot = null;
 let isRenderingJobs = false;
 let rootStatusRefreshInFlight = null;
+const pendingCuttingJobAttachmentRemovals = new Set();
+
+async function removeCuttingJobAttachmentReference(jobId, { fileIndex, cloudFileId } = {}){
+  const id = String(jobId);
+  if (pendingCuttingJobAttachmentRemovals.has(id)){ toast("Attachment removal is still saving."); return false; }
+  const jobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])];
+  const matches = jobs.filter(job => String(job?.id) === id);
+  if (matches.length !== 1) return false;
+  const job = matches[0];
+  const cloud = typeof cloudFileId === "string" && cloudFileId.length > 0;
+  if (cloud){
+    const listed = cfr05CloudPresentation?.peek(id)?.files || [];
+    if (!listed.some(file => file.fileId === cloudFileId) || isCuttingJobCloudFileUnlinked(id, cloudFileId)) return false;
+    if (job.unlinkedCloudFileIds != null && !Array.isArray(job.unlinkedCloudFileIds)){
+      toast("Attachment unlink state needs review before removal."); return false;
+    }
+  } else if (!Array.isArray(job.files) || !Number.isInteger(fileIndex) || fileIndex < 0 || fileIndex >= job.files.length){
+    return false;
+  }
+  if (!window.confirm("Remove this file from this cutting job? The underlying file will not be deleted.")) return false;
+  if (!canWriteCloud("cutting-job attachment removal")){ toast("Removal was not saved: cloud writes are currently blocked."); return false; }
+  pendingCuttingJobAttachmentRemovals.add(id);
+  let undo;
+  if (cloud){
+    const hadField = Object.prototype.hasOwnProperty.call(job, "unlinkedCloudFileIds");
+    const before = job.unlinkedCloudFileIds;
+    const staged = [...(before || []), cloudFileId];
+    job.unlinkedCloudFileIds = staged;
+    undo = ()=>{
+      if (job.unlinkedCloudFileIds !== staged) return false;
+      if (hadField) job.unlinkedCloudFileIds = before;
+      else delete job.unlinkedCloudFileIds;
+      return true;
+    };
+  } else {
+    const files = job.files;
+    const removed = files.splice(fileIndex, 1)[0];
+    const staged = files.slice();
+    undo = ()=>{
+      if (job.files !== files || files.length !== staged.length || files.some((file, index)=>file !== staged[index])) return false;
+      files.splice(fileIndex, 0, removed);
+      return true;
+    };
+  }
+  try {
+    document.querySelectorAll("[data-cfr05-cloud-dialog], [data-cfr05-enlarged-preview]").forEach(dialog=>{
+      if (dialog.dataset.cfr05JobId === id){ dialog.close(); dialog.remove(); }
+    });
+    renderJobs();
+    const saved = await saveCloudNow();
+    if (saved?.saved === true && saved?.stateWriteCompleted === true){
+      toast("Attachment removed from job."); return saved;
+    }
+    // Roll back only a definite failure and only the still-owned local mutation.
+    const definite = saved && saved.indeterminate !== true && saved.stateWriteCompleted !== true
+      && (saved.stateWriteAttempted === false || saved.definiteFailure === true || saved.blocked === true);
+    const currentJobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])];
+    if (definite && currentJobs.includes(job) && undo()) toast("Removal was not saved. Attachment restored.");
+    else toast("Removal could not be confirmed. Reload and verify before retrying.");
+    return saved || false;
+  } catch (error){
+    console.error("Cutting-job attachment removal save could not be confirmed", error);
+    toast("Removal could not be confirmed. Reload and verify before retrying.");
+    return false;
+  } finally {
+    pendingCuttingJobAttachmentRemovals.delete(id);
+    renderJobs();
+  }
+}
 
 async function refreshCfr05CloudPresentation(jobId, options = {}){
   const id = String(jobId || "").trim();
@@ -20196,10 +20287,11 @@ function hydrateVisibleCfr05CloudFiles(content){
 
 async function hydrateCfr05DxfPreview(target){
   const identity={jobId:String(target?.dataset?.cfr05JobId||""),fileId:String(target?.dataset?.cfr05FileId||""),sha256:String(target?.dataset?.cfr05Sha256||"")};
+  if (isCuttingJobCloudFileUnlinked(identity.jobId, identity.fileId)) return null;
   if (!identity.jobId || !identity.fileId || !identity.sha256 || !cfr05CloudPreviewCache) return null;
   return cfr05CloudPreviewCache.load(identity,async value=>{
     let previewData="";
-    const outcome=await window.openCfr05CloudFile(value.jobId,value.fileId,{displayPreview:async preview=>{if(!/^data:image\/svg\+xml/i.test(preview))return false;previewData=preview;return true;}});
+    const outcome=await window.openCfr05CloudFile(value.jobId,value.fileId,{displayPreview:async preview=>{if(isCuttingJobCloudFileUnlinked(value.jobId,value.fileId)||!/^data:image\/svg\+xml/i.test(preview))return false;previewData=preview;return true;}});
     return {...outcome,previewData};
   });
 }
@@ -20447,12 +20539,14 @@ function renderJobs(){
   const flowHidePreviews = content.querySelector("#jobFlowHidePreviews");
   const flowDialog = flowBackdrop?.querySelector(".job-flow-modal") || null;
 
-  const normalizeProjectNumber = (value)=> String(value || "").replace(/[^0-9]/g, "").slice(0, 8);
+  const normalizeProjectNumber = (value)=> window.CuttingJobHistory.normalizeProjectKey(value);
   const normalizeCategoryKey = (value)=> String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const categoryProjectMap = new Map([["colin","1208"],["lady bird","1241"],["brazos","1247"],["cable trough at t","1249"],["cable trough att","1249"],["at t","1249"],["atm","1251"],["alamo","0000"],["all jobs","0000"]]);
+  const categoryProjectMap = new Map([["colin","1208"],["lady bird","1241"],["brazos","1247"],["cable trough at t","1249"],["cable trough att","1249"],["at t","1249"],["atm","1251"],["alamo","ALAMO"],["company improvements","0000"],["undisclosed project","XXXX"]]);
   const categoryProjectNumber = (name)=>{
     const key = normalizeCategoryKey(name);
     if (!key) return "";
+    const embedded=window.CuttingJobHistory.leadingProject(name)||window.CuttingJobHistory.reversedProject(name);
+    if(embedded)return embedded;
     if (categoryProjectMap.has(key)) return categoryProjectMap.get(key) || "";
     for (const [alias, project] of categoryProjectMap.entries()){ if (key.includes(alias)) return project; }
     return "";
@@ -22735,7 +22829,7 @@ function renderJobs(){
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
     const projectNumberRaw = document.getElementById("jobProjectNumber")?.value ?? "";
-    const projectNumber = String(projectNumberRaw).replace(/[^0-9]/g, "").slice(0, 8);
+    const projectNumber = window.CuttingJobHistory.normalizeProjectKey(projectNumberRaw);
     const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
     const priorityNum = Number(priorityRaw);
     const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
@@ -23071,11 +23165,13 @@ function renderJobs(){
     return result?.error?.message?safeCloudActionError(result.error.message):"secure file verification failed";
   };
   const downloadVerifiedCloudFile = async (button, jobId, fileId, host)=>{
+    if(isCuttingJobCloudFileUnlinked(jobId,fileId)){toast("This file is no longer attached to this job.");return null;}
     if(button.disabled||button.dataset.cfr05DownloadActive==="true")return null;
     const originalLabel=button.textContent;
     button.disabled=true;button.dataset.cfr05DownloadActive="true";button.textContent="Downloading…";
     try{
       const outcome=await window.openCfr05CloudFile(jobId,fileId,{openObjectUrl:async(url,metadata)=>{
+        if(isCuttingJobCloudFileUnlinked(jobId,fileId))return;
         const anchor=document.createElement("a");
         anchor.href=url;anchor.download=metadata.safeFileName;anchor.rel="noopener";
         document.body.appendChild(anchor);anchor.click();anchor.remove();
@@ -23094,12 +23190,14 @@ function renderJobs(){
     }
   };
   const openVerifiedCloudFile = async (jobId, fileId, dialog, host)=>{
+    if(isCuttingJobCloudFileUnlinked(jobId,fileId)){toast("This file is no longer attached to this job.");return null;}
     let status = dialog.querySelector("[data-cfr05-action-status]");
     if (!status){ status=document.createElement("p"); status.setAttribute("data-cfr05-action-status",""); status.setAttribute("role","status"); dialog.appendChild(status); }
     status.textContent = "Validating and downloading verified cloud file…";
     try {
       const outcome = await window.openCfr05CloudFile(jobId, fileId, {
         displayPreview:async preview=>{
+          if(isCuttingJobCloudFileUnlinked(jobId,fileId))return false;
           if (!/^data:image\/svg\+xml/i.test(preview)) return false;
           let image=dialog.querySelector("[data-cfr05-preview]");
           if(!image){ image=document.createElement("img"); image.setAttribute("data-cfr05-preview",""); image.alt="Verified DXF preview"; image.style.maxWidth="100%"; dialog.appendChild(image); }
@@ -23107,6 +23205,7 @@ function renderJobs(){
           return true;
         },
         openObjectUrl:async (url,metadata)=>{
+          if(isCuttingJobCloudFileUnlinked(jobId,fileId))return;
           const anchor=document.createElement("a");
           anchor.href=url; anchor.download=metadata.safeFileName; anchor.rel="noopener";
           document.body.appendChild(anchor); anchor.click(); anchor.remove();
@@ -23137,6 +23236,7 @@ function renderJobs(){
   };
   const showCloudFilesDialog = async (jobId, host, options={})=>{
     const dialog=document.createElement("dialog"); dialog.setAttribute("data-cfr05-cloud-dialog","");
+    dialog.dataset.cfr05JobId = String(jobId);
     dialog.innerHTML='<h3>Cloud files</h3><p data-cfr05-dialog-loading>Loading verified cloud files…</p><button type="button" data-cfr05-close>Close</button>';
     document.body.appendChild(dialog); dialog.showModal();
     dialog.addEventListener("click",async event=>{
@@ -23147,9 +23247,10 @@ function renderJobs(){
     try {
       const result=await refreshCfr05CloudPresentation(jobId,{force:options.force!==false});
       host.dataset.cfr05LastListingResult=JSON.stringify(result);
-      const rows=(result?.files||[]).map(file=>{const label=file.extension==="dxf"?"Preview/Open":"Download/Open";return `<li><strong>${escapeHtml(file.originalName)}</strong> · Secure cloud · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-action-open="${escapeHtml(file.fileId)}">${label}</button></li>`;}).join("");
+      const attachedFiles=filterAttachedCuttingJobCloudFiles(jobId,result?.files);
+      const rows=attachedFiles.map(file=>{const label=file.extension==="dxf"?"Preview/Open":"Download/Open";return `<li><strong>${escapeHtml(file.originalName)}</strong> · Secure cloud · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-action-open="${escapeHtml(file.fileId)}">${label}</button></li>`;}).join("");
       const listingError=result?.error?`<p role="alert">Cloud Files listing failed: ${escapeHtml(result.error.message||result.error.code||"Unknown error")}</p>`:(result?.blockers?.length?`<p role="alert">Cloud Files listing blocked: ${escapeHtml(result.blockers.join(", "))}</p>`:"");
-      dialog.querySelector("[data-cfr05-dialog-loading]").outerHTML=`${listingError}<p>${result?.cloudFileCount||0} verified; ${result?.rejectedMetadataDocumentCount||0} rejected.</p><ul>${rows||"<li>No verified cloud files.</li>"}</ul><p data-cfr05-action-status role="status"></p>`;
+      dialog.querySelector("[data-cfr05-dialog-loading]").outerHTML=`${listingError}<p>${attachedFiles.length} attached; ${result?.rejectedMetadataDocumentCount||0} rejected.</p><ul>${rows||"<li>No attached cloud files.</li>"}</ul><p data-cfr05-action-status role="status"></p>`;
       renderJobs();
     } catch(error){
       const failure={jobId,error:{code:String(error?.code||"listingFailure"),message:safeCloudActionError(error)}};
@@ -23161,6 +23262,11 @@ function renderJobs(){
 
   const handleCuttingJobFileActionClick = async (e)=>{
     const act = (matched)=>{ if (!matched) return false; e.preventDefault(); e.stopPropagation(); if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation(); return true; };
+    const unlinkCloudFile = e.target.closest("[data-unlink-cloud-file]");
+    if (unlinkCloudFile && act(true)){
+      await removeCuttingJobAttachmentReference(unlinkCloudFile.getAttribute("data-cfr05-job-id"), { cloudFileId:unlinkCloudFile.getAttribute("data-unlink-cloud-file") });
+      return true;
+    }
     const cloudFiles = e.target.closest("[data-cloud-files]");
     if(cloudFiles){
       e.preventDefault(); e.stopPropagation();
@@ -23176,8 +23282,10 @@ function renderJobs(){
       e.preventDefault(); e.stopPropagation();
       const jobId=String(presentedCloudFile.getAttribute("data-cfr05-job-id")||"");
       const fileId=String(presentedCloudFile.getAttribute("data-cfr05-presented-open")||"");
+      if(isCuttingJobCloudFileUnlinked(jobId,fileId))return true;
       const host=presentedCloudFile.closest("[data-job-edit-row], [data-job-row], [data-history-row]")||content;
       const dialog=document.createElement("dialog"); dialog.setAttribute("data-cfr05-cloud-dialog","");
+      dialog.dataset.cfr05JobId = jobId;
       dialog.innerHTML='<h3>Verified cloud file</h3><p data-cfr05-action-status role="status"></p><button type="button" data-cfr05-close>Close</button>';
       dialog.querySelector("[data-cfr05-close]").addEventListener("click",()=>{dialog.close();dialog.remove();});
       document.body.appendChild(dialog); dialog.showModal();
@@ -23217,10 +23325,11 @@ function renderJobs(){
     if(enlargePreview){
       e.preventDefault();e.stopPropagation();
       const identity={jobId:String(enlargePreview.dataset.cfr05JobId||""),fileId:String(enlargePreview.dataset.cfr05EnlargePreview||""),sha256:String(enlargePreview.dataset.cfr05Sha256||"")};
+      if(isCuttingJobCloudFileUnlinked(identity.jobId,identity.fileId))return true;
       const cached=cfr05CloudPreviewCache?.peek(identity);
       if(!cached?.previewData){toast("Preview is not available in this browser session.");return true;}
       const fileName=String(enlargePreview.dataset.cfr05FileName||"Verified DXF preview");
-      const dialog=document.createElement("dialog");dialog.className="cfr05-preview-dialog";dialog.setAttribute("data-cfr05-enlarged-preview","");dialog.innerHTML=`<div class="cfr05-preview-dialog-header"><strong>${escapeHtml(fileName)}</strong><div><button type="button" data-cfr05-download="${escapeHtml(identity.fileId)}" data-cfr05-job-id="${escapeHtml(identity.jobId)}">Download</button><button type="button" data-cfr05-preview-close>Close</button></div></div><div class="cfr05-preview-dialog-body"><img class="cfr05-preview-dialog-image" src="${escapeHtml(cached.previewData)}" alt="Enlarged preview of ${escapeHtml(fileName)}"></div>`;dialog.querySelector("[data-cfr05-download]").addEventListener("click",event=>downloadVerifiedCloudFile(event.currentTarget,identity.jobId,identity.fileId,dialog));dialog.querySelector("[data-cfr05-preview-close]").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();return true;
+      const dialog=document.createElement("dialog");dialog.dataset.cfr05JobId=identity.jobId;dialog.className="cfr05-preview-dialog";dialog.setAttribute("data-cfr05-enlarged-preview","");dialog.innerHTML=`<div class="cfr05-preview-dialog-header"><strong>${escapeHtml(fileName)}</strong><div><button type="button" data-cfr05-download="${escapeHtml(identity.fileId)}" data-cfr05-job-id="${escapeHtml(identity.jobId)}">Download</button><button type="button" data-cfr05-preview-close>Close</button></div></div><div class="cfr05-preview-dialog-body"><img class="cfr05-preview-dialog-image" src="${escapeHtml(cached.previewData)}" alt="Enlarged preview of ${escapeHtml(fileName)}"></div>`;dialog.querySelector("[data-cfr05-download]").addEventListener("click",event=>downloadVerifiedCloudFile(event.currentTarget,identity.jobId,identity.fileId,dialog));dialog.querySelector("[data-cfr05-preview-close]").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();return true;
     }
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
     if (fileMenuAdd){
@@ -23238,14 +23347,17 @@ function renderJobs(){
     const editFileLink = e.target.closest("[data-edit-file-link]");
     if (editFileLink && act(true)){ const idStr = String(editFileLink.getAttribute("data-edit-file-link") || ""); const idx = Number(editFileLink.getAttribute("data-file-index")); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null; if (!file) return true; const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || ""); if (url == null) return true; file.url = url; file.source = "onedrive"; saveCloudDebounced(); toast(url ? "File link updated" : "File link cleared"); renderJobs(); return true; }
     const removeFile = e.target.closest("[data-remove-file]");
-    if (removeFile && act(true)){ const idStr = String(removeFile.getAttribute("data-remove-file") || ""); const idx = Number(removeFile.getAttribute("data-file-index")); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; if (j && Array.isArray(j.files) && idx >= 0 && idx < j.files.length){ j.files.splice(idx, 1); saveCloudDebounced(); toast("File removed"); renderJobs(); } return true; }
+    if (removeFile && act(true)){
+      await removeCuttingJobAttachmentReference(removeFile.getAttribute("data-remove-file"), { fileIndex:Number(removeFile.getAttribute("data-file-index")) });
+      return true;
+    }
     return false;
   };
 
   const handleRootFileActionClick = (e)=>{
     const target = e.target;
     if (!(target instanceof Element)) return;
-    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload], [data-cfr05-presented-open], [data-cfr05-enlarge-preview], [data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
+    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload], [data-cfr05-presented-open], [data-cfr05-enlarge-preview], [data-unlink-cloud-file], [data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
     if (!fileAction || !content.contains(fileAction)) return;
     handleCuttingJobFileActionClick(e).catch(err => {
       console.error("Cutting job file action failed", err);
@@ -23802,6 +23914,9 @@ function renderJobs(){
       const j  = cuttingJobs.find(x => String(x?.id) === idStr); if (!j) return;
       const filesBeforeSave = Array.isArray(j.files) ? j.files.slice() : [];
       const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${idStr}"]`)?.value;
+      const projectRaw=String(qs("projectNumber")||"").trim();
+      const projectInput=window.CuttingJobHistory.normalizeProjectKey(projectRaw);
+      if(projectRaw&&!projectInput){toast("Project # must be 1-8 digits, ALAMO, or XXXX.");return;}
       const chargeRaw = qs("chargeRate");
       const chargeVal = chargeRaw === "" || chargeRaw == null ? null : Number(chargeRaw);
       if (chargeVal != null && (!Number.isFinite(chargeVal) || chargeVal < 0)){ toast("Enter a valid charge rate."); return; }
@@ -23824,7 +23939,6 @@ function renderJobs(){
       j.materialQty = Math.max(0, Number(qs("materialQty")) || 0);
       j.startISO = qs("startISO") || j.startISO;
       j.dueISO   = qs("dueISO")   || j.dueISO;
-      const projectInput = String(qs("projectNumber") || "").replace(/[^0-9]/g, "").slice(0, 8);
       if (projectInput) j.projectNumber = projectInput;
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${idStr}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;
