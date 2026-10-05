@@ -846,7 +846,7 @@ function createMaintenanceV2FromTemplate(task, opts = {}){
     }
   };
   if (!reusedOccurrence) collections.occurrences.unshift(occurrence);
-  recordMaintenanceV2MutationSource({
+  if (typeof window.recordMaintenanceV2MutationSource === "function") window.recordMaintenanceV2MutationSource({
     helper: "createMaintenanceV2FromTemplate",
     action: reusedInstance || reusedOccurrence ? "deduped_or_reused" : "appended",
     eventType,

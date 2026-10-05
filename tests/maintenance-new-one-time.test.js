@@ -64,7 +64,7 @@ function harness({ initial = baseline(), pause } = {}) {
     downForm: null, jobForm: null, downDateInput: null, garnetDateInput: null, editingGarnetId: null,
     populateCategoryOptions() {}, resetTaskForm() {}, resetGarnetForm() {}, resetExistingTaskForm() {},
     syncTaskDateInput() {}, syncTaskRepeatMode() {}, refreshDownTimeList() {}, prepareGarnetStep() {},
-    ensureDownTimeArray() {}, recordMaintenanceV2MutationSource() {},
+    ensureDownTimeArray() {},
     alert: message => alerts.push(message), toast: message => messages.push(message), renderCosts() {},
     renderCalendarPreservingScroll: () => {},
     renderCalendar: () => {
