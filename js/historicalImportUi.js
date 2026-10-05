@@ -56,7 +56,7 @@ function renderHistoricalReconciliationTool(root){
 
 function renderMaintenanceRecoveryTaskSetupTool(root){
   const section=document.createElement("section");
-  section.className="history-import-admin";
+  section.className="history-import-admin maintenance-recovery-panel";
   section.innerHTML=`<h4>Maintenance Recovery Task Setup</h4>
     <p>Preview the eight reviewed setup names against authoritative cloud state. Create only eligible missing reusable tasks. Existing tasks stay unchanged. Transfer Tank Water Pump and Empty Scrap Bin remain blocked until manually reviewed. This action does not import maintenance history or schedule calendar events.</p>
     <button type="button" data-task-setup-preview>Preview task setup</button>
