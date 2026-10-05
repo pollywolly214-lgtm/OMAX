@@ -25,7 +25,7 @@ async function harness(options={}){
     saveCloudNow:async args=>{saves++;assert.equal(args.expectedRevision,1);if(options.gate)await options.gate;return options.save||{saved:true,stateWriteAttempted:true,stateWriteCompleted:true};},verifyCloud:async()=>true,suspend:()=>calls.push("suspend")});
   const actualSubmit=api.submit,window={CuttingJobImporter:importer,CuttingJobImportDownload:download,cuttingJobImporter:api};
   if(options.submitError)window.cuttingJobImporter={...api,submit:async()=>{throw Error("unexpected submit rejection");}};
-  const context=vm.createContext({window,document:{getElementById:id=>elements[id.replace("cuttingJobImport","")]||null,addEventListener(){}},requestAnimationFrame:fn=>fn(),cuttingJobImportBackupReceipts:receipts,
+  const context=vm.createContext({window,document:{getElementById:id=>elements[id.replace("cuttingJobImport","")]||null,addEventListener(){}},requestAnimationFrame:fn=>fn(),cuttingJobImportBackupReceipts:receipts,createCuttingJobImportPreviewTrace:()=>({report:{samples:[]},record(){}}),
     prepareCuttingJobImportBackup:async()=>{if(options.prepareError)throw Error("backup Blob preparation failed");return{revision:1,validate(){if(JSON.stringify(state)!==baseline)throw Error("stale prepared backup");},download:download.prepare("backup.json",state,fixture.browser)};}});
   vm.runInContext(installer,context);
   elements.File.files=[{name:"jobs.json",text:async()=>JSON.stringify([row])}];

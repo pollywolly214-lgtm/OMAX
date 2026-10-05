@@ -2,7 +2,7 @@
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),vm=require("node:vm");
 const importer=require("../js/cuttingJobImporter")();
 const core=fs.readFileSync("js/core.js","utf8");
-const adapter=core.slice(core.indexOf("const cuttingJobImportBackupReceipts=new WeakMap();"),core.indexOf("const cuttingJobRepairBackup="));
+const adapter=core.slice(core.indexOf("function createCuttingJobImportPreviewTrace(){"),core.indexOf("const cuttingJobRepairBackup="));
 const timestampA="2026-10-02T19:52:35.090Z",timestampB="2026-10-02T20:20:07.475Z";
 const fixture=()=>({syncMeta:{rev:7},saveMeta:{status:"saved"},syncProcessLog:[],weeklyCostReports:[
   {id:"week-1",weekStartISO:"2026-09-28",weekEndISO:"2026-10-04",totalCutCost:123.45,totalMaintenanceCost:12,totalCutHours:4,cutByCategory:{Blanco:{count:1,cost:123.45,hours:4}},cutItems:[{id:"item",cost:123.45,generatedAtISO:"nested-business-evidence"}],generatedAtISO:timestampA},

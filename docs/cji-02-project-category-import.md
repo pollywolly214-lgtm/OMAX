@@ -206,3 +206,51 @@ git diff --cached --check
 Node/DOM: **205 cases passed** (the prior 170 plus 35 focused CJI-02C cases). Node's aggregate reports 168 entries because the older cutting-import and repair script suites each count as one entry rather than their internal 24 and 15 cases. The focused matrix exercises production adapter code and verifies timestamp-only/multiple/missing timestamp equality, non-mutating frozen/shared data, strict meaningful drift before and after save, unchanged backup payloads, receipt checks, staging protection, and revision mismatch. All CJI-02A/B cases still pass, including legacy 0000 ID-preserving rename, independent XXXX, and historical 1111 handling.
 
 Actual Edge: **16/16 scenarios passed** using the disposable full localhost app with external requests blocked. Two new no-watcher scenarios use cloud timestamp A and local timestamp B: preview prepares the backup, the trusted final click starts a real inspected download, fresh baseline and receipt checks pass, and timestamp-only post-save verification completes with no recovery/autosave suspension. A second scenario injects a meaningful dollar drift in the post-save server read and correctly suspends after exactly one save, with staged evidence retained. The previous 14 backup/action/legacy/XXXX scenarios pass unchanged. No DevTools, console/status polling during normal submission, production Firebase import, new branch/PR, or merge was performed. Results and downloaded fixture backups are retained in ignored `artifacts/cji-02a/`. Actual shop Vercel acceptance of this fix remains untested.
+
+## CJI-02D: bounded Preview preparation stability
+
+Continued on the existing branch and PR #490 after confirming `cutting-import-project-categories`, expected HEAD `40d15beb05e2b2f9d5c20735526e717a20743052`, and clean status. No package.json or AGENTS.md exists in this checkout; no npm commands were used.
+
+The user supplied a further Vercel symptom: the Preview click intermittently failed the backup equality guard, although later normalized comparison and direct `prepareCuttingJobImportBackup()` succeeded. Loaded revision before/after the diagnostic read and cloud revision were all `1790973695350`; normalized local/cloud signatures both had length `595914` and compared equal. This is evidence of timing, not evidence that another business property should be excluded.
+
+Phase inspection covered opening/focus, parsing, classification, table rendering, definition planning, snapshot/global refresh, job/cost render callbacks, report regeneration, autosave, and state adoption. The importer handler has no direct business-state write. Runtime snapshots refresh bindings and normalize existing folder/config state; the app also has queued frame work (dashboard follow-up, layout notifications, chart rendering) and asynchronous cloud adoption. A specific production operation or transient field could not be identified from the supplied post-failure diagnostics. No production state was fetched.
+
+An actual Edge probe of the unchanged starting code recorded normalized signatures at start, parsed, classified, rendered, definition-plan, and prepare-entry boundaries. Ordinary fixture signatures stayed unchanged at every phase. A controlled pending snapshot projection at **`$.jobLayout.fixtureRenderPhase`** reproduced the exact symptom: the old Preview click stopped with “Authoritative baseline changed while preparing backup,” a queued animation frame cleared that projection, and direct preparation then succeeded at the same revision. The injected field exists only in the test fixture; it is not claimed to be the shop's actual field. The old-code evidence is retained locally in ignored `artifacts/cji-02a/preview-race-probe.json`.
+
+The sequencing fix keeps equality strict and prepares no Blob until a stable point is proven:
+
+1. Capture normalized local A and read fresh cloud state at the Preview-start revision R.
+2. Cross queued microtasks, two rendering frames, and the next task, then capture local B.
+3. If A differs from B or B still differs from cloud, allow one additional such render cycle.
+4. Perform a second fresh cloud read at R, then capture local C.
+5. Proceed only if B equals C, C equals the final authoritative business state, both cloud reads have the same normalized business state, and the loaded revision and recorded local business-edit version have remained unchanged throughout.
+
+This is a fixed A/B/C verification sequence: **at most three stabilization samples, two cloud reads, and two render-cycle waits**. Each render-cycle wait has a one-second deadline with callback cancellation; each cloud read retains the existing 30-second timeout. No loop, polling interval, recurring watcher, renderer invocation, autosave flush, or cloud adoption is installed. Delayed work that cannot settle within these bounds stops visibly. Fingerprints are diagnostic labels only; equality uses complete stableStringify signatures.
+
+Persistent local differences in jobs, completed jobs, folders, report financial content, inventory, maintenance, or any other business field block. Cloud business differences between the two reads block even if the revision incorrectly stays unchanged and local state matches the later cloud value. Revision changes and recorded business edits block immediately. The fix neither rolls local state back to cloud nor writes anything during preparation. CJI-02C still ignores only direct weekly report generatedAtISO in comparison copies; stored report/backup data remain intact.
+
+The Preview handler now marks itself busy through parsing and preparation, preventing competing Preview clicks and dialog cancellation during that action. It preserves full reviewed-preview revalidation, prepared-backup ownership, synchronous trusted final download, exact expected-revision CAS, 0000 rename/reuse, XXXX semantics, selective rollback, and strict post-save verification. Successful preparation creates exactly one authoritative pre-import backup.
+
+Bounded diagnostics are stored in `#cuttingJobImportRows.dataset.lastPreviewPreparation`: loaded/current/cloud revision, comparison count, whether local signatures changed, first mismatch and blocking mismatch paths, phase/status, and up to ten phase samples with signature length/fingerprint and first changed path. No full signatures or protected values are exposed. Failure messages distinguish loaded/cloud revision changes, cloud business drift, local mismatch, non-stabilizing snapshots, recorded edits, and a stalled rendering cycle. Controls recover for a fresh user review; there is no automatic retry.
+
+Exact verification commands (all PASS):
+
+```powershell
+node --check js/core.js
+node --check js/cuttingJobImporter.js
+node --check scripts/cji-02a-browser.js
+node --check tests/cji-02d-preview-stability.test.js
+node --check tests/cji-02a-backup-action.test.js
+node --check tests/cji-02c-comparison-state.test.js
+node --test tests/cji-02-project-category-import.test.js tests/cji-02a-backup-action.test.js tests/cji-02b-legacy-category-adoption.test.js tests/cji-02c-comparison-state.test.js tests/cji-02d-preview-stability.test.js tests/cutting-job-import.test.js tests/cji02-history-repair.test.js tests/import-selective-rollback.test.js tests/atomic-persistence.test.js tests/recovery-import.test.js
+node scripts/devsafe-server.js
+# In a second terminal:
+$env:OMAX_PLAYWRIGHT_PATH='C:\Users\Ryder\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright'
+node scripts/cji-02a-browser.js
+git diff --check
+git diff --cached --check
+```
+
+Node/DOM: **233 cases passed, zero failures** (the prior 205 plus 28 focused stability cases). The aggregate Node runner reports 196 entries because the older importer/repair scripts each count as one entry instead of their internal 24 and 15 cases. The new tests exercise the actual Preview handler and preparation adapter, transient convergence, persistent local drift, same-revision cloud drift, revision/edit-version changes, bounded nonconvergence, callback deadlines/cleanup, double Preview/cancel protection, one authoritative backup, trusted download and CAS, 0000/XXXX, and post-save suspension. All CJI-02A/B/C, rollback, persistence and recovery suites pass.
+
+Actual Edge: **21/21 scenarios passed, zero failures**. Five new full-page scenarios verify a single Preview click succeeds after an injected projection settles, and visibly blocks persistent local business drift, cloud business drift, revision drift, and never-stable snapshots with zero backup Blobs/downloads/saves. The previous 16 scenarios pass, including trusted downloads without a watcher, report timestamp normalization, strict post-save drift suspension, legacy 0000 adoption, and XXXX. Every external request is blocked; only the disposable localhost devsafe backend is used. The normal import driver awaits the business promise and reads status afterward, without DevTools or status polling during submission. Artifacts remain in ignored `artifacts/cji-02a/`. No production Firebase import, new branch/PR, or merge was performed. The exact shop transient writer/path and actual Vercel acceptance remain unverified.

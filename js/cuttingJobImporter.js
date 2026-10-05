@@ -24,6 +24,64 @@
     }
     return comparison;
   }
+  function firstDifferencePath(left,right,path="$",depth=0){
+    if(Object.is(left,right))return "";
+    if(!left||!right||typeof left!=="object"||typeof right!=="object"||Array.isArray(left)!==Array.isArray(right)||depth>=32)return path.slice(0,240);
+    if(Array.isArray(left)){
+      if(left.length!==right.length)return (path+".length").slice(0,240);
+      for(let i=0;i<left.length;i++){const difference=firstDifferencePath(left[i],right[i],path+"["+i+"]",depth+1);if(difference)return difference;}
+    }else{
+      for(const key of [...new Set([...Object.keys(left),...Object.keys(right)])].sort()){
+        const next=path+"."+key;
+        if(!Object.hasOwn(left,key)||!Object.hasOwn(right,key))return next.slice(0,240);
+        const difference=firstDifferencePath(left[key],right[key],next,depth+1);if(difference)return difference;
+      }
+    }
+    return "";
+  }
+  // Fingerprints are bounded diagnostic labels. Full signatures decide equality.
+  function comparisonFingerprint(signature){let hash=2166136261;for(let i=0;i<signature.length;i++){hash^=signature.charCodeAt(i);hash=Math.imul(hash,16777619);}return (hash>>>0).toString(16).padStart(8,"0");}
+  async function stabilizePreviewBaseline({snapshot,readCloud,loadedRevision,settle,signature=canonical,onSample,localMutationVersion=()=>0,initialRevision=loadedRevision(),initialMutationVersion=localMutationVersion()}){
+    const revision=Number(initialRevision),diagnostics={status:"preparing",loadedRevision:revision,cloudRevision:null,comparisonAttempts:0,localSignatureChanged:false,firstMismatchPath:"",blockingMismatchPath:"",phase:"local-A"};
+    const business=value=>Object.fromEntries(Object.entries(normalizeComparisonState(value)||{}).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));
+    const mismatch=(a,b)=>a.key===b.key?"":firstDifferencePath(a.data,b.data)||"$";
+    const remember=path=>{if(path&&!diagnostics.firstMismatchPath)diagnostics.firstMismatchPath=path;};
+    const stop=(message,path="")=>{diagnostics.status="blocked";diagnostics.blockingMismatchPath=path;remember(path);throw Object.assign(Error(message),{previewPreparation:{...diagnostics}});};
+    const guard=()=>{
+      diagnostics.currentLoadedRevision=Number(loadedRevision());
+      if(!Number.isFinite(revision)||revision<=0||diagnostics.currentLoadedRevision!==revision)stop("Authoritative baseline changed while preparing backup: loaded revision changed; refresh and preview again.","$.syncMeta.rev");
+      if(localMutationVersion()!==initialMutationVersion)stop("Local state changed during preview preparation: a business edit was recorded; preview again.");
+    };
+    const take=(phase,previous)=>{
+      diagnostics.phase=phase;guard();const data=business(snapshot()),key=signature(data);guard();const sample={data,key},path=previous?mismatch(previous,sample):"";
+      remember(path);if(path)diagnostics.localSignatureChanged=true;
+      onSample?.({phase,loadedRevision:revision,signatureLength:key.length,fingerprint:comparisonFingerprint(key),firstChangedPath:path});return sample;
+    };
+    const read=async phase=>{
+      diagnostics.phase=phase;guard();const raw=await readCloud();guard();diagnostics.cloudRevision=Number(raw?.syncMeta?.rev||0);
+      if(!raw||diagnostics.cloudRevision!==revision)stop("Authoritative baseline changed while preparing backup: cloud revision changed; refresh and preview again.","$.syncMeta.rev");
+      const data=business(raw);return{raw,data,key:signature(data)};
+    };
+    try{
+      const a=take("local-A"),first=await read("cloud-A");remember(mismatch(a,first));
+      diagnostics.phase="settling-1";diagnostics.comparisonAttempts=1;await settle();guard();
+      const b=take("local-B",a);
+      // One additional render cycle is allowed when the first sample changed or
+      // still differs. No retry loop, state adoption, normalization, or save here.
+      if(a.key!==b.key||b.key!==first.key){diagnostics.phase="settling-2";diagnostics.comparisonAttempts=2;await settle();guard();}
+      diagnostics.comparisonAttempts=2;
+      const final=await read("cloud-B"),cloudPath=mismatch(first,final);
+      if(cloudPath)stop("Authoritative baseline changed while preparing backup: cloud business state changed at "+cloudPath+"; refresh and preview again.",cloudPath);
+      const c=take("local-C",b);diagnostics.comparisonAttempts=2;
+      const unstable=mismatch(b,c);
+      if(unstable)stop("Local state changed during preview preparation; consecutive snapshots did not stabilize at "+unstable+". Preview again.",unstable);
+      const path=mismatch(c,final);
+      if(path)stop("Authoritative baseline changed while preparing backup: normalized business state differs at "+path+"; refresh and preview again.",path);
+      guard();diagnostics.status="ready";diagnostics.phase="stable";return{baseline:clone(final.raw),revision,diagnostics};
+    }catch(error){
+      diagnostics.status="blocked";if(!error.previewPreparation)error.previewPreparation={...diagnostics};throw error;
+    }
+  }
   const normalizeDefinitionName=value=>String(value||"").trim().replace(/\s+/g," ").toLocaleLowerCase();
   const date=v=>{const s=String(v||"").trim();if(!/^\d{4}-\d{2}-\d{2}$/.test(s))return"";const d=new Date(`${s}T00:00:00Z`);return Number.isNaN(d.getTime())||d.toISOString().slice(0,10)!==s?"":s;};
   const num=(v,{min=0,integer=false}={})=>{if(String(v??"").trim()==="")return null;const n=Number(v);return Number.isFinite(n)&&n>=min&&(!integer||Number.isInteger(n))?n:NaN;};
@@ -116,5 +174,5 @@
     busy=true;
     const state=env.state(),protectedBefore=protectedSnapshot(state),beforeCategories=clone(env.categories()),beforeMaterials=clone(env.materials()),stagedJobs=[],createdCategorySnapshots=[],sequenceChanges=[],renameChanges=[];result.beforeCounts={...counts(state),categories:beforeCategories.length,materials:beforeMaterials.length};try{progress("Validating prepared backup…");const backupResult=await env.backup(options);if(backupResult===false)throw Error("Mandatory backup step failed.");result.backupCreated=true;if(canonical(classify(rows))!==canonical(classified))throw new Error("Reviewed preview changed during backup; preview again.");progress("Staging reviewed jobs…");const createdCategories=new Map(),expectedExisting=clone(beforeCategories);for(const change of result.definitionPlan.renamedCategories){const matches=env.categories().filter(folder=>String(folder.id)===change.id);if(matches.length!==1||matches[0].name!==change.from)throw Error("Reviewed category rename changed; preview again.");const before=clone(matches[0]);renameChanges.push({...change,before});matches[0].name=change.to;expectedExisting.find(folder=>String(folder.id)===change.id).name=change.to;result.renamedCategories.push({...change});}for(const item of rechecked){if(item.categoryResolution.status==="missing"){const categoryName=item.categoryResolution.displayName,key=item.row.project_number;if(!createdCategories.has(key)){const made=env.createCategory(categoryName);createdCategories.set(key,made);result.createdCategoryIds.push(String(made.id));createdCategorySnapshots.push(clone(env.categories().find(category=>String(category.id)===String(made.id))||made));}item.categoryId=String(createdCategories.get(key).id);}else if(["matched","rename"].includes(item.categoryResolution.status)){item.categoryId=item.categoryResolution.value;if(!result.reusedCategoryIds.includes(item.categoryId))result.reusedCategoryIds.push(item.categoryId);}item.materialName=item.materialResolution.displayName;const id=String(item.materialResolution.value);if(!result.reusedMaterialIds.includes(id))result.reusedMaterialIds.push(id);}if(canonical(env.categories().slice(0,beforeCategories.length))!==canonical(expectedExisting)||canonical(env.materials())!==canonical(beforeMaterials)||env.categories().length!==beforeCategories.length+result.createdCategoryIds.length)throw new Error("Definition mutation exceeded the reviewed creation/name-only rename plan.");for(const item of rechecked){const resolved=history.resolveProjectCategory(item.row.project_number,env.categories(),item.row.category,[...state.cuttingJobs,...state.completedCuttingJobs]);if(resolved.status!=="matched"||String(resolved.folder.id)!==item.categoryId||resolved.projectNumber!==item.row.project_number)throw new Error("Imported project/category pair verification failed.");}
     const mapped=rechecked.map(map),active=mapped.filter((_,i)=>rechecked[i].row.record_status==="active"),completed=mapped.filter((_,i)=>rechecked[i].row.record_status==="completed");state.cuttingJobs.push(...active);state.completedCuttingJobs.push(...completed);stagedJobs.push(...clone(mapped));const sequenceBefore=[...state.cuttingJobs,...state.completedCuttingJobs].filter(job=>!mapped.includes(job)).map(job=>({job,id:job.id,import_event_id:job.import_event_id,had:Object.prototype.hasOwnProperty.call(job,"cutNumber"),before:job.cutNumber}));result.resequence=history.resequence(state.cuttingJobs,state.completedCuttingJobs);stagedJobs.splice(0,stagedJobs.length,...clone(mapped));sequenceChanges.push(...sequenceBefore.filter(item=>item.before!==item.job.cutNumber).map(({job,...item})=>({...item,staged:job.cutNumber})));result.activeJobsAdded=active.length;result.completedJobsAdded=completed.length;result.completedTimeRecordsAdded=mapped.reduce((n,j)=>n+j.manualLogs.length,0);result.protectedStateMismatchPaths=compareProtected(protectedBefore,state);result.protectedStateMatched=!result.protectedStateMismatchPaths.length;if(!result.protectedStateMatched)throw new Error("Protected state mutation rejected.");const expectedState={cuttingJobs:clone(state.cuttingJobs),completedCuttingJobs:clone(state.completedCuttingJobs)},expectedCategories=clone(env.categories());progress("Saving…");result.saveAttempted=true;let saved;try{saved=await env.saveCloudNow(options.expectedRevision==null?undefined:{expectedRevision:options.expectedRevision});}catch(error){result.stateWriteAttempted=true;result.saveIndeterminate=true;result.saveError=String(error?.message||error);env.suspend?.(result.saveError);return result;}result.stateWriteAttempted=saved?.stateWriteAttempted===true;result.stateWriteCompleted=saved?.stateWriteCompleted===true;result.saveCompleted=saved?.saved===true&&result.stateWriteCompleted;result.saveIndeterminate=!result.saveCompleted&&(!saved||typeof saved!=="object"||result.stateWriteCompleted||saved?.indeterminate===true||(result.stateWriteAttempted&&!result.stateWriteCompleted&&saved?.definiteFailure!==true));result.saveWarnings=Array.isArray(saved?.warnings)?saved.warnings.slice():[];result.saveError=String(saved?.error||"");if(result.saveCompleted){progress("Verifying…");let verified=false;try{verified=typeof env.verifyCloud==="function"&&await env.verifyCloud({plannedIds:result.plannedImportEventIds,expectedState,expectedCategories,beforeCounts:result.beforeCounts});}catch(error){result.saveError=String(error?.message||error);}result.verificationCompleted=verified===true;if(!result.verificationCompleted){result.authoritativeSaveCompleted=true;result.saveCompleted=false;result.saveIndeterminate=true;result.saveError=result.saveError||"Committed import requires cloud ID/count verification before retrying.";env.suspend?.(result.saveError);return result;}progress("Import complete.");result.importedEventIds=result.plannedImportEventIds.slice();result.afterCounts={...counts(state),categories:env.categories().length,materials:env.materials().length};return result;}if(result.saveIndeterminate){env.suspend?.(result.saveError||"Indeterminate import completion; read-verify before retrying.");result.afterCounts={...counts(state),categories:env.categories().length,materials:env.materials().length};return result;}throw new Error(result.saveError||"Authoritative save did not complete.");}catch(error){result.saveError=result.saveError||String(error?.message||error);if(!result.saveIndeterminate&&!result.stateWriteCompleted){result.rollbackAttempted=true;try{const retained=rollbackImport(env,stagedJobs,createdCategorySnapshots,sequenceChanges,beforeCategories,renameChanges);result.rollbackCompleted=!retained.length;result.rollbackVerified=result.rollbackCompleted;if(retained.length){result.rollbackReviewRequired=true;result.rollbackRetained=retained;result.saveWarnings.push(...retained);result.saveError+=" Selective rollback retained definitions; manual verification is required. Writes are suspended.";env.suspend?.(result.saveError);}}catch(rollbackError){result.rollbackReviewRequired=true;result.rollbackError=String(rollbackError?.message||rollbackError);result.saveError+=" "+result.rollbackError+" Writes are suspended.";env.suspend?.(result.saveError);}}result.afterCounts={...counts(state),categories:env.categories().length,materials:env.materials().length};return result;}finally{busy=false;}}return Object.freeze({parseFile:f=>parseFile(f,env.xlsx),preview:classify,submit,canPrepareBackup:()=>env.authenticatedBaseline(),isBusy:()=>busy});}
-  return Object.freeze({FIELDS,MATERIAL_ALIASES,PROJECT_CATEGORIES:history.PROJECT_CATEGORIES,normalizeComparisonState,normalizeDefinitionName,csv,parseFile,parseNumberExpression,parseDimensions,resolveMaterial,preview,definitionPlan,map,createApi,resequence:history.resequence,audit:history.audit,resolveProjectCategory:history.resolveProjectCategory});
+  return Object.freeze({FIELDS,MATERIAL_ALIASES,PROJECT_CATEGORIES:history.PROJECT_CATEGORIES,normalizeComparisonState,firstDifferencePath,comparisonFingerprint,stabilizePreviewBaseline,normalizeDefinitionName,csv,parseFile,parseNumberExpression,parseDimensions,resolveMaterial,preview,definitionPlan,map,createApi,resequence:history.resequence,audit:history.audit,resolveProjectCategory:history.resolveProjectCategory});
 });

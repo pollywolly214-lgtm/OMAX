@@ -8,13 +8,13 @@ const row={import_event_id:"browser-cji02a",record_status:"active",job_name:"Bro
 const checks=[];
 async function main(){
   const browser=await chromium.launch({channel:"msedge",headless:true});
-  async function scenario(name,mode,verify,{legacy=false,rows=[row],weeklyTimestampDrift=false}={}){
+  async function scenario(name,mode,verify,{legacy=false,rows=[row],weeklyTimestampDrift=false,previewRace=""}={}){
     const context=await browser.newContext({acceptDownloads:true,serviceWorkers:"block"}),page=await context.newPage(),errors=[];
     page.setDefaultTimeout(30000);page.on("pageerror",error=>errors.push(error.message));
     await context.route("**/*",route=>new URL(route.request().url()).hostname==="localhost"?route.continue():route.abort());
     try{
       await page.goto("http://localhost:8000/?devsafe=1");await page.waitForFunction(()=>window.__initialAdoptComplete===true);
-      await page.evaluate(async({legacy,weeklyTimestampDrift})=>{
+      await page.evaluate(async({legacy,weeklyTimestampDrift,previewRace})=>{
         if(!window.OMAXDevSafe.active)throw Error("Disposable backend required");
         location.hash="#/jobs";route();
         localStorage.setItem("job_material_pricing_v1",JSON.stringify({wasteFactor:10,materials:[{id:"steel",name:"Steel",density:.283,pricePerLb:.8}]}));
@@ -32,8 +32,19 @@ async function main(){
         if(weeklyTimestampDrift)window.weeklyCostReports[0].generatedAtISO="2026-10-02T20:20:07.475Z";
         window.__cjiDone=new Promise(resolve=>window.__cjiResolveDone=resolve);
         window.__cjiSaveStarted=new Promise(resolve=>window.__cjiResolveSaveStarted=resolve);
-        const api=window.cuttingJobImporter;
-        window.cuttingJobImporter={...api,submit:(...args)=>{
+        const api=window.cuttingJobImporter,snapshot=snapshotState,prepare=prepareCuttingJobImportBackup,download=window.CuttingJobImportDownload;
+        window.__cjiBackupBlobs=0;window.__cjiPreviewReads=0;window.__cjiProjectionSamples=0;
+        window.CuttingJobImportDownload={...download,prepare:(...args)=>{window.__cjiBackupBlobs++;return download.prepare(...args);}};
+        snapshotState=options=>{
+          const result=snapshot(options);
+          if(window.__cjiPreviewRaceActive&&window.__cjiPreviewProjection){result.jobLayout={...result.jobLayout,fixtureRenderPhase:previewRace==="never-stable"?++window.__cjiProjectionSamples:"pending"};}
+          return result;
+        };
+        prepareCuttingJobImportBackup=(...args)=>prepare(...args).finally(()=>{window.__cjiPreviewRaceActive=false;});
+        window.cuttingJobImporter={...api,parseFile:async file=>{
+          window.__cjiPreviewRaceActive=Boolean(previewRace);window.__cjiPreviewProjection=["transient","never-stable"].includes(previewRace);
+          return api.parseFile(file);
+        },submit:(...args)=>{
           window.__cjiSubmissionStarted=true;
           return api.submit(...args).finally(()=>window.__cjiResolveDone());
         }};
@@ -51,6 +62,13 @@ async function main(){
           if(window.__cjiReadError)throw Error("Fixture cloud read rejection");
           if(window.__cjiDelayRead)await new Promise(resolve=>setTimeout(resolve,window.__cjiDelayRead));
           const result=await read();if(window.__cjiServerDrift)result.syncMeta.rev++;
+          if(window.__cjiPreviewRaceActive){
+            window.__cjiPreviewReads++;
+            if(window.__cjiPreviewReads===1&&previewRace==="transient")requestAnimationFrame(()=>{window.__cjiPreviewProjection=false;});
+            if(window.__cjiPreviewReads===1&&previewRace==="business-change")requestAnimationFrame(()=>{window.inventory.push({id:"fixture-concurrent",quantity:4});});
+            if(window.__cjiPreviewReads===2&&previewRace==="cloud-change")result.inventory.push({id:"fixture-server-edit",quantity:4});
+            if(window.__cjiPreviewReads===2&&previewRace==="revision-change")result.syncMeta.rev++;
+          }
           if(window.__cjiSaves&&window.__cjiPostSaveWeeklyValueDrift)result.weeklyCostReports[0].totalCutCost++;
           return result;
         };
@@ -62,15 +80,18 @@ async function main(){
           if(window.__cjiDefiniteFailure)return{saved:false,stateWriteAttempted:true,definiteFailure:true,error:"Fixture CAS rejection"};
           return save(options);
         };
-      },{legacy,weeklyTimestampDrift});
+      },{legacy,weeklyTimestampDrift,previewRace});
       if(mode==="poller")await page.evaluate(()=>{window.__unrelatedPoll=setInterval(()=>{document.getElementById("cuttingJobImportStatus").textContent;},10);});
       if(mode==="observer")await page.evaluate(()=>{window.__unrelatedObserver=new MutationObserver(()=>{document.getElementById("cuttingJobImportStatus").textContent;});window.__unrelatedObserver.observe(document.getElementById("cuttingJobImportStatus"),{childList:true,subtree:true});});
       await page.evaluate(()=>openReviewedCuttingJobImporter());
       await page.locator("#cuttingJobImportFile").setInputFiles({name:"fixture.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(rows))});
       await page.locator("#cuttingJobImportPreview").click();await page.waitForFunction(()=>!document.getElementById("cuttingJobImportPreview").disabled);
-      assert.equal(await page.locator("#cuttingJobImportStatus").textContent().then(text=>text.startsWith("Import stopped")),false,await page.locator("#cuttingJobImportStatus").textContent());
-      await page.locator("#cuttingJobImportReviewed").check();assert.equal(await page.locator("#cuttingJobImportRun").isEnabled(),true);
-      await page.locator("#cuttingJobImportRun").click();await verify(page);
+      if(previewRace&&previewRace!=="transient")await verify(page);
+      else{
+        assert.equal(await page.locator("#cuttingJobImportStatus").textContent().then(text=>text.startsWith("Import stopped")),false,await page.locator("#cuttingJobImportStatus").textContent());
+        await page.locator("#cuttingJobImportReviewed").check();assert.equal(await page.locator("#cuttingJobImportRun").isEnabled(),true);
+        await page.locator("#cuttingJobImportRun").click();await verify(page);
+      }
       assert.deepEqual(errors,[]);checks.push({name,passed:true});console.log("PASS",name);
     }catch(error){checks.push({name,passed:false,error:String(error.stack||error)});console.error("FAIL",name,error.message);}
     finally{await context.close();}
@@ -90,6 +111,20 @@ async function main(){
     assert.deepEqual(unrelated(result.cloud),unrelated(result.before));return result;
   };
   try{
+    await scenario("one Preview accepts a pending derived snapshot after bounded render settling","none",async page=>{
+      const before=await page.evaluate(()=>({diagnostics:JSON.parse(document.getElementById("cuttingJobImportRows").dataset.lastPreviewPreparation),reads:window.__cjiPreviewReads,blobs:window.__cjiBackupBlobs}));
+      assert.equal(before.diagnostics.status,"ready");assert.equal(before.diagnostics.firstMismatchPath,"$.jobLayout.fixtureRenderPhase");assert.equal(before.diagnostics.localSignatureChanged,true);assert.equal(before.diagnostics.comparisonAttempts,2);assert.equal(before.reads,2);assert.equal(before.blobs,1);assert.equal(before.diagnostics.cloudRevision,before.diagnostics.loadedRevision);assert.equal(before.diagnostics.samples.length,9);
+      await successful(page,"transient-preview-backup.json");assert.equal(await page.evaluate(()=>window.__cjiBackupBlobs),1);
+    },{previewRace:"transient"});
+    for(const previewRace of ["business-change","cloud-change","revision-change","never-stable"]){
+      await scenario("Preview visibly blocks "+previewRace+" without a backup or save","none",async page=>{
+        const text=await page.locator("#cuttingJobImportStatus").textContent(),result=await page.evaluate(()=>({diagnostics:JSON.parse(document.getElementById("cuttingJobImportRows").dataset.lastPreviewPreparation),reads:window.__cjiPreviewReads,blobs:window.__cjiBackupBlobs,saves:window.__cjiSaves,downloads:window.__cjiTrace.filter(t=>t.stage==="download").length}));
+        assert.match(text,/^Import stopped/);assert.equal(result.diagnostics.status,"blocked");assert.equal(result.diagnostics.comparisonAttempts,2);assert.equal(result.reads,2);assert.equal(result.blobs,0);assert.equal(result.saves,0);assert.equal(result.downloads,0);assert.ok(result.diagnostics.samples.length<=10);assert.equal(await page.locator("#cuttingJobImportPreview").isEnabled(),true);assert.equal(await page.locator("#cuttingJobImportRun").isDisabled(),true);
+        if(previewRace==="never-stable")assert.match(text,/consecutive snapshots did not stabilize/);
+        else if(previewRace==="revision-change")assert.equal(result.diagnostics.blockingMismatchPath,"$.syncMeta.rev");
+        else assert.ok(result.diagnostics.blockingMismatchPath.startsWith("$.inventory"));
+      },{previewRace});
+    }
     for(const outcome of ["timestamp only","meaningful post-save drift"]){
       await scenario("weekly generated timestamp baseline: "+outcome,"none",async page=>{
         assert.match(await page.locator("#cuttingJobImportStatus").textContent(),/Ready:/);
