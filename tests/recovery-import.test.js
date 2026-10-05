@@ -67,7 +67,7 @@ test("maintenance reliable saved duration is used only when blank; absent durati
 });
 test("recovery uses real native one-time resolver and cost compatibility stream",async()=>{
   const h=harness();await h.submit("maintenance",[event("seal",{route:"calendar_only",exact_existing_task:"",event_name:"Replace seal",labor_minutes:10,parts_cost_snapshot:3.1})]);
-  const core=fs.readFileSync("js/core.js","utf8"),calendar=fs.readFileSync("js/calendar.js","utf8"),context=vm.createContext({window:clone(h.cloud),console,normalizeDateISO:v=>v||null,normalizeDateKey:v=>v||null});
+  const core=fs.readFileSync("js/core.js","utf8"),calendar=fs.readFileSync("js/calendar.js","utf8"),context=vm.createContext({window:{...clone(h.cloud),OMAXMaintenanceCalendarIntegrity:require("../js/maintenanceCalendarIntegrity")},console,normalizeDateISO:v=>v||null,normalizeDateKey:v=>v||null});
   vm.runInContext(core.slice(core.indexOf("function detectMaintenanceRecordSystem"),core.indexOf("function runMaintenanceV2SafetyChecks"))+";this.stream=buildMaintenanceCompatibilityStream",context);
   const start=calendar.indexOf("function resolveV2OneTimeOccurrenceState(");vm.runInContext(calendar.slice(start,calendar.indexOf("window.completeV2OneTimeOccurrence",start))+";this.resolve=resolveV2OneTimeOccurrenceState",context);
   const base=h.cloud.maintenanceOccurrencesV2.find(r=>r.eventType==="scheduled");assert.equal(context.resolve(base.id,base).status,"completed");assert.equal(context.resolve(base.id,base).hours,10/60);
