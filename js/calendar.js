@@ -2379,15 +2379,11 @@ function showJobBubble(jobId, anchor){
         renderJobs();
       }
     });
-    b.querySelector("[data-bbl-remove-job]")?.addEventListener("click", ()=>{
-      try {
-        if (typeof recordDeletedItem === "function"){
-          recordDeletedItem("job", j, {});
-        }
-      } catch (err) {
-        console.warn("Failed to record deleted job from calendar", err);
-      }
-      cuttingJobs = cuttingJobs.filter(x=>String(x.id)!==String(j.id)); window.cuttingJobs = cuttingJobs; saveCloudDebounced(); toast("Removed"); hideBubble(); route();
+    b.querySelector("[data-bbl-remove-job]")?.addEventListener("click", async ()=>{
+      const result = await deleteCuttingJob("cuttingJobs", j.id);
+      if (result.cancelled) return;
+      toast(result.saved ? "Removed" : (result.error || "Job deletion failed."));
+      hideBubble(); route();
     });
     b.querySelector("[data-bbl-edit-job]")?.addEventListener("click", ()=>{ hideBubble(); openJobsEditor(j.id); });
   }catch(err){

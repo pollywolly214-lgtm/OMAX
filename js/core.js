@@ -4169,6 +4169,200 @@ function scanAuthoritativeCutFileContent(state, rootPath = "$"){
 }
 
 const inventoryIdentityRepairAuthorizations=new Map();
+// CJD authorizes one exact job-to-trash move, never general array shrinkage.
+const cuttingJobDeletionAuthorizations = new Map();
+const cuttingJobDeletionProofs = new WeakSet();
+const cuttingJobDeletionTransactions = new WeakSet();
+let cuttingJobDeletionInProgress = false;
+
+function cuttingJobDeletionFailure(error){
+  return { saved:false, blocked:true, definiteFailure:true, stateWriteAttempted:false,
+    stateWriteCompleted:false, errorCode:"cutting_job_deletion_rejected", error };
+}
+
+function cuttingJobDeletionProtectedKey(state){
+  const keys = Array.from(new Set(PROTECTED_FIELD_REGISTRY.map(entry => entry.path.split(".")[0]).concat("deletedItems"))).sort();
+  return stableStringifyForIntegrity(keys.map(key => [key, Object.prototype.hasOwnProperty.call(state || {}, key), state?.[key]]));
+}
+
+function cuttingJobDeletionArray(source, collection, id){
+  const remaining = source.filter(job => String(job?.id) !== id).map(job => cloneStructured(job));
+  if (collection === "cuttingJobs"){
+    // Same stable priority sort and contiguous priorities as the Jobs table.
+    const priority = job => Number.isFinite(Number(job?.priority)) && Number(job.priority) > 0 ? Math.max(1, Math.floor(Number(job.priority))) : 1;
+    remaining.sort((a, b) => priority(a) - priority(b));
+    remaining.forEach((job, index) => { job.priority = index + 1; });
+  }
+  return remaining;
+}
+
+function validateCuttingJobDeletionSave(remote, pending, proof = null){
+  const collections = ["cuttingJobs", "completedCuttingJobs"];
+  if (!proof){
+    // Completion retains the stable ID in completed history. Ordinary record
+    // loss, even below the count thresholds, must not masquerade as deletion.
+    const counts = state => Object.fromEntries(collections.map(key => {
+      const result = new Map();
+      for (const job of (Array.isArray(state?.[key]) ? state[key] : [])){
+        const id = String(job?.id); result.set(id, (result.get(id) || 0) + 1);
+      }
+      return [key, result];
+    }));
+    const prior = counts(remote), next = counts(pending);
+    const lost = collections.some(key => Array.from(prior[key]).some(([id, count]) => {
+      const completedTransfer = key === "cuttingJobs" ? Math.max(0, (next.completedCuttingJobs.get(id) || 0) - (prior.completedCuttingJobs.get(id) || 0)) : 0;
+      return (next[key].get(id) || 0) + completedTransfer < count;
+    }));
+    return lost ? { valid:false, error:"Cutting-job loss requires an exact job-to-trash authorization." } : { valid:true };
+  }
+  if (!cuttingJobDeletionProofs.has(proof) || Date.now() > proof.expiresAt) return { valid:false, error:"Cutting-job deletion authorization is invalid or expired." };
+  if (remote?.syncMeta?.rev !== proof.expectedRevision) return { valid:false, error:"Cutting-job deletion revision changed; reload before retrying." };
+  if (cuttingJobDeletionProtectedKey(remote) !== proof.sourceKey) return { valid:false, error:"Cutting-job deletion source or unrelated protected data changed." };
+  if (cuttingJobDeletionProtectedKey(pending) !== proof.pendingKey) return { valid:false, error:"Cutting-job deletion result or trash preservation changed." };
+  const matches = collections.flatMap(key => (Array.isArray(remote?.[key]) ? remote[key] : []).filter(job => String(job?.id) === proof.id).map(job => ({ key, job })));
+  if (matches.length !== 1 || matches[0].key !== proof.collection || stableStringifyForIntegrity(matches[0].job) !== proof.payloadKey) return { valid:false, error:"Cutting-job deletion identity or payload is ambiguous or changed." };
+  if (!Array.isArray(remote.deletedItems) || !Array.isArray(pending.deletedItems)) return { valid:false, error:"Cutting-job deletion requires authoritative trash." };
+  const entries = pending.deletedItems.filter(entry => entry?.id === proof.trash.id);
+  if (entries.length !== 1 || stableStringifyForIntegrity(entries[0]) !== stableStringifyForIntegrity(proof.trash)
+    || entries[0].type !== (proof.collection === "cuttingJobs" ? "job" : "completed-job")
+    || stableStringifyForIntegrity(entries[0].payload) !== proof.payloadKey) return { valid:false, error:"The exact deleted job is not preserved in matching trash." };
+  const expected = { ...remote, [proof.collection]:cuttingJobDeletionArray(remote[proof.collection], proof.collection, proof.id), deletedItems:[proof.trash, ...remote.deletedItems] };
+  if (remote.deletedItems.some(entry => entry?.id === proof.trash.id) || cuttingJobDeletionProtectedKey(expected) !== cuttingJobDeletionProtectedKey(pending)) return { valid:false, error:"Only one job and its bounded priority changes may move into new trash." };
+  return { valid:true };
+}
+
+function authorizeCuttingJobDeletion(before, pending, collection, id, trash, expectedRevision){
+  if (!["cuttingJobs", "completedCuttingJobs"].includes(collection) || !id || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) return { authorized:false, error:"Invalid cutting-job deletion identity or revision." };
+  const source = before?.[collection];
+  const matches = Array.isArray(source) ? source.filter(job => String(job?.id) === id) : [];
+  if (matches.length !== 1) return { authorized:false, error:"Select one unambiguous cutting job." };
+  const proof = Object.freeze({ collection, id, expectedRevision, sourceKey:cuttingJobDeletionProtectedKey(before),
+    pendingKey:cuttingJobDeletionProtectedKey(pending), payloadKey:stableStringifyForIntegrity(matches[0]),
+    trash:cloneStructured(trash), expiresAt:Date.now() + 60000 });
+  cuttingJobDeletionProofs.add(proof);
+  const checked = validateCuttingJobDeletionSave(before, pending, proof);
+  if (!checked.valid){ cuttingJobDeletionProofs.delete(proof); return { authorized:false, error:checked.error }; }
+  const token = genId("cutting_job_deletion");
+  cuttingJobDeletionAuthorizations.set(token, proof);
+  return { authorized:true, token };
+}
+
+function consumeCuttingJobDeletionAuthorization(token, pending, expectedRevision){
+  const proof = cuttingJobDeletionAuthorizations.get(token);
+  cuttingJobDeletionAuthorizations.delete(token);
+  if (!proof || proof.expectedRevision !== expectedRevision || Date.now() > proof.expiresAt
+    || cuttingJobDeletionProtectedKey(pending) !== proof.pendingKey) return { authorized:false, error:"Cutting-job deletion authorization is missing, stale, altered, or already used." };
+  return { authorized:true, proof };
+}
+
+function cuttingJobDeletionSafetyBaseline(state, pending, proof){
+  // Called only after exact proof validation; all other guard inputs stay intact.
+  return proof && state ? { ...state, [proof.collection]:pending[proof.collection] } : state;
+}
+
+function rollbackCuttingJobDeletion(mutation){
+  const { collection, id, job, before, staged, trash, priorities } = mutation;
+  const current = window[collection];
+  const allJobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])];
+  if (current !== staged || allJobs.some(entry => String(entry?.id) === id)) return false;
+  const stagedIds = cuttingJobDeletionArray(before, collection, id).map(entry => String(entry?.id));
+  const orderOwned = stableStringifyForIntegrity(current.map(entry => String(entry?.id))) === stableStringifyForIntegrity(stagedIds);
+  for (const change of priorities){
+    if (current.includes(change.job) && change.job.priority === change.after){
+      if (change.had) change.job.priority = change.before;
+      else delete change.job.priority;
+    }
+  }
+  if (orderOwned){
+    const byId = new Map(current.map(entry => [String(entry?.id), entry]));
+    current.splice(0, current.length, ...before.map(entry => String(entry?.id) === id ? job : byId.get(String(entry?.id))));
+  } else {
+    const originalIndex = before.findIndex(entry => String(entry?.id) === id);
+    current.splice(Math.min(originalIndex, current.length), 0, job);
+  }
+  const trashIndex = window.deletedItems?.findIndex(entry => entry === trash);
+  if (trashIndex >= 0 && stableStringifyForIntegrity(window.deletedItems[trashIndex]) === mutation.trashKey) window.deletedItems.splice(trashIndex, 1);
+  else return false;
+  refreshGlobalCollections();
+  // Replace this operation's rejected staged backup using the existing helper.
+  persistLocalStateBackup(snapshotState({ skipLocalFileCacheSync:true }));
+  return true;
+}
+
+async function deleteCuttingJob(collection, jobId){
+  if (cuttingJobDeletionInProgress) return cuttingJobDeletionFailure("Another cutting-job deletion is still saving.");
+  if (!["cuttingJobs", "completedCuttingJobs"].includes(collection) || jobId == null || String(jobId) === "") return cuttingJobDeletionFailure("Select a valid cutting job.");
+  if (!canWriteCloud("cutting-job deletion") || !FB.ready || !FB.user || isVercelPreviewRuntime()) return cuttingJobDeletionFailure("Cloud writes are unavailable; the cutting job was not removed.");
+  const id = String(jobId);
+  const matches = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])].filter(job => String(job?.id) === id);
+  if (matches.length !== 1 || !(window[collection] || []).includes(matches[0])) return cuttingJobDeletionFailure("Select one unambiguous cutting job; duplicate or missing IDs cannot be deleted.");
+  const job = matches[0];
+  const originalPayloadKey = stableStringifyForIntegrity(job);
+  if (typeof window.confirm !== "function" || !window.confirm(`Remove cutting job "${String(job.name || id)}"? It will be placed in Trash and can be restored for 30 days.`)) return { saved:false, cancelled:true };
+  cuttingJobDeletionInProgress = true;
+  let mutation = null, token = null;
+  try {
+    // Finish earlier saves before binding this operation to one cloud revision.
+    if (hasPendingLocalChanges){
+      const settled = await saveCloudNow();
+      if (!settled?.saved || !settled.stateWriteCompleted) return cuttingJobDeletionFailure("Existing changes could not be confirmed; the cutting job was not removed.");
+    } else await cloudSaveQueue;
+    if (!canWriteCloud("cutting-job deletion")) return cuttingJobDeletionFailure("Cloud writes are blocked; the cutting job was not removed.");
+    refreshGlobalCollections();
+    const before = compactStateForStorage(snapshotState({ skipLocalFileCacheSync:true }));
+    const expectedRevision = window.__loadedCloudRevisionForSaveGuard;
+    before.syncMeta = { ...before.syncMeta, rev:expectedRevision };
+    if (stableStringifyForIntegrity(job) !== originalPayloadKey || cuttingJobDeletionProtectedKey(before) !== cuttingJobDeletionProtectedKey(window.__lastLoadedCloudState)) return cuttingJobDeletionFailure("The job or protected state changed; save/reload and review before deleting.");
+    const type = collection === "cuttingJobs" ? "job" : "completed-job";
+    // Preserve existing trash verbatim; addDeletedItem also purges/schedules a
+    // separate save, so this bounded operation stages the same schema itself.
+    const trash = { id:genId(`trash_${type}`), type, payload:cloneStructured(job), meta:{}, label:buildTrashLabel(type, job, {}), deletedAt:new Date().toISOString() };
+    const next = { ...before, [collection]:cuttingJobDeletionArray(before[collection], collection, id), deletedItems:[trash, ...before.deletedItems] };
+    const authorization = authorizeCuttingJobDeletion(before, next, collection, id, trash, expectedRevision);
+    if (!authorization.authorized) return cuttingJobDeletionFailure(authorization.error);
+    token = authorization.token;
+    const originals = new Map(window[collection].map(entry => [String(entry?.id), entry]));
+    const priorities = [];
+    const staged = next[collection].map(entry => {
+      const live = originals.get(String(entry?.id));
+      if (collection === "cuttingJobs"){
+        priorities.push({ job:live, had:Object.prototype.hasOwnProperty.call(live, "priority"), before:live.priority, after:entry.priority });
+        live.priority = entry.priority;
+      }
+      return live;
+    });
+    mutation = { collection, id, job, before:before[collection], staged, trash, priorities, trashKey:stableStringifyForIntegrity(trash) };
+    window[collection] = staged;
+    window.deletedItems.unshift(trash);
+    refreshGlobalCollections();
+    let result;
+    try { result = await saveCloudNow({ expectedRevision, cuttingJobDeletionToken:token }); }
+    catch (error){ result = { saved:false, indeterminate:true, error:String(error?.message || error) }; }
+    if (result?.saved === true && result.stateWriteCompleted === true){
+      try { captureHistorySnapshot(); } catch (error){ console.warn("History capture after confirmed job deletion failed", error); }
+      return result;
+    }
+    const indeterminate = !result || result.indeterminate === true || result.stateWriteCompleted === true
+      || (result.stateWriteAttempted === true && result.definiteFailure !== true);
+    if (indeterminate){
+      window.__autosaveDisabled = true; window.__recoveryInspectMode = true;
+      window.__lastIndeterminateSave = result;
+      renderRecoveryDiagnosticsPanel();
+      return { ...result, saved:false, indeterminate:true, error:"Deletion completion is uncertain. Reload authoritative cloud state to verify before retrying." };
+    }
+    const rolledBack = rollbackCuttingJobDeletion(mutation);
+    if (!rolledBack){ window.__autosaveDisabled = true; window.__recoveryInspectMode = true; renderRecoveryDiagnosticsPanel(); }
+    return { ...result, saved:false, rolledBack, error:rolledBack ? `Job was not deleted: ${result.error || "cloud save failed"}` : "Deletion failed and local state changed. Reload authoritative cloud state before retrying." };
+  } catch (error){
+    const rolledBack = !mutation || rollbackCuttingJobDeletion(mutation);
+    if (!rolledBack){ window.__autosaveDisabled = true; window.__recoveryInspectMode = true; renderRecoveryDiagnosticsPanel(); }
+    return { ...cuttingJobDeletionFailure(String(error?.message || error)), rolledBack };
+  } finally {
+    if (token) cuttingJobDeletionAuthorizations.delete(token);
+    cuttingJobDeletionInProgress = false;
+  }
+}
+window.deleteCuttingJob = deleteCuttingJob;
 async function writeReviewedGlobalIdentityRepair(next,{source,expectedRevision}){
   const api=window.OMAXGlobalIdentityRepair,plan=api.preview(source);
   if(window.__lastIndeterminateSave||window.__globalIdentityVerificationPending||window.__lastImportVerificationError||window.__lastInventoryIdentityRepairError)throw Error("Unresolved write verification blocks identity repair.");
@@ -4195,6 +4389,11 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
     &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
   if (!identityAuthorized && !canWriteCloud("authoritative transaction")) return { saved:false, blocked:true, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
+  const deletionProof = options.cuttingJobDeletionProof;
+  if (deletionProof){
+    if (!cuttingJobDeletionProofs.has(deletionProof) || cuttingJobDeletionTransactions.has(deletionProof)) return cuttingJobDeletionFailure("Cutting-job deletion transaction authorization is invalid or already used.");
+    cuttingJobDeletionTransactions.add(deletionProof);
+  }
   const writer = window.OMAXAtomicPersistence?.save;
   if (typeof writer !== "function" || !window.CuttingFileContentFirewall){
     return { saved:false, blocked:true, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
@@ -4209,16 +4408,20 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
         return pending;
       }
       const proof = options.repairProof;
+      const deletionCheck = validateCuttingJobDeletionSave(remote, pending, deletionProof);
+      if (!deletionCheck.valid) throw Object.assign(new Error(deletionCheck.error), { definite:true, code:"cutting_job_deletion_rejected" });
       if (proof && !validateMaintenanceV2RepairRemoteBaseline(proof, remote)) throw Object.assign(new Error("Latest V2 state no longer matches the authorized repair baseline."), { definite:true, code:"repair_conflict" });
-      const safetyRemote = proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote;
-      const safetyBaseline = proof ? { ...window.__lastLoadedCloudState, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : window.__lastLoadedCloudState;
+      const safetyRemote = cuttingJobDeletionSafetyBaseline(proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote, pending, deletionProof);
+      const safetyBaseline = cuttingJobDeletionSafetyBaseline(proof ? { ...window.__lastLoadedCloudState, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : window.__lastLoadedCloudState, pending, deletionProof);
       const backup = readLocalStateBackup();
-      const safetyBackup = proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup;
+      const safetyBackup = cuttingJobDeletionSafetyBaseline(proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup, pending, deletionProof);
       const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:buildWindowProtectedStateForCoverage(), coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
       if (preflight.blocked || detectDangerousProtectedFieldReduction(safetyRemote, pending).blocked) throw Object.assign(new Error("Protected-state transaction preflight blocked the write."), { definite:true, code:"protected_preflight_blocked" });
-      pending.totalHistory = mergeTotalHistoryForSave(pending.totalHistory, remote.totalHistory);
-      pending.dailyCutHours = mergeDailyCutHoursForSave(pending.dailyCutHours, remote.dailyCutHours);
-      pending.pumpEff = mergePumpEffForSave(pending.pumpEff, remote.pumpEff);
+      if (!deletionProof){
+        pending.totalHistory = mergeTotalHistoryForSave(pending.totalHistory, remote.totalHistory);
+        pending.dailyCutHours = mergeDailyCutHoursForSave(pending.dailyCutHours, remote.dailyCutHours);
+        pending.pumpEff = mergePumpEffForSave(pending.pumpEff, remote.pumpEff);
+      }
       if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
       return pending;
     }
@@ -6340,6 +6543,11 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.snapshotOccurrenceFoundInsideSave = rawOccurrences.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
     }
     const snap = compactStateForStorage(rawSnap);
+    const deletionAuthorization = saveOptions.cuttingJobDeletionToken
+      ? consumeCuttingJobDeletionAuthorization(saveOptions.cuttingJobDeletionToken, snap, expectedRevision)
+      : { authorized:false };
+    if (saveOptions.cuttingJobDeletionToken && !deletionAuthorization.authorized) return cuttingJobDeletionFailure(deletionAuthorization.error);
+    const deletionProof = deletionAuthorization.proof || null;
     if (explicitTrace){
       const compactedInstances = Array.isArray(snap?.maintenanceCalendarInstancesV2) ? snap.maintenanceCalendarInstancesV2 : [];
       const compactedOccurrences = Array.isArray(snap?.maintenanceOccurrencesV2) ? snap.maintenanceOccurrencesV2 : [];
@@ -6404,6 +6612,8 @@ async function performCloudSave(saveOptions = {}){
     window.__lastSnapshot = snap;
     const remoteSnap = await FB.docRef.get();
     const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+    const deletionCheck = validateCuttingJobDeletionSave(remoteData, snap, deletionProof);
+    if (!deletionCheck.valid) return cuttingJobDeletionFailure(deletionCheck.error);
     if (allowScheduledV2Dedupe && !validateMaintenanceV2RepairRemoteBaseline(repairAuthorization.proof, remoteData)){
       return { saved:false, error:"Latest Firestore V2 state no longer matches the authorized repair baseline." };
     }
@@ -6420,15 +6630,15 @@ async function performCloudSave(saveOptions = {}){
     const allowFirstRunPreflight = Boolean(remoteSnap && !remoteSnap.exists)
       && !stateHasMeaningfulData(window.__lastLoadedCloudState || {})
       && !stateHasMeaningfulData(localBackupForPreflight || {});
-    const safetyBaseline = allowScheduledV2Dedupe
+    const safetyBaseline = cuttingJobDeletionSafetyBaseline(allowScheduledV2Dedupe
       ? { ...(window.__lastLoadedCloudState || {}), maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
-      : (window.__lastLoadedCloudState || null);
-    const safetyRemote = allowScheduledV2Dedupe && remoteData
+      : (window.__lastLoadedCloudState || null), snap, deletionProof);
+    const safetyRemote = cuttingJobDeletionSafetyBaseline(allowScheduledV2Dedupe && remoteData
       ? { ...remoteData, maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
-      : remoteData;
-    const safetyLocalBackup = allowScheduledV2Dedupe && localBackupForPreflight
+      : remoteData, snap, deletionProof);
+    const safetyLocalBackup = cuttingJobDeletionSafetyBaseline(allowScheduledV2Dedupe && localBackupForPreflight
       ? { ...localBackupForPreflight, maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
-      : localBackupForPreflight;
+      : localBackupForPreflight, snap, deletionProof);
     const saveSchemaCoverage = getSaveSchemaCoverageReport({ pendingSnapshot: snap });
     const registryPreflight = validateProtectedSavePreflight({
       baselineState: safetyBaseline,
@@ -6480,9 +6690,11 @@ async function performCloudSave(saveOptions = {}){
         hasPendingLocalChanges = true;
         return { saved:false, error:"Protected field reduction was blocked." };
       }
-      snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
-      snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
-      snap.pumpEff = mergePumpEffForSave(snap.pumpEff, remoteData.pumpEff);
+      if (!deletionProof){
+        snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
+        snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
+        snap.pumpEff = mergePumpEffForSave(snap.pumpEff, remoteData.pumpEff);
+      }
     }
     persistLocalStateBackup(snap);
     let writeRev = Number(snap?.syncMeta?.rev || 0);
@@ -6493,7 +6705,7 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.firestoreWritePayloadInstanceFound = Array.isArray(snap.maintenanceCalendarInstancesV2) && snap.maintenanceCalendarInstancesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
       explicitTrace.firestoreWritePayloadOccurrenceFound = Array.isArray(snap.maintenanceOccurrencesV2) && snap.maintenanceOccurrencesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
     }
-    const writeResult = await writeAuthoritativeStateSnapshot(snap, { merge:true }, { expectedRevision, repairProof:allowScheduledV2Dedupe ? repairAuthorization.proof : null });
+    const writeResult = await writeAuthoritativeStateSnapshot(snap, { merge:true }, { expectedRevision, repairProof:allowScheduledV2Dedupe ? repairAuthorization.proof : null, cuttingJobDeletionProof:deletionProof });
     writeRev = Number(snap?.syncMeta?.rev || 0);
     authoritativeStateWriteAttempted = writeResult.stateWriteAttempted;
     authoritativeStateWriteCompleted = writeResult.stateWriteCompleted;
@@ -6799,7 +7011,8 @@ function saveCloudNow(saveOptions = {}){
     console.warn("Failed to normalize folders before save:", err);
   }
   try {
-    if (typeof captureHistorySnapshot === "function") captureHistorySnapshot();
+    // CJD captures history only after the authoritative deletion is confirmed.
+    if (!saveOptions.cuttingJobDeletionToken && typeof captureHistorySnapshot === "function") captureHistorySnapshot();
   } catch (err) {
     console.warn("History capture before save failed:", err);
   }
