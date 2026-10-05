@@ -24,8 +24,9 @@
       const ns=namespace(collection),list=byNamespace.get(ns)||[];list.push(record);byNamespace.set(ns,list);
       if(!valid(record.id)){plan.missingIds.push({collection,path:pathText(path),indexes:path.filter(part=>typeof part==="number"),evidence:clone(row??null),id:record.id??null});block(`Missing/noncanonical ${identityField} at ${pathText(path)}.`);}
     };
-    // Required schema collections plus every additional ID-bearing array. Nested
-    // import IDs are identities too, scoped to their containing collection.
+    // Required schema collections plus every additional ID-bearing array.
+    // Cutting import identities belong only to direct job members; nested
+    // copies are owning-job provenance, validated by referenceWalk below.
     const discover=(value,path=[])=>{
       if(Array.isArray(value)){
         const collection=path.length===1?path[0]:pathText(path),mandatory=requiredIds.has(collection)||(path.length===1&&value.some(row=>row&&typeof row==="object"&&Object.hasOwn(row,"id")))||collection==="$.inventoryMaterials.types"||(path[0]==="orderRequests"&&path.at(-1)==="items")||(["cuttingJobs","completedCuttingJobs"].includes(path[0])&&path.at(-1)==="files"),week=collection==="receiptTrackerWeeks",dateKey=["dailyCutHours","totalHistory"].includes(collection);
@@ -33,7 +34,7 @@
           if(row&&typeof row==="object"&&!Array.isArray(row)){
             const field=dateKey?"dateISO":week?("key" in row?"key":"id"):"id";
             if(mandatory||week||dateKey||Object.hasOwn(row,field))add(row,[...path,index],collection,field);
-            if(Object.hasOwn(row,"import_event_id")){
+            if(Object.hasOwn(row,"import_event_id")&&(!["cuttingJobs","completedCuttingJobs"].includes(path[0])||path.length===1)){
               const scope=path[0]==="receiptTrackerWeeks"?"purchaseImportEvents":path[0]==="pumpEff"?"pumpImportEvents":["tasksInterval","tasksAsReq"].includes(path[0])?"maintenanceImportEvents":["cuttingJobs","completedCuttingJobs"].includes(path[0])?"cuttingImportEvents":collection+"#import";
               add(row,[...path,index],scope,"import_event_id");
             }
@@ -172,6 +173,13 @@
     // history, and attachments), too. Unknown V2 consumers remain blockers.
     const referenceWalk=(value,path=[])=>{
       if(!value||typeof value!=="object")return;
+      if(!Array.isArray(value)&&path.length>2&&["cuttingJobs","completedCuttingJobs"].includes(path[0])&&typeof path[1]==="number"&&Object.hasOwn(value,"import_event_id")){
+        const ownerPath=path.slice(0,2),owner=state[path[0]][path[1]],canonical=owner?.import_event_id,fieldPath=pathText([...path,"import_event_id"]);
+        const targets=valid(canonical)?lookup("cuttingImportEvents",canonical):[];
+        if(!valid(canonical)||targets.length!==1||pathText(targets[0].path)!==pathText(ownerPath))block(`Cutting import provenance ${fieldPath} has no unique canonical owning-job import_event_id.`);
+        else if(value.import_event_id!==canonical)block(`Cutting import provenance ${fieldPath} contradicts owning-job import_event_id ${canonical}.`);
+        else{supported.add(fieldPath);plan.references.push({path:fieldPath,target:pathText(ownerPath),value:canonical,proposedId:canonical});}
+      }
       if(!Array.isArray(value)&&!byPath.has(pathText(path))){const record={row:value,path,collection:pathText(path)};
         for(const [field,target]of [["inventoryId","inventory"],["inventoryItemId","inventory"],["linkedTaskId","legacyTasks"],["legacyTaskId","legacyTasks"],["jobId","jobs"],["requestId","orderRequests"]])if(Object.hasOwn(value,field))ref(record,field,target);
       }

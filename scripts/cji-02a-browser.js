@@ -127,6 +127,38 @@ async function main(){
     assert.deepEqual(unrelated(result.cloud),unrelated(result.before));return result;
   };
   try{
+    const completedRows=Array.from({length:4},(_,i)=>({...row,import_event_id:`616-CUT-BROWSER-${i+1}`,record_status:"completed",actual_cut_minutes:"60",completed_date:"2026-01-02",start_date:"2026-01-01"}));
+    for(const duplicate of [false,true])await scenario(duplicate?"true top-level cutting import duplicate still enters Recovery Mode and blocks saves":"completed imports retain matching provenance and reload with autosave enabled","none",async page=>{
+      await page.evaluate(()=>{window.__cjiTrace=[];});const pending=page.waitForEvent("download");await page.locator("#cuttingJobImportConfirmRun").click();const download=await pending;
+      const filename=path.join(output,duplicate?"completed-negative-backup.json":"completed-provenance-backup.json");await download.saveAs(filename);assert.equal(await download.failure(),null);
+      const backup=JSON.parse(fs.readFileSync(filename,"utf8"));assert.equal(backup.completedCuttingJobs.length,0);
+      await final(page);assert.match(await page.locator("#cuttingJobImportStatus").textContent(),/^Import complete/);
+      const r=await page.evaluate(async()=>{const cloud=await readCurrentCloudStateReadOnly();return{cloud,result:JSON.parse(document.getElementById("cuttingJobImportRows").dataset.lastImportResult),saves:window.__cjiSaves,blobs:window.__cjiBackupBlobs,trace:window.__cjiTrace,integrity:OMAXGlobalIdentityRepair.integrity(cloud),recovery:Boolean(window.__recoveryInspectMode),autosaveDisabled:Boolean(window.__autosaveDisabled)};});
+      assert.equal(r.saves,1);assert.equal(r.blobs,1);assert.equal(r.trace[0].stage,"download");assert.equal(r.trace[0].active,true);
+      assert.equal(r.result.stateWriteCompleted,true);assert.equal(r.result.saveCompleted,true);assert.equal(r.result.saveIndeterminate,false);assert.equal(r.result.verificationCompleted,true);
+      assert.equal(r.result.completedJobsAdded,4);assert.equal(r.result.completedTimeRecordsAdded,4);assert.equal(r.cloud.completedCuttingJobs.length,4);
+      assert.equal(r.integrity.valid,true);assert.deepEqual(r.integrity.plan.duplicateGroups,[]);assert.deepEqual(r.integrity.plan.unknownReferences,[]);
+      assert.equal(r.integrity.plan.auditedCollections.find(c=>c.collection==="cuttingImportEvents").count,4);assert.equal(r.recovery,false);assert.equal(r.autosaveDisabled,false);
+      for(const job of r.cloud.completedCuttingJobs){assert.equal(job.manualLogs[0].import_event_id,job.import_event_id);assert.equal(job.importProvenance.import_event_id,job.import_event_id);}
+      if(duplicate)await page.evaluate(async()=>{
+        if(!OMAXDevSafe.active)throw Error("Duplicate fixture requires disposable backend");
+        const cloud=await readCurrentCloudStateReadOnly(),[owner,other]=cloud.completedCuttingJobs;
+        other.import_event_id=owner.import_event_id;other.manualLogs[0].import_event_id=owner.import_event_id;other.importProvenance.import_event_id=owner.import_event_id;
+        // Seed corrupt disposable SERVER evidence directly, so the real reload
+        // gate (rather than importer idempotency) must reject two job owners.
+        await FB.docRef.set(cloud);
+      });
+      await page.reload();await page.waitForFunction(()=>window.__initialAdoptComplete===true);
+      const adopted=await page.evaluate(async()=>{const cloud=await readCurrentCloudStateReadOnly();return{cloud,adopted:window.__lastLoadedCloudState,integrity:OMAXGlobalIdentityRepair.integrity(cloud),recovery:Boolean(window.__recoveryInspectMode),autosaveDisabled:Boolean(window.__autosaveDisabled),canWrite:canWriteCloud("CJI-02G fixture"),issues:window.__globalIdentityIssues};});
+      assert.deepEqual(adopted.adopted,adopted.cloud);assert.equal(adopted.cloud.completedCuttingJobs.length,4);
+      assert.equal(adopted.integrity.valid,!duplicate);assert.equal(adopted.recovery,duplicate);assert.equal(adopted.autosaveDisabled,duplicate);assert.equal(adopted.canWrite,!duplicate);
+      if(duplicate){
+        const group=adopted.integrity.plan.duplicateGroups.find(g=>g.collection==="cuttingImportEvents");assert.equal(group.records.length,2);assert.ok(adopted.issues.some(message=>message.includes("cuttingImportEvents")));
+        const blocked=await page.evaluate(async()=>{let transactions=0;const transaction=FB.db.runTransaction;FB.db.runTransaction=(...args)=>{transactions++;return transaction(...args);};return{result:await saveCloudNow(),transactions};});
+        assert.equal(blocked.result.saved,false);assert.match(blocked.result.error,/Cloud writes are currently blocked/);assert.equal(blocked.transactions,0);
+        assert.deepEqual(await page.evaluate(()=>readCurrentCloudStateReadOnly()),adopted.cloud);
+      }else assert.deepEqual(adopted.cloud.completedCuttingJobs,r.cloud.completedCuttingJobs);
+    },{rows:completedRows});
     const companyRows=[{...row,project_number:"0000",category:"Company Improvements"}];
     await scenario("proven 0000 plus unused legacy 1111 previews rename, diagnoses audit and preserves both IDs","none",async page=>{
       assert.doesNotMatch(await page.locator("#cuttingJobImportRows").textContent(),/Conflict \/ Review/);
