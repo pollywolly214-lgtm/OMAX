@@ -20194,6 +20194,75 @@ function drawCostChart(canvas, model, show){
 let cachedActiveWJCutsRoot = null;
 let isRenderingJobs = false;
 let rootStatusRefreshInFlight = null;
+const pendingCuttingJobAttachmentRemovals = new Set();
+
+async function removeCuttingJobAttachmentReference(jobId, { fileIndex, cloudFileId } = {}){
+  const id = String(jobId);
+  if (pendingCuttingJobAttachmentRemovals.has(id)){ toast("Attachment removal is still saving."); return false; }
+  const jobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])];
+  const matches = jobs.filter(job => String(job?.id) === id);
+  if (matches.length !== 1) return false;
+  const job = matches[0];
+  const cloud = typeof cloudFileId === "string" && cloudFileId.length > 0;
+  if (cloud){
+    const listed = cfr05CloudPresentation?.peek(id)?.files || [];
+    if (!listed.some(file => file.fileId === cloudFileId) || isCuttingJobCloudFileUnlinked(id, cloudFileId)) return false;
+    if (job.unlinkedCloudFileIds != null && !Array.isArray(job.unlinkedCloudFileIds)){
+      toast("Attachment unlink state needs review before removal."); return false;
+    }
+  } else if (!Array.isArray(job.files) || !Number.isInteger(fileIndex) || fileIndex < 0 || fileIndex >= job.files.length){
+    return false;
+  }
+  if (!window.confirm("Remove this file from this cutting job? The underlying file will not be deleted.")) return false;
+  if (!canWriteCloud("cutting-job attachment removal")){ toast("Removal was not saved: cloud writes are currently blocked."); return false; }
+  pendingCuttingJobAttachmentRemovals.add(id);
+  let undo;
+  if (cloud){
+    const hadField = Object.prototype.hasOwnProperty.call(job, "unlinkedCloudFileIds");
+    const before = job.unlinkedCloudFileIds;
+    const staged = [...(before || []), cloudFileId];
+    job.unlinkedCloudFileIds = staged;
+    undo = ()=>{
+      if (job.unlinkedCloudFileIds !== staged) return false;
+      if (hadField) job.unlinkedCloudFileIds = before;
+      else delete job.unlinkedCloudFileIds;
+      return true;
+    };
+  } else {
+    const files = job.files;
+    const removed = files.splice(fileIndex, 1)[0];
+    const staged = files.slice();
+    undo = ()=>{
+      if (job.files !== files || files.length !== staged.length || files.some((file, index)=>file !== staged[index])) return false;
+      files.splice(fileIndex, 0, removed);
+      return true;
+    };
+  }
+  try {
+    document.querySelectorAll("[data-cfr05-cloud-dialog], [data-cfr05-enlarged-preview]").forEach(dialog=>{
+      if (dialog.dataset.cfr05JobId === id){ dialog.close(); dialog.remove(); }
+    });
+    renderJobs();
+    const saved = await saveCloudNow();
+    if (saved?.saved === true && saved?.stateWriteCompleted === true){
+      toast("Attachment removed from job."); return saved;
+    }
+    // Roll back only a definite failure and only the still-owned local mutation.
+    const definite = saved && saved.indeterminate !== true && saved.stateWriteCompleted !== true
+      && (saved.stateWriteAttempted === false || saved.definiteFailure === true || saved.blocked === true);
+    const currentJobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])];
+    if (definite && currentJobs.includes(job) && undo()) toast("Removal was not saved. Attachment restored.");
+    else toast("Removal could not be confirmed. Reload and verify before retrying.");
+    return saved || false;
+  } catch (error){
+    console.error("Cutting-job attachment removal save could not be confirmed", error);
+    toast("Removal could not be confirmed. Reload and verify before retrying.");
+    return false;
+  } finally {
+    pendingCuttingJobAttachmentRemovals.delete(id);
+    renderJobs();
+  }
+}
 
 async function refreshCfr05CloudPresentation(jobId, options = {}){
   const id = String(jobId || "").trim();
@@ -20218,10 +20287,11 @@ function hydrateVisibleCfr05CloudFiles(content){
 
 async function hydrateCfr05DxfPreview(target){
   const identity={jobId:String(target?.dataset?.cfr05JobId||""),fileId:String(target?.dataset?.cfr05FileId||""),sha256:String(target?.dataset?.cfr05Sha256||"")};
+  if (isCuttingJobCloudFileUnlinked(identity.jobId, identity.fileId)) return null;
   if (!identity.jobId || !identity.fileId || !identity.sha256 || !cfr05CloudPreviewCache) return null;
   return cfr05CloudPreviewCache.load(identity,async value=>{
     let previewData="";
-    const outcome=await window.openCfr05CloudFile(value.jobId,value.fileId,{displayPreview:async preview=>{if(!/^data:image\/svg\+xml/i.test(preview))return false;previewData=preview;return true;}});
+    const outcome=await window.openCfr05CloudFile(value.jobId,value.fileId,{displayPreview:async preview=>{if(isCuttingJobCloudFileUnlinked(value.jobId,value.fileId)||!/^data:image\/svg\+xml/i.test(preview))return false;previewData=preview;return true;}});
     return {...outcome,previewData};
   });
 }
@@ -23095,11 +23165,13 @@ function renderJobs(){
     return result?.error?.message?safeCloudActionError(result.error.message):"secure file verification failed";
   };
   const downloadVerifiedCloudFile = async (button, jobId, fileId, host)=>{
+    if(isCuttingJobCloudFileUnlinked(jobId,fileId)){toast("This file is no longer attached to this job.");return null;}
     if(button.disabled||button.dataset.cfr05DownloadActive==="true")return null;
     const originalLabel=button.textContent;
     button.disabled=true;button.dataset.cfr05DownloadActive="true";button.textContent="Downloading…";
     try{
       const outcome=await window.openCfr05CloudFile(jobId,fileId,{openObjectUrl:async(url,metadata)=>{
+        if(isCuttingJobCloudFileUnlinked(jobId,fileId))return;
         const anchor=document.createElement("a");
         anchor.href=url;anchor.download=metadata.safeFileName;anchor.rel="noopener";
         document.body.appendChild(anchor);anchor.click();anchor.remove();
@@ -23118,12 +23190,14 @@ function renderJobs(){
     }
   };
   const openVerifiedCloudFile = async (jobId, fileId, dialog, host)=>{
+    if(isCuttingJobCloudFileUnlinked(jobId,fileId)){toast("This file is no longer attached to this job.");return null;}
     let status = dialog.querySelector("[data-cfr05-action-status]");
     if (!status){ status=document.createElement("p"); status.setAttribute("data-cfr05-action-status",""); status.setAttribute("role","status"); dialog.appendChild(status); }
     status.textContent = "Validating and downloading verified cloud file…";
     try {
       const outcome = await window.openCfr05CloudFile(jobId, fileId, {
         displayPreview:async preview=>{
+          if(isCuttingJobCloudFileUnlinked(jobId,fileId))return false;
           if (!/^data:image\/svg\+xml/i.test(preview)) return false;
           let image=dialog.querySelector("[data-cfr05-preview]");
           if(!image){ image=document.createElement("img"); image.setAttribute("data-cfr05-preview",""); image.alt="Verified DXF preview"; image.style.maxWidth="100%"; dialog.appendChild(image); }
@@ -23131,6 +23205,7 @@ function renderJobs(){
           return true;
         },
         openObjectUrl:async (url,metadata)=>{
+          if(isCuttingJobCloudFileUnlinked(jobId,fileId))return;
           const anchor=document.createElement("a");
           anchor.href=url; anchor.download=metadata.safeFileName; anchor.rel="noopener";
           document.body.appendChild(anchor); anchor.click(); anchor.remove();
@@ -23161,6 +23236,7 @@ function renderJobs(){
   };
   const showCloudFilesDialog = async (jobId, host, options={})=>{
     const dialog=document.createElement("dialog"); dialog.setAttribute("data-cfr05-cloud-dialog","");
+    dialog.dataset.cfr05JobId = String(jobId);
     dialog.innerHTML='<h3>Cloud files</h3><p data-cfr05-dialog-loading>Loading verified cloud files…</p><button type="button" data-cfr05-close>Close</button>';
     document.body.appendChild(dialog); dialog.showModal();
     dialog.addEventListener("click",async event=>{
@@ -23171,9 +23247,10 @@ function renderJobs(){
     try {
       const result=await refreshCfr05CloudPresentation(jobId,{force:options.force!==false});
       host.dataset.cfr05LastListingResult=JSON.stringify(result);
-      const rows=(result?.files||[]).map(file=>{const label=file.extension==="dxf"?"Preview/Open":"Download/Open";return `<li><strong>${escapeHtml(file.originalName)}</strong> · Secure cloud · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-action-open="${escapeHtml(file.fileId)}">${label}</button></li>`;}).join("");
+      const attachedFiles=filterAttachedCuttingJobCloudFiles(jobId,result?.files);
+      const rows=attachedFiles.map(file=>{const label=file.extension==="dxf"?"Preview/Open":"Download/Open";return `<li><strong>${escapeHtml(file.originalName)}</strong> · Secure cloud · ${escapeHtml(file.extension.toUpperCase())}/${escapeHtml(file.contentType)} · ${(Number(file.sizeBytes)/1024).toFixed(1)} KB · verified <button type="button" data-cfr05-action-open="${escapeHtml(file.fileId)}">${label}</button></li>`;}).join("");
       const listingError=result?.error?`<p role="alert">Cloud Files listing failed: ${escapeHtml(result.error.message||result.error.code||"Unknown error")}</p>`:(result?.blockers?.length?`<p role="alert">Cloud Files listing blocked: ${escapeHtml(result.blockers.join(", "))}</p>`:"");
-      dialog.querySelector("[data-cfr05-dialog-loading]").outerHTML=`${listingError}<p>${result?.cloudFileCount||0} verified; ${result?.rejectedMetadataDocumentCount||0} rejected.</p><ul>${rows||"<li>No verified cloud files.</li>"}</ul><p data-cfr05-action-status role="status"></p>`;
+      dialog.querySelector("[data-cfr05-dialog-loading]").outerHTML=`${listingError}<p>${attachedFiles.length} attached; ${result?.rejectedMetadataDocumentCount||0} rejected.</p><ul>${rows||"<li>No attached cloud files.</li>"}</ul><p data-cfr05-action-status role="status"></p>`;
       renderJobs();
     } catch(error){
       const failure={jobId,error:{code:String(error?.code||"listingFailure"),message:safeCloudActionError(error)}};
@@ -23185,6 +23262,11 @@ function renderJobs(){
 
   const handleCuttingJobFileActionClick = async (e)=>{
     const act = (matched)=>{ if (!matched) return false; e.preventDefault(); e.stopPropagation(); if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation(); return true; };
+    const unlinkCloudFile = e.target.closest("[data-unlink-cloud-file]");
+    if (unlinkCloudFile && act(true)){
+      await removeCuttingJobAttachmentReference(unlinkCloudFile.getAttribute("data-cfr05-job-id"), { cloudFileId:unlinkCloudFile.getAttribute("data-unlink-cloud-file") });
+      return true;
+    }
     const cloudFiles = e.target.closest("[data-cloud-files]");
     if(cloudFiles){
       e.preventDefault(); e.stopPropagation();
@@ -23200,8 +23282,10 @@ function renderJobs(){
       e.preventDefault(); e.stopPropagation();
       const jobId=String(presentedCloudFile.getAttribute("data-cfr05-job-id")||"");
       const fileId=String(presentedCloudFile.getAttribute("data-cfr05-presented-open")||"");
+      if(isCuttingJobCloudFileUnlinked(jobId,fileId))return true;
       const host=presentedCloudFile.closest("[data-job-edit-row], [data-job-row], [data-history-row]")||content;
       const dialog=document.createElement("dialog"); dialog.setAttribute("data-cfr05-cloud-dialog","");
+      dialog.dataset.cfr05JobId = jobId;
       dialog.innerHTML='<h3>Verified cloud file</h3><p data-cfr05-action-status role="status"></p><button type="button" data-cfr05-close>Close</button>';
       dialog.querySelector("[data-cfr05-close]").addEventListener("click",()=>{dialog.close();dialog.remove();});
       document.body.appendChild(dialog); dialog.showModal();
@@ -23241,10 +23325,11 @@ function renderJobs(){
     if(enlargePreview){
       e.preventDefault();e.stopPropagation();
       const identity={jobId:String(enlargePreview.dataset.cfr05JobId||""),fileId:String(enlargePreview.dataset.cfr05EnlargePreview||""),sha256:String(enlargePreview.dataset.cfr05Sha256||"")};
+      if(isCuttingJobCloudFileUnlinked(identity.jobId,identity.fileId))return true;
       const cached=cfr05CloudPreviewCache?.peek(identity);
       if(!cached?.previewData){toast("Preview is not available in this browser session.");return true;}
       const fileName=String(enlargePreview.dataset.cfr05FileName||"Verified DXF preview");
-      const dialog=document.createElement("dialog");dialog.className="cfr05-preview-dialog";dialog.setAttribute("data-cfr05-enlarged-preview","");dialog.innerHTML=`<div class="cfr05-preview-dialog-header"><strong>${escapeHtml(fileName)}</strong><div><button type="button" data-cfr05-download="${escapeHtml(identity.fileId)}" data-cfr05-job-id="${escapeHtml(identity.jobId)}">Download</button><button type="button" data-cfr05-preview-close>Close</button></div></div><div class="cfr05-preview-dialog-body"><img class="cfr05-preview-dialog-image" src="${escapeHtml(cached.previewData)}" alt="Enlarged preview of ${escapeHtml(fileName)}"></div>`;dialog.querySelector("[data-cfr05-download]").addEventListener("click",event=>downloadVerifiedCloudFile(event.currentTarget,identity.jobId,identity.fileId,dialog));dialog.querySelector("[data-cfr05-preview-close]").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();return true;
+      const dialog=document.createElement("dialog");dialog.dataset.cfr05JobId=identity.jobId;dialog.className="cfr05-preview-dialog";dialog.setAttribute("data-cfr05-enlarged-preview","");dialog.innerHTML=`<div class="cfr05-preview-dialog-header"><strong>${escapeHtml(fileName)}</strong><div><button type="button" data-cfr05-download="${escapeHtml(identity.fileId)}" data-cfr05-job-id="${escapeHtml(identity.jobId)}">Download</button><button type="button" data-cfr05-preview-close>Close</button></div></div><div class="cfr05-preview-dialog-body"><img class="cfr05-preview-dialog-image" src="${escapeHtml(cached.previewData)}" alt="Enlarged preview of ${escapeHtml(fileName)}"></div>`;dialog.querySelector("[data-cfr05-download]").addEventListener("click",event=>downloadVerifiedCloudFile(event.currentTarget,identity.jobId,identity.fileId,dialog));dialog.querySelector("[data-cfr05-preview-close]").addEventListener("click",()=>{dialog.close();dialog.remove();});document.body.appendChild(dialog);dialog.showModal();return true;
     }
     const fileMenuAdd = e.target.closest("[data-job-file-add]");
     if (fileMenuAdd){
@@ -23262,14 +23347,17 @@ function renderJobs(){
     const editFileLink = e.target.closest("[data-edit-file-link]");
     if (editFileLink && act(true)){ const idStr = String(editFileLink.getAttribute("data-edit-file-link") || ""); const idx = Number(editFileLink.getAttribute("data-file-index")); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; const file = j && Array.isArray(j.files) && idx >= 0 ? j.files[idx] : null; if (!file) return true; const url = promptOneDriveLinkForFile(file.name || "attachment", file.url || ""); if (url == null) return true; file.url = url; file.source = "onedrive"; saveCloudDebounced(); toast(url ? "File link updated" : "File link cleared"); renderJobs(); return true; }
     const removeFile = e.target.closest("[data-remove-file]");
-    if (removeFile && act(true)){ const idStr = String(removeFile.getAttribute("data-remove-file") || ""); const idx = Number(removeFile.getAttribute("data-file-index")); const found = findJobRecord(idStr); const j = found && found.job ? found.job : null; if (j && Array.isArray(j.files) && idx >= 0 && idx < j.files.length){ j.files.splice(idx, 1); saveCloudDebounced(); toast("File removed"); renderJobs(); } return true; }
+    if (removeFile && act(true)){
+      await removeCuttingJobAttachmentReference(removeFile.getAttribute("data-remove-file"), { fileIndex:Number(removeFile.getAttribute("data-file-index")) });
+      return true;
+    }
     return false;
   };
 
   const handleRootFileActionClick = (e)=>{
     const target = e.target;
     if (!(target instanceof Element)) return;
-    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload], [data-cfr05-presented-open], [data-cfr05-enlarge-preview], [data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
+    const fileAction = target.closest("[data-cloud-files], [data-cloud-file-upload], [data-cfr05-presented-open], [data-cfr05-enlarge-preview], [data-unlink-cloud-file], [data-job-file-add], [data-open-local-file], [data-preview-path-btn], [data-remove-file], [data-link-job-file], [data-edit-file-link], [data-upload-job]");
     if (!fileAction || !content.contains(fileAction)) return;
     handleCuttingJobFileActionClick(e).catch(err => {
       console.error("Cutting job file action failed", err);
