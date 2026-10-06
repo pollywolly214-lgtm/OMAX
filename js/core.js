@@ -5823,9 +5823,26 @@ function jobFolderChildren(parentId){
   });
 }
 
-function addJobFolder(name, parentId, color){
+function validateManualJobProjectCategory(cat, project, original = null){
+  const jobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])];
+  const result = window.CuttingJobHistory.validateManualProjectCategory(cat, project, window.jobFolders || [], jobs, original);
+  if (!result.ok) toast(result.reason);
+  return result;
+}
+
+function applyManualJobProjectCategory(job, result){
+  if (!result.ok) throw new Error("Project/category validation is required.");
+  if (!result.unchanged){ job.projectNumber = result.projectNumber; job.cat = result.cat; }
+}
+
+function addJobFolder(name, parentId, color, projectNumber){
+  let ownership = null;
+  if (projectNumber !== undefined){
+    ownership = window.CuttingJobHistory.validateNewProjectCategory(projectNumber, name, window.jobFolders || [], [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])]);
+    if (!ownership.ok) throw new Error(ownership.reason);
+  }
   const folders = ensureJobFolderState();
-  const label = (name || "").trim();
+  const label = ownership ? ownership.name : (name || "").trim();
   const parentKey = parentId != null ? String(parentId) : JOB_ROOT_FOLDER_ID;
   const fallbackParent = folders.some(folder => String(folder.id) === parentKey)
     ? parentKey
@@ -5842,10 +5859,11 @@ function addJobFolder(name, parentId, color){
     order: orderBase + 1
   };
   const normalizedColor = normalizeHexColor(color);
+  if (ownership) folder.projectNumber = ownership.projectNumber;
   if (normalizedColor) folder.color = normalizedColor;
   folders.push(folder);
   setJobFolders(folders);
-  ensureJobCategories();
+  if (!ownership) ensureJobCategories();
   return folder;
 }
 
