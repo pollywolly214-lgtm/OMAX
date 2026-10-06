@@ -18,8 +18,8 @@ CJO fields, or numbers on page load. Explicit saves number dated jobs in busines
 date order. Dateless jobs with valid stored C-numbers reserve those numbered
 slots, so dated jobs fill the other slots without inventing historical dates.
 Dateless jobs lacking a valid number retain their stored label and deterministic
-ID order at the end. Duplicate numbered dateless slots fail safely because their
-preservation would otherwise be ambiguous.
+ID order at the end. Existing duplicate labels on dateless records remain unchanged; they do not
+create a global review requirement for normal edits or completion.
 
 Within a date, existing cut-number order is retained, followed by applicable
 established sequence metadata and stable UTF-16 job ID. A complete, unique

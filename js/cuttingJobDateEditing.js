@@ -86,8 +86,7 @@
     if(validateCategory&&validateCategory(target,state)!==true)return fail("Project/category ownership changed. Choose a valid category.");
     if(normalizePriorities&&(operation.type!=="edit"||!wasCompleted))normalizePriorities(nextState.cuttingJobs,target.id);
     const beforeById=new Map(original.map(job=>[job.id,job]));
-    const ordered=orderedJobs(nextState.cuttingJobs,nextState.completedCuttingJobs),unknownRanks=new Set();
-    for(const entry of ordered.filter(entry=>!entry.date&&entry.rank)){if(unknownRanks.has(entry.rank))return fail("Dateless jobs share a stored cut number; correct the ambiguous records before saving.");unknownRanks.add(entry.rank);}
+    const ordered=orderedJobs(nextState.cuttingJobs,nextState.completedCuttingJobs);
     // Synchronize old internal fields only on the explicitly edited job. Never
     // populate legacy dates during reads or materialize dates for other jobs.
     const targetDay=businessDate(target,wasCompleted||operation.type==="complete");

@@ -124,3 +124,10 @@ test("CJO-04A exact guarded preparation cannot accept an altered numbering or un
   h.context.write=async(next,options,guards)=>{next.inventory=[];return originalWrite(next,options,guards);};
   const result=await save(h,operation);assert.equal(result.saved,false);assert.equal(h.counts.queues,0);assert.equal(h.counts.commits,0);assert.equal(h.live.inventory.length,1);
 });
+
+test("CJO-04A duplicate stored legacy labels without dates cannot block ordinary completion",async()=>{
+  const source=state(),active=source.completedCuttingJobs.pop();delete active.completedAtISO;source.cuttingJobs.push(active);
+  source.completedCuttingJobs.push({id:"old-a",cutNumber:"C099"},{id:"old-b",cutNumber:"C099"});const h=harness(source);
+  const result=await save(h,{type:"complete",id:"four",completedAtISO:"2026-10-05"});assert.equal(result.saved,true,result.error);
+  assert.deepEqual(byId(h.remote).get("old-a"),source.completedCuttingJobs.at(-2));assert.deepEqual(byId(h.remote).get("old-b"),source.completedCuttingJobs.at(-1));
+});
