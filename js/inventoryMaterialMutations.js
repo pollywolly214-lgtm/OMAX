@@ -55,7 +55,31 @@
       actual:protectedValue ? summary(difference.actual) : compactValue(difference.actual),
       ...(difference.missing ? {missing:difference.missing} : {})};
   }
+  const unverified = reason => ({reason, readbackAvailable:false, fullStateAvailable:false, materialsMatch:null,
+    committedMaterialsMatch:null, revisionValid:null, unrelatedBusinessStateMatch:null, metadataValid:null});
+  function readContractError(message, reason, readback){
+    const error = Error(message);
+    error.code = "authoritative_" + reason;
+    error.verification = {...unverified(reason), readbackAvailable:readback != null};
+    return error;
+  }
+  function authoritativeState(readback){
+    const state = readback?.state;
+    if (!state || typeof state !== "object" || Array.isArray(state)
+      || !Object.hasOwn(state, "inventoryMaterials") || !state.inventoryMaterials
+      || typeof state.inventoryMaterials !== "object" || Array.isArray(state.inventoryMaterials))
+      throw readContractError("Authoritative SERVER readback is incomplete: a full state with inventoryMaterials is required.", "incomplete_read_contract", readback);
+    if (readback.revision !== state.syncMeta?.rev){
+      const error = readContractError("Authoritative SERVER readback revision disagrees with its state snapshot.", "revision_mismatch", readback);
+      error.verification = {...error.verification, fullStateAvailable:true, revisionValid:false,
+        ...compactDifference({path:"readback.revision", expected:state.syncMeta?.rev, actual:readback.revision}, "readback envelope/state")};
+      throw error;
+    }
+    return state;
+  }
   function verifyReadback(source, intended, actual, writeResult, writerClientId){
+    // Never label a missing full-state response as a material-value mismatch.
+    authoritativeState({revision:actual?.syncMeta?.rev, state:actual});
     const acknowledged = writeResult?.saved === true && writeResult.stateWriteCompleted === true;
     const committed = writeResult?.committedState;
     const materialDifference = firstDifference(intended.inventoryMaterials, actual?.inventoryMaterials, "inventoryMaterials");
@@ -73,35 +97,36 @@
     const revisionValid = Number.isSafeInteger(actual?.syncMeta?.rev) && actual.syncMeta.rev > source.syncMeta.rev
       && (!acknowledged || (Number.isSafeInteger(committed?.syncMeta?.rev) && actual.syncMeta.rev === committed.syncMeta.rev));
     const metadataDifference = acknowledged ? firstDifference(committed?.syncMeta, actual?.syncMeta, "syncMeta") : null;
-    const verification = {readbackAvailable:!!actual, materialsMatch:!!actual && !materialDifference,
+    const verification = {readbackAvailable:true, fullStateAvailable:true, materialsMatch:!materialDifference,
       committedMaterialsMatch:acknowledged ? !!committed && !committedMaterialDifference : null,
       revisionValid, unrelatedBusinessStateMatch:!unrelatedDifference,
       metadataValid:!!metadataValid(actual?.syncMeta) && (!acknowledged || (!!metadataValid(committed?.syncMeta) && !metadataDifference))};
-    const fail = (message, difference, comparison, protectedValue) => {
+    const fail = (message, difference, comparison, protectedValue, reason) => {
       const error = Error(message);
-      error.verification = {...verification, ...compactDifference(difference, comparison, protectedValue)};
+      error.code = "verification_" + reason;
+      error.verification = {...verification, reason, ...compactDifference(difference, comparison, protectedValue)};
       throw error;
     };
     if (!verification.materialsMatch)
-      fail("Server readback material state differs from the intended post-mutation state.", materialDifference, "intended/serverReadback");
+      fail("Server readback material state differs from the intended post-mutation state.", materialDifference, "intended/serverReadback", false, "material_mismatch");
     if (unrelatedDifference)
-      fail("Server readback changed unrelated business data or metadata not written by the material save.", unrelatedDifference, "source/businessState", true);
+      fail("Server readback changed unrelated business data or metadata not written by the material save.", unrelatedDifference, "source/businessState", true, "unrelated_business_mismatch");
     if (!metadataValid(actual?.syncMeta)){
       const difference = !revisionValid ? {path:"syncMeta.rev", expected:acknowledged ? committed?.syncMeta?.rev : {greaterThan:source.syncMeta.rev}, actual:actual?.syncMeta?.rev}
         : firstDifference(retainedSync(source.syncMeta), retainedSync(actual?.syncMeta), "syncMeta")
           || {path:"syncMeta.updatedAtISO", expected:"canonical ISO timestamp and nonempty writer", actual:actual?.syncMeta?.updatedAtISO};
-      fail("Server readback has invalid revision/timestamp or changed retained sync metadata.", difference, "source/serverReadback metadata");
+      fail("Server readback has invalid revision/timestamp or changed retained sync metadata.", difference, "source/serverReadback metadata", false, !revisionValid ? "revision_mismatch" : "metadata_mismatch");
     }
     if (acknowledged){
       if (!committed || committedMaterialDifference || !metadataValid(committed.syncMeta))
-        fail("The acknowledged writer result does not match the intended material change and save contract.", committedMaterialDifference || {path:"syncMeta", expected:actual?.syncMeta, actual:committed?.syncMeta}, "intended/committedState");
+        fail("The acknowledged writer result does not match the intended material change and save contract.", committedMaterialDifference || {path:"syncMeta", expected:actual?.syncMeta, actual:committed?.syncMeta}, "intended/committedState", false, "writer_contract_mismatch");
       // The acknowledgement binds the actual writing client. Querying local
       // storage again can generate another ID when a previous setItem failed.
       for (const field of syncWriterFields){
-        if (actual.syncMeta[field] !== committed.syncMeta[field]) fail("Server save metadata differs from the acknowledged transaction.", metadataDifference, "committedState/serverReadback metadata");
+        if (actual.syncMeta[field] !== committed.syncMeta[field]) fail("Server save metadata differs from the acknowledged transaction.", metadataDifference, "committedState/serverReadback metadata", false, !revisionValid ? "revision_mismatch" : "metadata_mismatch");
       }
     } else if (actual.syncMeta.updatedBy !== writerClientId){
-      fail("The uncertain material write could not be attributed to its captured writing client.", {path:"syncMeta.updatedBy", expected:writerClientId, actual:actual.syncMeta.updatedBy}, "captured writer/serverReadback");
+      fail("The uncertain material write could not be attributed to its captured writing client.", {path:"syncMeta.updatedBy", expected:writerClientId, actual:actual.syncMeta.updatedBy}, "captured writer/serverReadback", false, "write_unattributed");
     }
     return true;
   }
@@ -211,6 +236,10 @@
     let busy = false;
     const undo = [];
     const reject = error => ({saved:false, verified:false, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error});
+    const readAuthoritative = async () => {
+      try { return await env.readAuthoritativeState(); }
+      catch (error){ throw readContractError("Authoritative SERVER readback failed: " + String(error?.message || error), "server_read_failed", null); }
+    };
     return Object.freeze({isBusy:() => busy, undoCount:() => undo.length, async run(request){
       if (busy) return reject("A material change is still being verified. Wait before editing again.");
       if (!env.canWrite()) return reject("Material Inventory is read-only or cloud writes are blocked.");
@@ -229,7 +258,7 @@
         if (!env.canWrite()) throw Error("Cloud writes became unavailable.");
         env.lock(true);
         const localVersion = key(env.localVersion()), localBefore = key(business(env.localState()));
-        const source = await env.readState(), revision = source?.syncMeta?.rev;
+        const baseline = await readAuthoritative(), source = authoritativeState(baseline), revision = baseline.revision;
         const unchanged = () => key(env.localVersion()) === localVersion && key(business(env.localState())) === localBefore;
         if (!Number.isSafeInteger(revision) || revision < 0 || revision !== env.loadedRevision() || !env.baselineMatches(source) || !unchanged())
           throw Error("The authoritative baseline changed. Reload and review before editing materials.");
@@ -245,7 +274,8 @@
         if (key(material) === key(source.inventoryMaterials)) return {saved:true, verified:true, noOp:true, stateWriteAttempted:false, stateWriteCompleted:false};
         const proofSource = clone(source), proofIntended = clone(next);
         evidence = {action:Object.fromEntries(["kind", "typeId", "rowIndex", "colIndex", "value"].filter(name => Object.hasOwn(action, name)).map(name => [name, compactValue(action[name])])),
-          expectedRevision:revision, verification:{readbackAvailable:false, materialsMatch:null, committedMaterialsMatch:null, revisionValid:null, unrelatedBusinessStateMatch:null, metadataValid:null}};
+          baselineRevision:revision, expectedRevision:revision, intendedMaterials:clone(material),
+          serverReadback:{revision:null, stateAvailable:false, materialsAvailable:false}, verification:unverified("awaiting_server_readback")};
         const validateSource = remote => unchanged() && key(remote) === key(source);
         const validatePrepared = pending => unchanged() && key(pending) === key(next);
         if (!env.canWrite() || !unchanged()) throw Error("Local state changed before the material save.");
@@ -257,12 +287,17 @@
         evidence.writeResult.committedRevision = writeResult?.committedState?.syncMeta?.rev ?? null;
         const acknowledged = writeResult?.saved === true && writeResult.stateWriteCompleted === true;
         const uncertain = !writeResult || writeResult.indeterminate === true || (!acknowledged && writeResult.stateWriteAttempted === true && writeResult.definiteFailure !== true);
-        if (!acknowledged && !uncertain) return {...reject(writeResult.error || "Material Inventory save was rejected."), ...writeResult, saved:false, verified:false};
+        if (!acknowledged && !uncertain){
+          evidence.verification = unverified("write_rejected");
+          return {...reject(writeResult.error || "Material Inventory save was rejected."), ...writeResult, saved:false, verified:false, evidence};
+        }
         // Also read after a lost acknowledgement. Never retry an uncertain write.
-        const actual = await env.readState(), actualRevision = actual?.syncMeta?.rev;
-        evidence.serverReadback = {revision:actualRevision ?? null};
+        const readback = await readAuthoritative();
+        evidence.serverReadback = {revision:compactValue(readback?.revision ?? null), stateAvailable:!!readback?.state,
+          materialsAvailable:!!readback?.state?.inventoryMaterials};
+        const actual = authoritativeState(readback), actualRevision = readback.revision;
         verifyReadback(proofSource, proofIntended, actual, writeResult, writerClientId);
-        evidence.verification = {readbackAvailable:true, materialsMatch:true, committedMaterialsMatch:acknowledged ? true : null,
+        evidence.verification = {reason:"confirmed", readbackAvailable:true, fullStateAvailable:true, materialsMatch:true, committedMaterialsMatch:acknowledged ? true : null,
           revisionValid:true, unrelatedBusinessStateMatch:true, metadataValid:true};
         if (!unchanged()) throw Error("The material change reached the server, but local edits changed during verification. Preserve them and reload/review.");
         if (await env.adoptVerifiedState(clone(actual), {uncertain, writeResult}) !== true) throw Error("Verified material state could not be safely adopted.");
@@ -273,7 +308,7 @@
         if (evidence && error.verification) evidence.verification = error.verification;
         const result = {...reject(String(error?.message || error)), stateWriteAttempted:attempted,
           stateWriteCompleted:writeResult?.stateWriteCompleted === true, indeterminate:attempted,
-          definiteFailure:!attempted, evidence};
+          definiteFailure:!attempted, errorCode:String(error?.code || "material_mutation_failed"), evidence};
         if (attempted) env.suspend(result);
         return result;
       } finally { env.lock(false); busy = false; }
@@ -284,5 +319,5 @@
     let settled = false;
     return {commit(){if (settled) return; settled = true; return commit();}, cancel(){if (settled) return; settled = true; return cancel();}};
   }
-  return Object.freeze({key, business, semanticMaterialEqual, parseThickness, validateModel, prepare, verifyReadback, createApi, createInlineSettlement});
+  return Object.freeze({key, business, semanticMaterialEqual, authoritativeState, parseThickness, validateModel, prepare, verifyReadback, createApi, createInlineSettlement});
 });

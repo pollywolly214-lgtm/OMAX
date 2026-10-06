@@ -5784,6 +5784,10 @@ function openLogHistoryModal(){
   const sorted = Array.isArray(totalHistory)
     ? totalHistory.filter(entry => entry && entry.dateISO).slice().sort((a, b)=> String(b.dateISO).localeCompare(String(a.dateISO)))
     : [];
+  const originalValues = sorted.map(entry => ({
+    dateISO: normalizeDateISO(entry.dateISO),
+    hours: Number(entry.hours)
+  })).sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
   if (sorted.length){
     sorted.forEach(entry => appendLogHistoryRow(tbody, entry));
   }
@@ -5824,6 +5828,13 @@ function openLogHistoryModal(){
       entries.push({ dateISO: dateVal, hours: hoursVal });
     }
     entries.sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+
+    const unchanged = entries.length === originalValues.length && entries.every((entry, index)=>
+      entry.dateISO === originalValues[index].dateISO && entry.hours === originalValues[index].hours);
+    if (unchanged){
+      closeLogHistoryModal();
+      return;
+    }
 
     const gap = findExcessiveLogGap(entries);
     if (!warnExcessiveLogGap(gap)) return;

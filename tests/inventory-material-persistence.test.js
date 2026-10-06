@@ -11,13 +11,13 @@ function harness(options={}){
   let cloud=identities.repairedState(fixture(),identities.preview(fixture()));
   cloud.inventoryMaterials=model();cloud.syncMeta={rev:7,updatedBy:"fixture-client"};cloud.inventoryTransactions=[{id:"transaction",qty:4}];
   if(options.blankAluminum){cloud.inventoryMaterials.activeType="aluminum";cloud.inventoryMaterials.sheets.aluminum.rows[0].values[0]="";}
-  if(options.secondAluminumCell){
+  if(options.secondAluminumCell || options.thirdAluminumCell){
     cloud.inventoryMaterials.activeType="aluminum";
     for(const sheet of Object.values(cloud.inventoryMaterials.sheets)){
       sheet.columns=["QTY 4x8","QTY 4x10","QTY 5x10","QTY 5x12"];
       sheet.rows.forEach(row=>{row.values.push("","");});
     }
-    cloud.inventoryMaterials.sheets.aluminum.rows[0].values=["10","","",""];
+    cloud.inventoryMaterials.sheets.aluminum.rows[0].values=["10",options.thirdAluminumCell ? "654" : "","",""];
   }
   if(options.baselineSyncMeta)cloud.syncMeta=clone(options.baselineSyncMeta);
   cloud.unknownFutureState={retain:[{id:"future-record",payload:"exact"}]};
@@ -48,6 +48,7 @@ function harness(options={}){
     isVercelPreviewRuntime:()=>Boolean(options.preview),toast(){}});
   const constants=["PROTECTED_STATE_FIELDS","REQUIRED_PROTECTED_DATA_PATHS","PROTECTED_FIELD_REGISTRY","DATA_SAFETY_PREFLIGHT_COUNT_DROP_RATIO","DATA_SAFETY_PREFLIGHT_MIN_BASELINE_COUNT","DATA_SAFETY_PREFLIGHT_TOTAL_DROP_RATIO","DATA_SAFETY_PREFLIGHT_SIZE_DROP_RATIO"];
   const functions=["cloneStructured","stateHasMeaningfulData","stableStringify","estimatePayloadBytes","countObjectKeys","countTaskNestedMapEntries","countTaskNestedArrayEntries","countJobManualLogs","getValueAtPath","getDataSafetyShape","countCollectionValue","countNestedProtectedValues","stableStringifyForIntegrity","hashIntegrityString","fingerprintProtectedValue","countProtectedField","validateProtectedFieldShape","getProtectedFieldRegistryCoverage","buildProtectedFieldIntegritySummary","buildDataIntegritySummary","hasAnyProtectedData","hasAnyProtectedFieldPresence","isDangerousShapeChange","chooseProtectedSaveBaseline","detectDangerousIntegrityReduction","validateProtectedSavePreflight","buildProtectedFieldSummary","compareProtectedFieldSummaries","detectDangerousProtectedFieldReduction","isRecoveryMode","canWriteCloud","blockCloudSave","scanAuthoritativeCutFileContent","reportCloudSaveSecondaryError","validateCuttingJobHistoryRestoreSave","validateCuttingJobDeletionSave","cuttingJobDeletionSafetyBaseline","writeAuthoritativeStateSnapshot","readCurrentCloudStateReadOnly","getInventoryIdentityRepairLocalState","buildWindowProtectedStateForCoverage","inspectInventoryIdentities","adoptAuthoritativeRecoveryState","adoptState","checkAuthoritativeIdentityIntegrity","adoptIdentityCheckedAuthoritativeState","loadFromCloud","cloudSaveNoWriteFailure","saveCloudDebounced","saveCloudNow"];
+  functions.push("readInventoryMaterialAuthoritativeState");
   vm.runInContext(bindings.map(name=>"let "+name+"=window."+name+";").join("\n")+"\nlet lastAppliedCloudRevision=7,lastLocalMutationAt=0,hasPendingLocalChanges=false,cloudSaveQueue=Promise.resolve();const inventoryIdentityRepairAuthorizations=new Map(),cuttingJobDeletionProofs=new WeakSet(),cuttingJobDeletionTransactions=new WeakSet(),cuttingJobHistoryRestoreProofs=new WeakSet(),cuttingJobHistoryRestoreTransactions=new WeakSet();\n"+constants.map(constant).join("\n")+"\n"+functions.map(name=>fn(core,name)).join("\n"),c);
   assert.equal(c.adoptIdentityCheckedAuthoritativeState(clone(cloud)).recovery,Boolean(options.preview));
   if(options.quotaClientId){
@@ -55,13 +56,15 @@ function harness(options={}){
     window.localStorage={getItem:()=>"",setItem:()=>{throw Error("QuotaExceededError");}};
     vm.runInContext(fn(core,"getCloudSyncClientId"),c);
   }
+  const realRead=c.readInventoryMaterialAuthoritativeState,readbacks=[];
+  c.readInventoryMaterialAuthoritativeState=async()=>{const readback=await realRead();readbacks.push(clone(readback));return options.readContract ? options.readContract(readback,readbacks.length) : readback;};
   vm.runInContext(core.slice(core.indexOf("let inventoryMaterialOwnedSuspension"),core.indexOf("const inventoryIdentityRepairApi=")),c);
   if(options.blockProtected)c.validateProtectedSavePreflight=()=>({blocked:true});
   if(options.recovery)window.__recoveryInspectMode=true;
   if(options.autosaveDisabled)window.__autosaveDisabled=true;
   if(options.pending)vm.runInContext("hasPendingLocalChanges=true",c);
   if(options.loadedRevision!==undefined)window.__loadedCloudRevisionForSaveGuard=options.loadedRevision;
-  return {api:window.inventoryMaterialMutationApi,window,c,events,get writeOptions(){return clone(writeOptions);},get cloud(){return clone(cloud);},get local(){return clone(c.getInventoryIdentityRepairLocalState());},get commits(){return commits;},get transactions(){return transactions;},get reads(){return reads;},get diagnostics(){return diagnostics;},editCloud:change=>change(cloud),reload:()=>c.loadFromCloud(),bump:()=>vm.runInContext("lastLocalMutationAt++",c)};
+  return {api:window.inventoryMaterialMutationApi,window,c,events,get readbacks(){return clone(readbacks);},get writeOptions(){return clone(writeOptions);},get cloud(){return clone(cloud);},get local(){return clone(c.getInventoryIdentityRepairLocalState());},get commits(){return commits;},get transactions(){return transactions;},get reads(){return reads;},get diagnostics(){return diagnostics;},editCloud:change=>change(cloud),reload:()=>c.loadFromCloud(),bump:()=>vm.runInContext("lastLocalMutationAt++",c)};
 }
 const action=(kind,other={})=>({kind,typeId:"steel",rowIndex:1,colIndex:0,...other});
 const unrelated=state=>Object.fromEntries(Object.entries(state).filter(([name])=>!["inventoryMaterials","syncMeta"].includes(name)));
@@ -273,6 +276,7 @@ for(const request of [action("add-row"),action("delete-row"),action("add-column"
   if(request.kind==="undo")assert.equal((await h.api.run({kind:"add-type",value:"Titanium"})).saved,true);
   const result=await h.api.run(request);assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(result.indeterminate,false);assert.equal(h.window.__recoveryInspectMode,false);
   assert.equal(materials.semanticMaterialEqual(h.local.inventoryMaterials,h.cloud.inventoryMaterials),true);
+  for(const readback of h.readbacks){assert.ok(readback.state.inventoryMaterials);assert.equal(readback.revision,readback.state.syncMeta.rev);}
   assert.equal((await h.reload()).recovery,false);
 });
 test("INV-01D committed writer material mismatch fails even when independent readback matches intent",async()=>{
@@ -287,4 +291,64 @@ test("INV-01D diagnostics stay bounded without exposing application snapshots or
   assert.equal(result.saved,false);assert.ok(serialized.length<2500);assert.doesNotMatch(serialized,/private business data|qtyNew|unknownFutureState|inventoryTransactions/);
   assert.deepEqual(result.evidence.verification.actual,{prefix:"x".repeat(256),length:100000,truncated:true});
   assert.equal(h.window.__lastInventoryMaterialMutationEvidence,result);
+});
+
+const thirdCellAction={kind:"cell",typeId:"aluminum",rowIndex:0,colIndex:2,value:"15"};
+test("INV-01E exact third Aluminum quantity -> 15 uses full SERVER state and survives reload without Recovery",async()=>{
+  const h=harness({thirdAluminumCell:true,baselineSyncMeta:{...browserBaselineMeta,rev:1791322619177}}),u=ui(h),writer=h.c.writeAuthoritativeStateSnapshot;
+  let intended,acknowledgement;
+  h.c.writeAuthoritativeStateSnapshot=async(...args)=>{intended=clone(args[0].inventoryMaterials);acknowledgement=await writer(...args);return acknowledgement;};
+  const input=u.edit("cell","",{typeId:"aluminum",rowIndex:0,colIndex:2});input.value="15";
+  input.listeners.keydown({key:"Enter",preventDefault(){}});input.listeners.blur();const result=await u.finish();
+  assert.deepEqual(h.readbacks[0].state.inventoryMaterials.sheets.aluminum.rows[0].values,["10","654","",""]);
+  assert.deepEqual(intended.sheets.aluminum.rows[0].values,["10","654","15",""]);
+  assert.equal(acknowledgement.saved,true);assert.equal(acknowledgement.stateWriteAttempted,true);assert.equal(acknowledgement.stateWriteCompleted,true);assert.equal(acknowledgement.indeterminate,false);
+  const server=h.readbacks[1];assert.deepEqual(Object.keys(server).sort(),["revision","state"]);assert.ok(server.revision>1791322619177);assert.equal(server.revision,acknowledgement.committedState.syncMeta.rev);
+  assert.deepEqual(server.state.inventoryMaterials.sheets.aluminum.rows[0].values,["10","654","15",""]);
+  assert.ok(server.state.inventory);assert.ok(server.state.unknownFutureState);assert.equal(materials.semanticMaterialEqual(intended,server.state.inventoryMaterials),true);
+  assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(result.indeterminate,false);assert.equal(h.window.__recoveryInspectMode,false);assert.equal(h.diagnostics,0);assert.equal(h.transactions,1);assert.equal(h.reads,2);assert.equal(u.calls.length,1);
+  assert.deepEqual(h.local.inventoryMaterials,server.state.inventoryMaterials);assert.equal((await h.reload()).recovery,false);assert.equal(h.local.inventoryMaterials.sheets.aluminum.rows[0].values[2],"15");assert.equal(h.transactions,1);
+});
+for(const [name,broken] of [
+  ["revision only",readback=>({revision:readback.revision})],
+  ["raw state without envelope",readback=>readback.state],
+  ["null state",readback=>({revision:readback.revision,state:null})],
+  ["state without materials",readback=>{delete readback.state.inventoryMaterials;return readback;}]
+])test("INV-01E "+name+" is an incomplete read, never a material mismatch",async()=>{
+  const h=harness({thirdAluminumCell:true,readContract:(readback,n)=>n===2?broken(readback):readback}),before=h.local,result=await h.api.run(thirdCellAction);
+  assert.equal(result.saved,false);assert.equal(result.verified,false);assert.equal(result.indeterminate,true);assert.equal(result.stateWriteCompleted,true);
+  assert.equal(result.errorCode,"authoritative_incomplete_read_contract");assert.match(result.error,/readback is incomplete/);assert.doesNotMatch(result.error,/material state differs/);
+  const v=result.evidence.verification;assert.equal(v.reason,"incomplete_read_contract");assert.equal(v.materialsMatch,null);assert.equal(v.fullStateAvailable,false);
+  assert.equal(h.commits,1);assert.equal(h.transactions,1);assert.equal(h.api.undoCount(),0);assert.deepEqual(h.local,before);assert.equal(h.window.__recoveryInspectMode,true);
+  assert.deepEqual(result.evidence.intendedMaterials.sheets.aluminum.rows[0].values,["10","654","15",""]);
+  assert.equal(result.evidence.baselineRevision,7);assert.ok(result.evidence.writeResult.committedRevision>7);
+});
+test("INV-01E baseline revision-only contract fails before attempting any write",async()=>{
+  const h=harness({thirdAluminumCell:true,readContract:readback=>({revision:readback.revision})}),result=await h.api.run(thirdCellAction);
+  assert.equal(result.errorCode,"authoritative_incomplete_read_contract");assert.equal(result.definiteFailure,true);assert.equal(result.indeterminate,false);assert.equal(h.transactions,0);assert.equal(h.reads,1);
+});
+test("INV-01E direct verifier rejects revision-only state before semantic comparison",()=>{
+  const state={inventoryMaterials:model(),syncMeta:{rev:7}};
+  assert.throws(()=>materials.verifyReadback(state,state,{revision:8},{saved:true,stateWriteCompleted:true},"fixture"),error=>error.code==="authoritative_incomplete_read_contract"&&error.verification.materialsMatch===null);
+});
+test("INV-01E envelope revision must belong to its full-state snapshot",async()=>{
+  const h=harness({thirdAluminumCell:true,readContract:(readback,n)=>n===2?{...readback,revision:readback.revision+1}:readback}),result=await h.api.run(thirdCellAction);
+  assert.equal(result.saved,false);assert.equal(result.indeterminate,true);assert.equal(result.errorCode,"authoritative_revision_mismatch");assert.equal(result.evidence.verification.revisionValid,false);assert.equal(result.evidence.verification.mismatchPath,"readback.revision");assert.equal(h.transactions,1);
+});
+for(const [name,options,code,reason] of [
+  ["old value",{readbackMutation:state=>{state.inventoryMaterials.sheets.aluminum.rows[0].values[2]="";}},"verification_material_mismatch","material_mismatch"],
+  ["wrong value",{readbackMutation:state=>{state.inventoryMaterials.sheets.aluminum.rows[0].values[2]="51";}},"verification_material_mismatch","material_mismatch"],
+  ["SERVER read error",{readFailure:true},"authoritative_server_read_failed","server_read_failed"],
+  ["invalid revision",{readbackMutation:state=>{state.syncMeta.rev=7;}},"verification_revision_mismatch","revision_mismatch"],
+  ["unrelated protected change",{readbackMutation:state=>{state.inventory[0].qtyNew++;}},"verification_unrelated_business_mismatch","unrelated_business_mismatch"],
+  ["permission denial",{reject:true},"permission-denied","write_rejected"],
+  ["stale CAS",{beforeTransaction:(_window,state)=>{state.syncMeta.rev++;}},"revision_conflict","write_rejected"],
+  ["indeterminate transaction without commit",{unknownWithoutCommit:true},"verification_material_mismatch","material_mismatch"]
+])test("INV-01E full-state confirmation rejects "+name+" without retry",async()=>{
+  const h=harness({thirdAluminumCell:true,...options}),before=h.local,result=await h.api.run(thirdCellAction);
+  assert.equal(result.saved,false);assert.equal(result.verified,false);assert.equal(result.errorCode,code);assert.equal(result.evidence.verification.reason,reason);assert.equal(h.transactions,1);assert.equal(h.api.undoCount(),0);assert.deepEqual(h.local,before);
+  if(name==="old value"||name==="wrong value"){assert.equal(result.evidence.verification.mismatchPath,"inventoryMaterials.sheets.aluminum.rows[0].values[2]");assert.equal(result.evidence.verification.expected,"15");}
+  if(name==="SERVER read error"){assert.equal(result.evidence.verification.materialsMatch,null);assert.equal(result.evidence.verification.readbackAvailable,false);assert.equal(result.indeterminate,true);}
+  if(name==="stale CAS"||name==="permission denial"){assert.equal(result.definiteFailure,true);assert.equal(result.indeterminate,false);assert.equal(h.commits,0);}
+  else {assert.equal(result.indeterminate,true);assert.equal(h.window.__recoveryInspectMode,true);}
 });
