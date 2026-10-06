@@ -3116,52 +3116,11 @@ function viewJobs(){
   }
   const addFormOpen = addFormOpenState;
   const completedJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs.slice() : [];
-  const completedSorted = completedJobs.slice();
+  const completedSorted = window.CuttingJobDateEditing?.historyJobs(completedJobs) || completedJobs.slice();
   const allJobsForCutNumbers = (Array.isArray(cuttingJobs) ? cuttingJobs : []).concat(completedJobs).filter(Boolean);
-  const addedOrderFromId = (job)=>{
-    const id = String(job?.id || "");
-    const token = id.includes("_") ? id.slice(id.lastIndexOf("_") + 1) : "";
-    const parsed = Number.parseInt(token, 36);
-    return Number.isFinite(parsed) ? parsed : Number.NaN;
-  };
-  const fallbackOrderTime = (job)=>{
-    const val = Date.parse(job?.startISO || job?.createdAt || job?.completedAtISO || "");
-    return Number.isFinite(val) ? val : Number.MAX_SAFE_INTEGER;
-  };
-  const cutOrder = allJobsForCutNumbers.slice().sort((a, b)=>{
-    const aAdded = addedOrderFromId(a);
-    const bAdded = addedOrderFromId(b);
-    if (Number.isFinite(aAdded) || Number.isFinite(bAdded)){
-      if (!Number.isFinite(aAdded)) return 1;
-      if (!Number.isFinite(bAdded)) return -1;
-      if (aAdded !== bAdded) return aAdded - bAdded;
-    }
-    const aTime = fallbackOrderTime(a);
-    const bTime = fallbackOrderTime(b);
-    if (aTime !== bTime) return aTime - bTime;
-    return String(a?.id || "").localeCompare(String(b?.id || ""));
-  });
-  const jobCategoryCutMap = new Map();
-  const categoryCounts = new Map();
-  cutOrder.forEach((job, idx)=>{
-    const key = String(job?.id || `${job?.name || "job"}_${idx}`);
-    const catKey = String(job?.cat || (window.JOB_ROOT_FOLDER_ID || "jobs_root"));
-    const nextCat = (categoryCounts.get(catKey) || 0) + 1;
-    categoryCounts.set(catKey, nextCat);
-    jobCategoryCutMap.set(key, String(nextCat));
-  });
+  const jobCategoryCutMap = window.CuttingJobDateEditing?.categoryNumbers(cuttingJobs,completedJobs) || new Map();
   const jobCutLabel = (job)=> window.CuttingJobChronology?.readCutLabel(job) ?? "—";
   const jobCategoryCutLabel = (job)=> jobCategoryCutMap.get(String(job?.id || "")) || "0";
-  const cutNumberValue = (job)=> {
-    const label = jobCutLabel(job);
-    const numeric = Number.parseInt(String(label).replace(/[^\d]/g, ""), 10);
-    return Number.isFinite(numeric) ? numeric : 0;
-  };
-  completedSorted.sort((a, b) => {
-    const diff = cutNumberValue(b) - cutNumberValue(a);
-    if (diff !== 0) return diff;
-    return String(b?.completedAtISO || b?.dueISO || b?.startISO || "").localeCompare(String(a?.completedAtISO || a?.dueISO || a?.startISO || ""));
-  });
   const jobNameWithCut = (job, fallback = "Job")=> `${String(job?.name || fallback)} · ${jobCutLabel(job)} · ${jobCategoryCutLabel(job)}`;
   const historySearchRaw = typeof jobHistorySearchTerm === "string"
     ? jobHistorySearchTerm
@@ -4020,7 +3979,6 @@ function viewJobs(){
               <div class="job-actions-menu" id="${esc(actionMenuId)}" data-history-actions-menu="${job.id}" hidden>
                 <button type="button" data-history-activate="${job.id}">Make active copy</button>
                 <button type="button" data-history-edit="${job.id}">Edit</button>
-                <button type="button" data-edit-cut-chronology="${esc(job.id)}">Edit Cut Date / Order</button>
                 <button type="button" class="danger" data-history-delete="${job.id}">Delete</button>
               </div>
             </div>
@@ -4029,7 +3987,6 @@ function viewJobs(){
       `;
     }
 
-    const completedVal = formatDateTimeLocal(job?.completedAtISO);
     const actualVal = numberInputValue(actualHours);
     const estimateVal = numberInputValue(estHours);
     const materialCostVal = numberInputValue(job?.materialCost);
@@ -4044,7 +4001,8 @@ function viewJobs(){
             <div class="job-edit-layout">
               <div class="job-edit-grid">
                 <label>Job name<input type="text" data-history-field="name" data-history-id="${job.id}" value="${esc(job?.name || "")}"></label>
-                <label>Completed at<input type="datetime-local" data-history-field="completedAtISO" data-history-id="${job.id}" value="${completedVal}"></label>
+                <label>Start Date<input type="date" data-history-field="startISO" data-history-id="${job.id}" value="${esc(job?.startISO || "")}"></label>
+                <label>Completion Date<input type="date" data-history-field="completedAtISO" data-history-id="${job.id}" value="${esc(String(job?.completedAtISO || "").slice(0,10))}"></label>
                 <label>Estimate (hrs)<input type="number" min="0" step="0.1" data-history-field="estimateHours" data-history-id="${job.id}" value="${estimateVal}"></label>
                 <label>Actual (hrs)<input type="number" min="0" step="0.1" data-history-field="actualHours" data-history-id="${job.id}" value="${actualVal}"></label>
                 <label>Priority<select data-history-field="priority" data-history-id="${job.id}">${priorityOptionsMarkup(priorityValue)}</select></label>
@@ -4446,7 +4404,6 @@ function viewJobs(){
               <div class="job-actions-menu" id="${esc(actionMenuId)}" data-job-actions-menu="${j.id}" hidden>
                 <button type="button" data-log-job="${j.id}">Log time</button>
                 <button type="button" data-edit-job="${j.id}">Edit</button>
-                <button type="button" data-edit-cut-chronology="${esc(j.id)}">Edit Cut Date / Order</button>
                 <button type="button" data-complete-job="${j.id}">Mark complete</button>
                 <button type="button" class="danger" data-remove-job="${j.id}">Remove</button>
               </div>
@@ -4471,7 +4428,8 @@ function viewJobs(){
                 <label>Material quantity<input type="number" min="0" step="0.01" data-j="materialQty" data-id="${j.id}" value="${matQty}"></label>
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
                 <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-j="costRate" data-id="${j.id}" value="${Number.isFinite(costRate) ? costRate : 45}"></label>
-                <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
+                <label>Start Date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
+                <label>Completion Date<input type="date" value="" disabled aria-label="Completion Date (set when marked complete)"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
                 <label>Project #<input type="text" data-j="projectNumber" data-id="${j.id}" readonly value="${esc(String(j.projectNumber ?? ""))}"><span class="small muted" data-project-category-status aria-live="polite"></span></label>
                 <label>Priority<select data-j="priority" data-id="${j.id}">${priorityOptionsMarkup(priorityValue)}</select></label>

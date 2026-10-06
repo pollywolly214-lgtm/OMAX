@@ -1,5 +1,6 @@
 "use strict";
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),vm=require("node:vm");
+const dates=require("../js/cuttingJobDateEditing");
 const chronology=require("../js/cuttingJobChronology"),history=require("../js/cuttingJobHistory");
 const read=file=>fs.readFileSync("js/"+file,"utf8").replace(/\r\n/g,"\n"),views=read("views.js"),renderers=read("renderers.js");
 function slice(source,start,end){const a=source.indexOf(start),b=source.indexOf(end,a+start.length);assert.ok(a>=0&&b>a,start);return source.slice(a,b);}
@@ -13,14 +14,14 @@ function readers(state){
   const before=JSON.stringify(state),effects=[],stop=name=>()=>{effects.push(name);throw Error("Rendering invoked "+name);};
   const folders=[{id:"jobs_root",name:"All Jobs"},{id:"project",name:"0000 Company Improvements",parent:"jobs_root"}];
   freeze(state);freeze(folders);
-  const c=vm.createContext({window:{...state,jobFolders:folders,JOB_ROOT_FOLDER_ID:"jobs_root",CuttingJobChronology:{...chronology,createMutationApi:stop("coordinator"),planRenumbering:stop("renumber")},CuttingJobHistory:{...history,resequence:stop("resequence")}},cuttingJobs:state.cuttingJobs,completedCuttingJobs:state.completedCuttingJobs,completedJobs:state.completedCuttingJobs,
-    completedSorted:state.completedCuttingJobs.slice(),JOB_RATE_PER_HOUR:200,JOB_BASE_COST_PER_HOUR:45,saveCloudNow:stop("save"),saveCloudDebounced:stop("debounce"),persistJobChanges:stop("persist"),
+  const c=vm.createContext({window:{...state,CuttingJobDateEditing:dates,jobFolders:folders,JOB_ROOT_FOLDER_ID:"jobs_root",CuttingJobChronology:{...chronology,createMutationApi:stop("coordinator"),planRenumbering:stop("renumber")},CuttingJobHistory:{...history,resequence:stop("resequence")}},cuttingJobs:state.cuttingJobs,completedCuttingJobs:state.completedCuttingJobs,completedJobs:state.completedCuttingJobs,
+    completedSorted:dates.historyJobs(state.completedCuttingJobs),JOB_RATE_PER_HOUR:200,JOB_BASE_COST_PER_HOUR:45,saveCloudNow:stop("save"),saveCloudDebounced:stop("debounce"),persistJobChanges:stop("persist"),
     formatterCurrency:value=>"$"+value,resolveCategoryName:()=>"Company Improvements",computeJobEfficiency:()=>null,resolveCuttingJobNetTotal:()=>({hours:2,chargeRate:200,cutCostRate:45,materialCost:10}),
     maintenanceRows:[{taskId:"maint",taskName:"Maintenance"}],normalizeProjectNumber:value=>String(value||""),categoryProjectNumber:()=>"0000",escapeHtml:String,categoryStyleAttr:()=>"",readFlowCollapsedCategories:()=>new Set(),previewCardMarkup:()=>"",
     flowChart:{innerHTML:"",classList:{toggle(){}}},flowFilterInput:{value:""},flowGroupingSelect:{value:"job"},flowHidePreviews:{checked:true}
   });
   vm.runInContext(slice(views,"  const allJobsForCutNumbers =","  const historySearchRaw =")+";this.jobLabel=jobCutLabel;this.jobTitle=jobNameWithCut;this.historyIds=completedSorted.map(job=>job.id);this.categoryLabel=jobCategoryCutLabel;",c);
-  vm.runInContext(slice(renderers,"  const completedJobsInCounterOrder =","  const efficiencyRows =")+";this.dataRows=cuttingJobsDataTable;",c);
+  vm.runInContext(slice(renderers,"  const completedJobsForDataCenter =","  const efficiencyRows =")+";this.dataRows=cuttingJobsDataTable;",c);
   c.cuttingRows=c.dataRows.map(row=>({...row,cutNumber:"C999",cutLabel:"C888",jobCut:"C777"}));
   vm.runInContext(slice(renderers,"  const allCutJobsForLabels =","  const renderDashboardSuggestions =")+";this.searchItems=getDashboardSearchItems();",c);
   const flowLine=renderers.split("\n").find(line=>line.startsWith("  const renderFlowChart ="));assert.ok(flowLine);
@@ -43,15 +44,15 @@ test("reordering active/completed arrays never changes visible stored labels",()
     assert.ok(right.c.flowChart.innerHTML.includes(job.name+" · "+(job.cutNumber||"—")+" · "));
   }
 });
-test("Data Center reverse-row order, category counts and financial calculations are preserved",()=>{
-  const h=readers(fixture());assert.deepEqual(Array.from(h.c.dataRows,row=>row.id),["missing_c","reviewed_b","imported_a"]);
-  assert.deepEqual(Array.from(h.c.dataRows,row=>row.categoryCutNumberLabel),["#3","#2","#1"]);
+test("Data Center uses Completion Date and shared category sequence while financial calculations remain unchanged",()=>{
+  const h=readers(fixture());assert.deepEqual(Array.from(h.c.dataRows,row=>row.id),["imported_a","reviewed_b","missing_c"]);
+  assert.deepEqual(Array.from(h.c.dataRows,row=>row.categoryCutNumberLabel),["#3","#2","#4"]);
   for(const row of h.c.dataRows){assert.equal(row.hoursValue,2);assert.equal(row.laborCostValue,90);assert.equal(row.totalCostValue,100);assert.equal(row.totalProfitValue,300);}
-  assert.equal(h.c.categoryLabel(h.c.window.cuttingJobs[0]),"4");assert.equal(h.c.jobTitle(h.c.window.cuttingJobs[0]),"Active · C041 · 4");
+  assert.equal(h.c.categoryLabel(h.c.window.cuttingJobs[0]),1);assert.equal(h.c.jobTitle(h.c.window.cuttingJobs[0]),"Active · C041 · 1");
   assert.equal(h.c.window.cuttingJobs[0].priority,3);
 });
-test("history still sorts by stored number while flow grouping remains alphabetical",()=>{
-  const h=readers(fixture());assert.deepEqual(Array.from(h.c.historyIds),["reviewed_b","imported_a","missing_c"]);
+test("history sorts by Completion Date while flow grouping remains alphabetical",()=>{
+  const h=readers(fixture());assert.deepEqual(Array.from(h.c.historyIds),["imported_a","reviewed_b","missing_c"]);
   const markup=h.c.flowChart.innerHTML;assert.ok(markup.indexOf("Job Active")<markup.indexOf("Job Imported"));assert.ok(markup.indexOf("Job Imported")<markup.indexOf("Job Reviewed"));
 });
 test("all production readers preserve canonical labels in a ready domain",()=>{

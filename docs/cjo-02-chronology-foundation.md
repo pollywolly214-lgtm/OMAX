@@ -1,3 +1,4 @@
+<!-- Normal operator policy superseded by CJO-04A; see cjo-04a-date-editing.md. Historical internal-model contracts follow. -->
 # CJO-02: chronological ordering foundation
 
 The foundation adds a model and guarded persistence adapter. CJO-03 unifies

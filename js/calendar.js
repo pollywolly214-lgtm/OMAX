@@ -2368,11 +2368,9 @@ function showJobBubble(jobId, anchor){
         <button type="button" data-bbl-edit-job="${j.id}">Edit</button>
         <button type="button" class="danger" data-bbl-remove-job="${j.id}">Remove</button>
       </div>`;
-    b.querySelector("[data-bbl-complete-job]")?.addEventListener("click", ()=>{
-      const completed = typeof completeCuttingJob === "function" ? completeCuttingJob(j.id) : null;
-      if (completed?.blocked){ toast(completed.error); return completed; }
-      if (!completed){ toast("Unable to mark job complete"); return; }
-      saveCloudDebounced();
+    b.querySelector("[data-bbl-complete-job]")?.addEventListener("click", async ()=>{
+      const completed = typeof completeCuttingJob === "function" ? await completeCuttingJob(j.id) : null;
+      if (!completed?.saved || !completed.verified || completed.requiresReload){ toast(completed?.error || "Unable to save job completion"); return completed; }
       toast("Job marked complete");
       hideBubble();
       rerenderCalendarKeepScroll();

@@ -144,7 +144,7 @@
   // stages changes into live arrays. Success requires exact server read-back.
   function createMutationApi(env){
     let busy = false;
-    async function save(changes, {expectedRevision, expectedSourceKey, expectedPreparedKey, audit} = {}){
+    async function save(changes, {expectedRevision, expectedSourceKey, expectedPreparedKey, audit, businessOperation} = {}){
       const result = {saved:false, verified:false, stateWriteAttempted:false, stateWriteCompleted:false, indeterminate:false, error:""};
       if (busy) return {...result, blocked:true, error:"A chronology mutation is already in progress."};
       if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || !env.canWrite()) return {...result, blocked:true, error:"Current authoritative revision and write permission are required."};
@@ -161,12 +161,16 @@
         localVersion = stateKey(env.localVersion());
         // Freeze the caller's request before any asynchronous baseline read.
         const requestedChanges = clone(changes);
+        const requestedOperation = businessOperation ? clone(businessOperation) : null;
         const requestedAudit = audit ? clone(audit) : env.audit ? clone(env.audit()) : undefined;
         const source = await env.readState();
         if (!current() || !source || source.syncMeta?.rev !== expectedRevision || !env.baselineMatches(source)) return {...result, blocked:true, error:"Authoritative or local baseline changed; review again."};
         if (expectedSourceKey !== undefined && stateKey(source) !== expectedSourceKey) return {...result, blocked:true, error:"Data changed after preview; reload and review again."};
-        const prepared = prepareChronologyMutation(source, requestedChanges, {audit:requestedAudit});
-        if (!prepared.ok) return {...result, blocked:true, issues:prepared.issues, error:"Every included job needs verified cut date/order and unique stable identity."};
+        if(requestedOperation && !env.prepareBusinessMutation)return {...result,blocked:true,error:"Business-date saving is unavailable."};
+        const prepared = requestedOperation && env.prepareBusinessMutation
+          ? env.prepareBusinessMutation(source, requestedOperation, {audit:requestedAudit})
+          : prepareChronologyMutation(source, requestedChanges, {audit:requestedAudit});
+        if (!prepared.ok) return {...result, blocked:true, issues:prepared.issues, error:prepared.error || "Every included job needs verified cut date/order and unique stable identity."};
         if (expectedPreparedKey !== undefined && businessKey(prepared.nextState) !== expectedPreparedKey) return {...result, blocked:true, error:"Chronology preview changed; review again."};
         result.renumbering = prepared.renumbering;
         result.chronologyChanges = prepared.chronologyChanges;
@@ -177,7 +181,7 @@
         const validatePreparedState = pending => current() && businessKey(pending) === expected;
         if (!current()) return {...result, blocked:true, error:"Local state changed before saving."};
         writeInvoked = true;
-        const saved = await env.writeState(prepared.nextState, expectedRevision, validatePreparedState);
+        const saved = await env.writeState(prepared.nextState, expectedRevision, validatePreparedState, requestedOperation);
         result.stateWriteAttempted = saved?.stateWriteAttempted === true;
         result.stateWriteCompleted = saved?.stateWriteCompleted === true;
         if (saved?.saved !== true || !result.stateWriteCompleted){

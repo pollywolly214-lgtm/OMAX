@@ -200,12 +200,12 @@ test("even suspension UI failure cannot turn an unknown write into confirmation"
   const h=harness({writeError:Error("lost"),suspendError:true}),result=await h.api.save(correction,{expectedRevision:7});
   assert.equal(result.saved,false);assert.equal(result.requiresReload,true);assert.match(result.suspensionError,/suspend UI failed/);
 });
-test("production adapter is loaded but never called by UI or hydration",()=>{
+test("production adapter is used by explicit business operations, never by hydration",()=>{
   const index=fs.readFileSync("index.html","utf8");
   assert.ok(index.indexOf('src="js/cuttingJobChronology.js"')<index.indexOf('src="js/cuttingJobHistory.js"'));
   assert.match(core,/const cuttingJobChronologyMutationApi = window\.CuttingJobChronology\?\.createMutationApi/);
-  assert.match(core,/writeState:\(next,expectedRevision,validatePreparedState\)=>writeAuthoritativeStateSnapshot/);
-  assert.equal(core.includes("cuttingJobChronologyMutationApi.save("),false);
+  assert.match(core,/writeState:\(next,expectedRevision,validatePreparedState,operation\)=>writeAuthoritativeStateSnapshot/);
+  assert.match(core,/cuttingJobChronologyMutationApi\.save\(\[\], \{expectedRevision:window\.__loadedCloudRevisionForSaveGuard,businessOperation:operation\}\)/);
   assert.equal(fs.readFileSync("js/renderers.js","utf8").includes("cuttingJobChronologyMutationApi"),false);
 });
 test("caller corrections are frozen before awaiting the authoritative baseline",async()=>{

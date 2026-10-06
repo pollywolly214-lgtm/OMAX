@@ -36,10 +36,10 @@ for(const mixed of [false,true]){
     assert.equal(proposal.ok,false);assert.equal(audit.repairPlan,null);assert.match(audit.blockingError,/chronology|Chronology/);
     assert.equal(result.blocked,true);assert.equal(result.saveAttempted,false);assert.equal(result.saveCompleted,false);assert.deepEqual(effects,[]);assert.deepEqual({state,categories},before);
   });
-  test(label+" actual completion function leaves lifecycle, priorities and logs untouched",()=>{
+  test(label+" completion without the guarded date adapter leaves lifecycle, priorities and logs untouched",async()=>{
     const state=domain(mixed),before=clone(state),h=context(state);
     vm.runInContext(slice(core,"function normalizeJobPriorityOrder(","function refreshGlobalCollections("),h.c);
-    const result=h.c.completeCuttingJob("active",{normalizePriorities:()=>h.effects.push("normalize")});
+    const result=await h.c.completeCuttingJob("active",{normalizePriorities:()=>h.effects.push("normalize")});
     assert.equal(result.blocked,true);assert.deepEqual(state,before);assert.equal(h.c.window.syncProcessLog,undefined);assert.deepEqual(h.effects,[]);
   });
   for(const type of ["job","completed-job"])test(label+" actual "+type+" restore retains trash and never saves",()=>{
@@ -58,7 +58,7 @@ for(const mixed of [false,true]){
     const pending=JSON.stringify([h.c.pendingNewJobFiles,h.c.pendingSecureCloudJobFiles]),result=await handler({preventDefault(){}});
     assert.equal(result.blocked,true);assert.deepEqual(state,before);assert.deepEqual(h.effects,[]);
     assert.equal(JSON.stringify([h.c.pendingNewJobFiles,h.c.pendingSecureCloudJobFiles]),pending);
-    assert.equal(h.toastMessages.length,1);assert.match(h.toastMessages[0],/chronology|Chronology/);
+    assert.equal(h.toastMessages.length,1);assert.match(h.toastMessages[0],/saving is unavailable/);
   });
   test(label+" actual Make active copy branch returns a blocker before opening the date modal",async()=>{
     const state=domain(mixed),before=clone(state),h=context(state,{histActivate:{getAttribute:()=>state.completedCuttingJobs[0].id},closeHistoryActionMenu(){},closeFileMenu(){},showMakeActiveCopyModal:()=>{h.effects.push("modal");throw Error("Unexpected modal");}});
@@ -78,7 +78,7 @@ for(const [name,source,start,end,extra] of [
   const state=domain(true),h=context(state,{...extra,completeCuttingJob:()=>({blocked:true,error:"Chronology review required"})});let handler;
   if(name==="Calendar"){h.c.j={id:"active"};h.c.b={querySelector:()=>({addEventListener(event,fn){handler=fn;}})};}
   const body=slice(source,start,end);
-  if(name==="Jobs"){vm.runInContext("this.run=function(){"+body+"}",h.c);handler=h.c.run;}else vm.runInContext(body,h.c);
+  if(name==="Jobs"){vm.runInContext("this.run=async function(){"+body+"}",h.c);handler=h.c.run;}else vm.runInContext(body,h.c);
   const result=await handler();assert.equal(result.blocked,true);assert.deepEqual(h.effects,[]);assert.deepEqual(h.toastMessages,["Chronology review required"]);
 });
 test("actual repair UI disables a blocked audit and reports a late blocker without success",async()=>{
