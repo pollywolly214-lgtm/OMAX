@@ -5939,14 +5939,7 @@ function renderDashboard(){
   const maintenanceRows = Array.isArray(centralModel?.maintenanceDataTable) ? centralModel.maintenanceDataTable : [];
   const cuttingRows = Array.isArray(centralModel?.cuttingJobsDataTable) ? centralModel.cuttingJobsDataTable : [];
   const allCutJobsForLabels = ([]).concat(Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [], Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []).filter(Boolean);
-  const cutNumberMap = (()=>{
-    const addedOrderFromId = (job)=>{ const id = String(job?.id || ""); const token = id.includes("_") ? id.slice(id.lastIndexOf("_") + 1) : ""; const parsed = Number.parseInt(token, 36); return Number.isFinite(parsed) ? parsed : Number.NaN; };
-    const fallbackOrderTime = (job)=>{ const val = Date.parse(job?.startISO || job?.createdAt || job?.completedAtISO || ""); return Number.isFinite(val) ? val : Number.MAX_SAFE_INTEGER; };
-    const ordered = allCutJobsForLabels.slice().sort((a,b)=>{ const aa=addedOrderFromId(a), bb=addedOrderFromId(b); if (Number.isFinite(aa)||Number.isFinite(bb)){ if (!Number.isFinite(aa)) return 1; if (!Number.isFinite(bb)) return -1; if (aa!==bb) return aa-bb; } const at=fallbackOrderTime(a), bt=fallbackOrderTime(b); if (at!==bt) return at-bt; return String(a?.id||"").localeCompare(String(b?.id||"")); });
-    const map = new Map();
-    ordered.forEach((job, idx)=> map.set(String(job?.id || ""), `C${String(idx + 1).padStart(3, "0")}`));
-    return map;
-  })();
+  const cutJobsById = new Map(allCutJobsForLabels.map(job=>[String(job?.id || ""), job]));
   const maintenanceByTask = new Map();
   maintenanceRows.forEach(row=>{
     const taskId = String(row?.taskId || "").trim();
@@ -5960,7 +5953,7 @@ function renderDashboard(){
     const jobId = String(row?.id || "").trim();
     const name = String(row?.name || "").trim();
     if (!jobId || !name) return;
-    const cutNumber = String(row?.cutNumber || row?.cutLabel || row?.jobCut || cutNumberMap.get(jobId) || "").trim();
+    const cutNumber = window.CuttingJobChronology?.readCutLabel(cutJobsById.get(jobId) || row) ?? "—";
     if (!cuttingByJob.has(jobId)) cuttingByJob.set(jobId, { id: jobId, name, cutNumber, row });
   });
   const getDashboardSearchItems = ()=>{
@@ -7905,8 +7898,10 @@ function renderDashboard(){
   jobEstimateMinutesInput?.addEventListener("blur", applyDashMinutesToHours);
   refreshDashEstimateBreakdown();
 
-  jobForm?.addEventListener("submit", (e)=>{
+  jobForm?.addEventListener("submit", async (e)=>{
     e.preventDefault();
+    if(typeof createCuttingJob!=="function"){toast("Cutting-job saving is unavailable.");return {blocked:true};}
+
     const name = (jobNameInput?.value || "").trim();
     applyDashMinutesToHours();
     const est  = Number(jobEstimateInput?.value);
@@ -7943,9 +7938,9 @@ function renderDashboard(){
     const pair = validateManualJobProjectCategory(categoryId, jobProjectInput?.value);
     if (!pair.ok) return;
     const newJob = { id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, projectNumber:pair.projectNumber, material, materialCost, materialQty, chargeRate, costRate, priority: 1, notes:"", manualLogs:[], cat: pair.cat };
-    cuttingJobs.push(newJob);
-    window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
-    reorderPriorities(newJob.id, newJob.priority);
+    const created=await createCuttingJob(newJob);
+    if(!created.saved||!created.verified||created.requiresReload){toast(created.error||"Job was not saved.");return created;}
+    cuttingJobs=window.cuttingJobs;completedCuttingJobs=window.completedCuttingJobs;
     if (jobCategoryInput){
       jobCategoryInput.value = dashRootCategoryId;
       jobCategoryInput.dataset.prevValue = dashRootCategoryId;
@@ -7953,7 +7948,7 @@ function renderDashboard(){
     updateDashJobCategoryHint();
     syncManualJobProjectControl(jobCategoryInput, jobProjectInput);
     window.jobCategoryFilter = previousCategoryFilter;
-    saveCloudDebounced();
+
     renderCalendarPreservingScroll();
     toast("Cutting job added");
     closeModal();
@@ -18956,25 +18951,8 @@ function computeCostModel(){
     emptyMessage: orderRows.length ? "" : "Approve or deny order requests to build the spend log."
   };
 
-  const completedJobsInCounterOrder = Array.isArray(completedCuttingJobs) ? completedCuttingJobs.slice() : [];
-  const completedJobCounterById = new Map();
-  completedJobsInCounterOrder.forEach((job, index) => {
-    const key = job?.id != null ? String(job.id) : `completed_job_${index}`;
-    completedJobCounterById.set(key, index + 1);
-  });
-  const completedJobsForDataCenter = completedJobsInCounterOrder
-    .sort((a, b) => {
-      const aKey = a?.id != null ? String(a.id) : "";
-      const bKey = b?.id != null ? String(b.id) : "";
-      const aCounter = completedJobCounterById.get(aKey) || 0;
-      const bCounter = completedJobCounterById.get(bKey) || 0;
-      return bCounter - aCounter;
-    });
-  const cuttingCategoryRemaining = new Map();
-  completedJobsForDataCenter.forEach(job => {
-    const key = job?.cat != null ? String(job.cat) : "__uncategorized__";
-    cuttingCategoryRemaining.set(key, (cuttingCategoryRemaining.get(key) || 0) + 1);
-  });
+  const completedJobsForDataCenter = window.CuttingJobDateEditing?.historyJobs(completedCuttingJobs) || completedCuttingJobs.slice();
+  const cuttingCategoryNumbers = window.CuttingJobDateEditing?.categoryNumbers(cuttingJobs,completedCuttingJobs) || new Map();
   const cuttingJobsDataTable = completedJobsForDataCenter.map((job, index) => {
     const categoryId = job?.cat != null ? String(job.cat) : "";
     const categoryLabel = categoryId ? resolveCategoryName(categoryId) : "Uncategorized";
@@ -18986,9 +18964,7 @@ function computeCostModel(){
     const computedEfficiency = typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null;
     const jobNet = resolveCuttingJobNetTotal(job, computedEfficiency);
     const hours = Number(jobNet.hours) || 0;
-    const categoryKey = categoryId || "__uncategorized__";
-    const categoryCutCount = cuttingCategoryRemaining.get(categoryKey) || 1;
-    cuttingCategoryRemaining.set(categoryKey, Math.max(0, categoryCutCount - 1));
+    const categoryCutCount = cuttingCategoryNumbers.get(job.id) || 1;
     const chargeRate = Number.isFinite(Number(jobNet.chargeRate)) ? Number(jobNet.chargeRate) : JOB_RATE_PER_HOUR;
     const costRate = Number.isFinite(Number(jobNet.cutCostRate)) ? Number(jobNet.cutCostRate) : JOB_BASE_COST_PER_HOUR;
     const materialCost = Number(jobNet.materialCost);
@@ -19016,7 +18992,7 @@ function computeCostModel(){
       projectNumber: String(job?.projectNumber || "—"),
       notes: String(job?.notes || "").trim() || "—",
       priorityLabel: Number.isFinite(Number(job?.priority)) ? String(Math.max(1, Math.floor(Number(job.priority)))) : "—",
-      cumulativeCutNumberLabel: `C${Math.max(1, completedJobCounterById.get(job?.id != null ? String(job.id) : `completed_job_${index}`) || 0)}`,
+      cumulativeCutNumberLabel: window.CuttingJobChronology?.readCutLabel(job) ?? "—",
       categoryCutNumberLabel: `#${categoryCutCount}`,
       hoursValue: hours,
       chargeRateValue: chargeRate,
@@ -20625,7 +20601,7 @@ function renderJobs(){
   const previewCardMarkup = (file)=>{ const preview=file?.preview; const fallbackImage = String(file?.previewUrl || file?.dataUrl || file?.url || ""); const canUseFallbackImage = /^data:image\//i.test(fallbackImage) || /^https?:\/\//i.test(fallbackImage); const imgSource = (preview?.mode === "image" && preview.content) ? preview.content : (canUseFallbackImage ? fallbackImage : ""); if (imgSource){ return `<div class="job-flow-preview"><img src="${escapeHtml(imgSource)}" alt="Preview of ${escapeHtml(file?.name || "file")}" loading="lazy"></div>`; } const fallback = preview?.content || "Preview unavailable"; return `<div class="job-flow-preview is-empty small muted">${escapeHtml(fallback)}</div>`; };
   const readFlowCollapsedCategories = ()=>{ const raw = Array.isArray(window.jobFlowCollapsedCategories) ? window.jobFlowCollapsedCategories : []; return new Set(raw.map(id => String(id))); };
   const writeFlowCollapsedCategories = (set)=>{ window.jobFlowCollapsedCategories = Array.from(set).map(id => String(id)); };
-  const renderFlowChart = ()=>{ if (!flowChart) return; const query = String(flowFilterInput?.value || "").trim().toLowerCase(); const grouping = String(flowGroupingSelect?.value || "categoryTree"); const hidePreviews = Boolean(flowHidePreviews?.checked); const jobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : []; const completed = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []; const list = jobs.concat(completed).filter(Boolean); const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"; const folders = Array.isArray(window.jobFolders)&&window.jobFolders.length ? window.jobFolders.slice() : [{ id: rootId, name: "All Jobs", parent: null, order: 1 }]; if (!folders.some(folder => String(folder?.id) === String(rootId))) folders.push({ id: rootId, name: "All Jobs", parent: null, order: 1 }); const folderMap = new Map(folders.map(folder => [String(folder.id), folder])); const normalizeCategory=(cat)=>{ const key = cat != null ? String(cat) : rootId; return folderMap.has(key)?key:rootId; }; const projectNumberForJob=(job)=>{ const direct = normalizeProjectNumber(job?.projectNumber); if (direct) return direct; const folderName = folderMap.get(normalizeCategory(job?.cat))?.name || ""; return categoryProjectNumber(folderName) || "0000"; }; const childrenOf=(parentId)=>{ const key=parentId==null?null:String(parentId); return folders.filter(folder => (folder.parent==null?null:String(folder.parent))===key).sort((a,b)=>String(a?.name||"").localeCompare(String(b?.name||""))); }; const categoryOrder=[]; const walkCategory=(id)=>{ const key=String(id); categoryOrder.push(key); childrenOf(key).forEach(child=>walkCategory(child.id)); }; walkCategory(rootId); const categoryCutMap=new Map(categoryOrder.map((id,idx)=>[id,`CAT-${String(idx+1).padStart(3,"0")}`])); const categoryCutLabel=(catId)=>categoryCutMap.get(String(catId||rootId))||"CAT-000"; const filtered=list.filter(job=>{ const project=projectNumberForJob(job); const material=String(job?.material||""); const est=Number(job?.estimateHours); const dateTokens=[job?.startISO,job?.dueISO,job?.completedAtISO].filter(Boolean).join(" "); const fileNames=(Array.isArray(job?.files)?job.files:[]).map(file=>file?.name||"").join(" "); const token=`${project} ${job?.name||""} ${material} ${Number.isFinite(est)?est:""} ${dateTokens} ${fileNames}`.toLowerCase(); return !query || token.includes(query); }); const addedOrderFromId=(job)=>{ const id=String(job?.id||""); const token=id.includes("_")?id.slice(id.lastIndexOf("_")+1):""; const parsed=Number.parseInt(token,36); return Number.isFinite(parsed)?parsed:Number.NaN; }; const fallbackOrderTime=(job)=>{ const val = Date.parse(job?.startISO || job?.createdAt || job?.completedAtISO || ""); return Number.isFinite(val)?val:Number.MAX_SAFE_INTEGER; }; const jobCutOrder=list.slice().sort((a,b)=>{ const aAdded=addedOrderFromId(a), bAdded=addedOrderFromId(b); if (Number.isFinite(aAdded)||Number.isFinite(bAdded)){ if (!Number.isFinite(aAdded)) return 1; if (!Number.isFinite(bAdded)) return -1; if (aAdded!==bAdded) return aAdded-bAdded; } const aTime=fallbackOrderTime(a), bTime=fallbackOrderTime(b); if (aTime!==bTime) return aTime-bTime; return String(a?.id||"").localeCompare(String(b?.id||"")); }); const jobCutMap=new Map(), jobCategoryCutMap=new Map(), categoryCounts=new Map(); jobCutOrder.forEach((job,idx)=>{ const key=String(job?.id||`${job?.name||"job"}_${idx}`); jobCutMap.set(key,`C${String(idx+1).padStart(3,"0")}`); const catKey=normalizeCategory(job?.cat); const next=(categoryCounts.get(catKey)||0)+1; categoryCounts.set(catKey,next); jobCategoryCutMap.set(key,String(next)); }); const jobCutLabel=(job)=>String(job?.cutNumber||jobCutMap.get(String(job?.id||""))||"C000"); const jobCategoryCutLabel=(job)=>jobCategoryCutMap.get(String(job?.id||""))||"0"; const renderJobCard=(job)=>{ const files=Array.isArray(job?.files)?job.files:[]; const fileList=files.length?files.map(file=>`<li><span class="job-flow-file-name">${escapeHtml(file?.name || "Attachment")}</span>${hidePreviews?"":previewCardMarkup(file)}</li>`).join(""):'<li class="small job-flow-empty">No attached files</li>'; const style=categoryStyleAttr(normalizeCategory(job?.cat), folderMap, rootId); return `<article class="job-flow-job-card"${style}><header><div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")} · ${escapeHtml(jobCutLabel(job))} · ${escapeHtml(jobCategoryCutLabel(job))}</div><div class="small job-flow-meta">Project #${escapeHtml(projectNumberForJob(job))}</div><div class="small job-flow-meta">Material: ${escapeHtml(job?.material || "—")}</div><div class="small job-flow-meta">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div><div class="small job-flow-meta">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div></header><ul class="job-flow-file-list">${fileList}</ul></article>`; }; let html=""; if (grouping==="categoryTree"){ const byCategory=new Map(); filtered.forEach(job=>{ const cat=normalizeCategory(job?.cat); if (!byCategory.has(cat)) byCategory.set(cat,[]); byCategory.get(cat).push(job); }); const hasDescendantJobs=(categoryId)=>{ const key=String(categoryId); if ((byCategory.get(key)||[]).length>0) return true; return childrenOf(key).some(child=>hasDescendantJobs(String(child.id))); }; const collapsedSet=readFlowCollapsedCategories(); const renderCategoryNode=(categoryId, depth=0)=>{ const key=String(categoryId); if (!hasDescendantJobs(key)) return ""; const folder=folderMap.get(key)||{id:key,name:"Category"}; const projects=new Map(); (byCategory.get(key)||[]).forEach(job=>{ const project=projectNumberForJob(job); if (!projects.has(project)) projects.set(project,[]); projects.get(project).push(job); }); const projectMarkup=Array.from(projects.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([project, projectJobs])=>`<section class="job-flow-project-group"><h6>Project ${escapeHtml(project)}</h6><div class="job-flow-group-grid">${projectJobs.map(renderJobCard).join("")}</div></section>`).join(""); const childMarkup=childrenOf(key).map(child=>renderCategoryNode(String(child.id), depth+1)).join(""); const style=categoryStyleAttr(key, folderMap, rootId); const collapsed=collapsedSet.has(key); return `<div class="job-flow-tree-node" data-depth="${depth}"><div class="job-flow-tree-title-row"><button type="button" class="job-flow-tree-title job-flow-tree-title-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed?"false":"true"}"${style}>${escapeHtml(folder?.name || "Category")} · ${escapeHtml(categoryProjectNumber(folder?.name) || "----")} · ${escapeHtml(categoryCutLabel(key))}</button></div><div class="job-flow-tree-body${collapsed ? " is-collapsed" : ""}">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div></div>`; }; html=`<section class="job-flow-group"><h5>Category tree</h5>${renderCategoryNode(rootId)}</section>`; } else { const groups=new Map(); filtered.forEach(job=>{ const key=grouping==="job"?String(job?.name||"Untitled job"):projectNumberForJob(job); if (!groups.has(key)) groups.set(key,[]); groups.get(key).push(job); }); html=Array.from(groups.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([key,groupJobs])=>`<section class="job-flow-group"><h5>${escapeHtml(grouping==="job"?"Job":"Project")} ${escapeHtml(key)}</h5><div class="job-flow-group-grid">${groupJobs.map(renderJobCard).join("")}</div></section>`).join(""); } flowChart.innerHTML = html || '<p class="small job-flow-empty">No projects match this filter.</p>'; if (flowChart) flowChart.classList.toggle("hide-previews", hidePreviews); };
+  const renderFlowChart = ()=>{ if (!flowChart) return; const query = String(flowFilterInput?.value || "").trim().toLowerCase(); const grouping = String(flowGroupingSelect?.value || "categoryTree"); const hidePreviews = Boolean(flowHidePreviews?.checked); const jobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : []; const completed = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []; const list = jobs.concat(completed).filter(Boolean); const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"; const folders = Array.isArray(window.jobFolders)&&window.jobFolders.length ? window.jobFolders.slice() : [{ id: rootId, name: "All Jobs", parent: null, order: 1 }]; if (!folders.some(folder => String(folder?.id) === String(rootId))) folders.push({ id: rootId, name: "All Jobs", parent: null, order: 1 }); const folderMap = new Map(folders.map(folder => [String(folder.id), folder])); const normalizeCategory=(cat)=>{ const key = cat != null ? String(cat) : rootId; return folderMap.has(key)?key:rootId; }; const projectNumberForJob=(job)=>{ const direct = normalizeProjectNumber(job?.projectNumber); if (direct) return direct; const folderName = folderMap.get(normalizeCategory(job?.cat))?.name || ""; return categoryProjectNumber(folderName) || "0000"; }; const childrenOf=(parentId)=>{ const key=parentId==null?null:String(parentId); return folders.filter(folder => (folder.parent==null?null:String(folder.parent))===key).sort((a,b)=>String(a?.name||"").localeCompare(String(b?.name||""))); }; const categoryOrder=[]; const walkCategory=(id)=>{ const key=String(id); categoryOrder.push(key); childrenOf(key).forEach(child=>walkCategory(child.id)); }; walkCategory(rootId); const categoryCutMap=new Map(categoryOrder.map((id,idx)=>[id,`CAT-${String(idx+1).padStart(3,"0")}`])); const categoryCutLabel=(catId)=>categoryCutMap.get(String(catId||rootId))||"CAT-000"; const filtered=list.filter(job=>{ const project=projectNumberForJob(job); const material=String(job?.material||""); const est=Number(job?.estimateHours); const dateTokens=[job?.startISO,job?.dueISO,job?.completedAtISO].filter(Boolean).join(" "); const fileNames=(Array.isArray(job?.files)?job.files:[]).map(file=>file?.name||"").join(" "); const token=`${project} ${job?.name||""} ${material} ${Number.isFinite(est)?est:""} ${dateTokens} ${fileNames}`.toLowerCase(); return !query || token.includes(query); }); const jobCategoryCutMap=window.CuttingJobDateEditing?.categoryNumbers(jobs,completed)||new Map(); const jobCutLabel=(job)=>window.CuttingJobChronology?.readCutLabel(job)??"—"; const jobCategoryCutLabel=(job)=>jobCategoryCutMap.get(String(job?.id||""))||"0"; const renderJobCard=(job)=>{ const files=Array.isArray(job?.files)?job.files:[]; const fileList=files.length?files.map(file=>`<li><span class="job-flow-file-name">${escapeHtml(file?.name || "Attachment")}</span>${hidePreviews?"":previewCardMarkup(file)}</li>`).join(""):'<li class="small job-flow-empty">No attached files</li>'; const style=categoryStyleAttr(normalizeCategory(job?.cat), folderMap, rootId); return `<article class="job-flow-job-card"${style}><header><div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")} · ${escapeHtml(jobCutLabel(job))} · ${escapeHtml(jobCategoryCutLabel(job))}</div><div class="small job-flow-meta">Project #${escapeHtml(projectNumberForJob(job))}</div><div class="small job-flow-meta">Material: ${escapeHtml(job?.material || "—")}</div><div class="small job-flow-meta">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div><div class="small job-flow-meta">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div></header><ul class="job-flow-file-list">${fileList}</ul></article>`; }; let html=""; if (grouping==="categoryTree"){ const byCategory=new Map(); filtered.forEach(job=>{ const cat=normalizeCategory(job?.cat); if (!byCategory.has(cat)) byCategory.set(cat,[]); byCategory.get(cat).push(job); }); const hasDescendantJobs=(categoryId)=>{ const key=String(categoryId); if ((byCategory.get(key)||[]).length>0) return true; return childrenOf(key).some(child=>hasDescendantJobs(String(child.id))); }; const collapsedSet=readFlowCollapsedCategories(); const renderCategoryNode=(categoryId, depth=0)=>{ const key=String(categoryId); if (!hasDescendantJobs(key)) return ""; const folder=folderMap.get(key)||{id:key,name:"Category"}; const projects=new Map(); (byCategory.get(key)||[]).forEach(job=>{ const project=projectNumberForJob(job); if (!projects.has(project)) projects.set(project,[]); projects.get(project).push(job); }); const projectMarkup=Array.from(projects.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([project, projectJobs])=>`<section class="job-flow-project-group"><h6>Project ${escapeHtml(project)}</h6><div class="job-flow-group-grid">${projectJobs.map(renderJobCard).join("")}</div></section>`).join(""); const childMarkup=childrenOf(key).map(child=>renderCategoryNode(String(child.id), depth+1)).join(""); const style=categoryStyleAttr(key, folderMap, rootId); const collapsed=collapsedSet.has(key); return `<div class="job-flow-tree-node" data-depth="${depth}"><div class="job-flow-tree-title-row"><button type="button" class="job-flow-tree-title job-flow-tree-title-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed?"false":"true"}"${style}>${escapeHtml(folder?.name || "Category")} · ${escapeHtml(categoryProjectNumber(folder?.name) || "----")} · ${escapeHtml(categoryCutLabel(key))}</button></div><div class="job-flow-tree-body${collapsed ? " is-collapsed" : ""}">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div></div>`; }; html=`<section class="job-flow-group"><h5>Category tree</h5>${renderCategoryNode(rootId)}</section>`; } else { const groups=new Map(); filtered.forEach(job=>{ const key=grouping==="job"?String(job?.name||"Untitled job"):projectNumberForJob(job); if (!groups.has(key)) groups.set(key,[]); groups.get(key).push(job); }); html=Array.from(groups.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([key,groupJobs])=>`<section class="job-flow-group"><h5>${escapeHtml(grouping==="job"?"Job":"Project")} ${escapeHtml(key)}</h5><div class="job-flow-group-grid">${groupJobs.map(renderJobCard).join("")}</div></section>`).join(""); } flowChart.innerHTML = html || '<p class="small job-flow-empty">No projects match this filter.</p>'; if (flowChart) flowChart.classList.toggle("hide-previews", hidePreviews); };
   const noteTextarea = content.querySelector("#jobNoteModalInput");
   const noteJobLabel = content.querySelector("#jobNoteModalJob");
   const noteHistory = content.querySelector("#jobNoteModalHistory");
@@ -22640,7 +22616,7 @@ function renderJobs(){
     }
   };
 
-  // 4) Add Job (unchanged)
+  // 4) Add Job through the guarded business-date operation
   const formatEstimateBreakdown = (hoursValue)=>{
     const totalHours = Number(hoursValue);
     const safeHours = Number.isFinite(totalHours) && totalHours >= 0 ? totalHours : 0;
@@ -22864,6 +22840,8 @@ function renderJobs(){
 
   document.getElementById("addJobForm")?.addEventListener("submit",async (e)=>{
     e.preventDefault();
+    if(typeof createCuttingJob!=="function"){toast("Cutting-job saving is unavailable.");return {blocked:true};}
+
     recalcMaterialTotals();
     const name  = document.getElementById("jobName").value.trim();
     const estMinutesInput = document.getElementById("jobEstMinutes");
@@ -22925,23 +22903,14 @@ function renderJobs(){
     const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material,
       thickness, pathLength, pathWidth, materialCost, materialQty, materialWeight, materialCostComplete:materialCostRaw !== "",
       chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: pair.cat };
-    cuttingJobs.push(newJob);
-    window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
-    reorderPriorities(newJob.id, priority);
+    const created=await createCuttingJob(newJob);
+    if(!created.saved||!created.verified||created.requiresReload){toast(created.error||"Job was not saved.");return created;}
+    cuttingJobs=window.cuttingJobs;completedCuttingJobs=window.completedCuttingJobs;
     window.jobCategoryFilter = previousCategoryFilter;
     if (!pendingCloudFiles.length){
       pendingNewJobFiles.length = 0;
       window.jobAddDraft = {};
-      persistJobChanges();
-      renderCalendarPreservingScroll();
-      renderJobs();
-      return;
-    }
-    let saved;
-    try { saved = await saveCloudNow(); }
-    catch (error) { saved = { saved:false, error:String(error?.message || error) }; }
-    if (saved?.saved !== true || saved?.stateWriteCompleted !== true){
-      toast(`Job was not authoritatively saved; pending cloud files were not uploaded. ${saved?.error || ""}`.trim());
+      toast("Cutting job added");
       renderCalendarPreservingScroll();
       renderJobs();
       return;
@@ -23519,7 +23488,8 @@ function renderJobs(){
       if (!id) return;
       const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
       if (!entry){ toast("Unable to locate completed job."); return; }
-
+      if(typeof createCuttingJob!=="function"){toast("Cutting-job saving is unavailable.");return {saved:false,blocked:true};}
+      const copySourceKey=window.CuttingJobChronology.stateKey(entry);
       const hoursPerDay = typeof getSchedulingDailyHours === "function"
         ? getSchedulingDailyHours()
         : (typeof getConfiguredDailyHours === "function"
@@ -23588,6 +23558,8 @@ function renderJobs(){
         defaultEnd
       });
       if (!selection) return;
+      const currentSource=completedCuttingJobs.find(job=>String(job?.id)===String(id));
+      if(!currentSource||window.CuttingJobChronology.stateKey(currentSource)!==copySourceKey){toast("The completed job changed while choosing dates. Reopen Make Active Copy.");return {saved:false,blocked:true};}
       const pair = validateManualJobProjectCategory(entry.cat, undefined);
       if (!pair.ok) return;
       if (selection.startISO) startISO = selection.startISO;
@@ -23617,6 +23589,8 @@ function renderJobs(){
         chargeRate: Number.isFinite(Number(entry.chargeRate)) && Number(entry.chargeRate) >= 0
           ? Number(entry.chargeRate)
           : JOB_RATE_PER_HOUR,
+        costRate: Number.isFinite(Number(entry.costRate)) && Number(entry.costRate) >= 0
+          ? Number(entry.costRate) : JOB_BASE_COST_PER_HOUR,
         priority: typeof getJobPriority === "function"
           ? getJobPriority(entry)
           : (Number.isFinite(Number(entry.priority)) && Number(entry.priority) > 0
@@ -23628,11 +23602,11 @@ function renderJobs(){
         cat: pair.cat
       };
 
-      cuttingJobs.push(newJob);
-    window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
-      reorderPriorities(newJob.id, newJob.priority);
-      window.cuttingJobs = cuttingJobs;
-      saveCloudDebounced();
+      histActivate.disabled=true;
+      const created=await createCuttingJob(newJob);
+      histActivate.disabled=false;
+      if(!created.saved||!created.verified||created.requiresReload){toast(created.error||"Active copy was not saved.");return created;}
+      cuttingJobs=window.cuttingJobs;completedCuttingJobs=window.completedCuttingJobs;
       renderCalendarPreservingScroll();
       toast("Active cutting job created");
       renderJobs();
@@ -23672,8 +23646,9 @@ function renderJobs(){
       closeHistoryActionMenu();
       const id = histSave.getAttribute("data-history-save");
       if (!id) return;
-      const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
-      if (!entry) return;
+      const originalEntry = completedCuttingJobs.find(job => String(job?.id) === String(id));
+      if (!originalEntry) return;
+      const entry = structuredClone(originalEntry);
       const filesBeforeSave = Array.isArray(entry.files) ? entry.files.slice() : [];
       const field = (key)=> content.querySelector(`[data-history-field="${key}"][data-history-id="${id}"]`);
       const pair = validateManualJobProjectCategory(field("cat")?.value, field("projectNumber")?.value, entry);
@@ -23720,11 +23695,14 @@ function renderJobs(){
 
       const notes = notesInput?.value ?? entry.notes ?? "";
 
-      const completedRaw = completedInput?.value;
-      if (completedRaw){
-        const dt = new Date(completedRaw);
-        if (!Number.isNaN(dt.getTime())) entry.completedAtISO = dt.toISOString();
-      }
+      const startRaw=field("startISO")?.value;
+      const completedRaw=completedInput?.value;
+      if((startRaw||originalEntry.startISO)&&!window.CuttingJobChronology.validCutDate(startRaw)){toast("Enter a valid Start Date.");return;}
+      if((completedRaw||originalEntry.completedAtISO)&&!window.CuttingJobChronology.validCutDate(completedRaw)){toast("Enter a valid Completion Date.");return;}
+      if(startRaw)entry.startISO=startRaw;
+      // Leave an unchanged stored completion instant intact. A date correction
+      // uses the existing calendar-day field without a timezone conversion.
+      if(completedRaw&&completedRaw!==String(originalEntry.completedAtISO||"").slice(0,10))entry.completedAtISO=completedRaw;
 
       if (priorityInput){
         const priorityVal = priorityInput.value;
@@ -23793,11 +23771,13 @@ function renderJobs(){
         gainLoss
       };
 
-      // Keep both shared references in sync so a re-render or background refresh
-      // does not resurrect stale history values (e.g., old actualHours).
-      window.completedCuttingJobs = completedCuttingJobs;
+      const updates=Object.fromEntries(["name","startISO","completedAtISO","estimateHours","material","materialCost","materialQty","chargeRate","costRate","notes","actualHours","cat","projectNumber","priority","efficiency"].filter(key=>!["startISO","completedAtISO"].includes(key)||entry[key]).map(key=>[key,entry[key]]));
+      histSave.disabled=true;
+      const result=await saveCuttingJobEdit(id,updates);
+      histSave.disabled=false;
+      if(!result.saved||!result.verified||result.requiresReload){toast(result.error||"History was not saved. Reload if the save outcome is unknown.");return result;}
+      cuttingJobs=window.cuttingJobs;completedCuttingJobs=window.completedCuttingJobs;
       editingCompletedJobsSet().delete(String(id));
-      saveCloudDebounced();
       toast("History updated");
       renderJobs();
     }
@@ -23919,14 +23899,15 @@ function renderJobs(){
       const completedDay = parseJobDate(todayISO) || new Date();
       completedDay.setHours(12, 0, 0, 0);
       const completionISO = completedDay.toISOString();
+      complete.disabled=true;
       const completed = typeof completeCuttingJob === "function"
-        ? completeCuttingJob(id, { completedAtISO: completionISO, normalizePriorities: () => normalizeAllPriorities() })
+        ? await completeCuttingJob(id, { completedAtISO: completionISO })
         : null;
-      if (!completed){ toast("Unable to mark job complete"); return; }
+      complete.disabled=false;
+      if (!completed?.saved || !completed.verified || completed.requiresReload){ toast(completed?.error || "Unable to save job completion"); return completed; }
       cuttingJobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : cuttingJobs;
       completedCuttingJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : completedCuttingJobs;
       editingJobs.delete(id);
-      persistJobChanges();
       toast("Job marked complete");
       renderJobs();
       return;
@@ -23938,7 +23919,8 @@ function renderJobs(){
       closeActionMenu();
       const id = sv.getAttribute("data-save-job");
       const idStr = String(id || "");
-      const j  = cuttingJobs.find(x => String(x?.id) === idStr); if (!j) return;
+      const originalJob = cuttingJobs.find(x => String(x?.id) === idStr); if (!originalJob) return;
+      const j = structuredClone(originalJob);
       const filesBeforeSave = Array.isArray(j.files) ? j.files.slice() : [];
       const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${idStr}"]`)?.value;
       const pair = validateManualJobProjectCategory(qs("cat"), qs("projectNumber"), j);
@@ -23962,7 +23944,8 @@ function renderJobs(){
       j.material = qs("material") || j.material || "";
       j.materialCost = Math.max(0, Number(qs("materialCost")) || 0);
       j.materialQty = Math.max(0, Number(qs("materialQty")) || 0);
-      j.startISO = qs("startISO") || j.startISO;
+      if(!window.CuttingJobChronology.validCutDate(qs("startISO"))){toast("Enter a valid Start Date.");return;}
+      j.startISO = qs("startISO");
       j.dueISO   = qs("dueISO")   || j.dueISO;
       applyManualJobProjectCategory(j, pair);
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${idStr}"]`)?.value || j.notes || "";
@@ -23982,15 +23965,20 @@ function renderJobs(){
       } else if (j.priority == null){
         j.priority = 1;
       }
-      reorderPriorities(j.id, j.priority);
+      // Priority normalization happens on the guarded staged snapshot.
       j.files = mergeJobFileReferences(filesBeforeSave, j.files);
       if (window.DEBUG_MODE) console.info("[cutting-job-files] save edit files", {
         jobId: idStr,
         filesBeforeSave: filesBeforeSave.length,
         filesAfterSave: Array.isArray(j.files) ? j.files.length : 0
       });
+      const updates=Object.fromEntries(["name","estimateHours","material","materialCost","materialQty","startISO","dueISO","cat","projectNumber","notes","chargeRate","costRate","priority"].map(key=>[key,j[key]]));
+      sv.disabled=true;
+      const result=await saveCuttingJobEdit(idStr,updates);
+      sv.disabled=false;
+      if(!result.saved||!result.verified||result.requiresReload){toast(result.error||"Job edit was not saved. Reload if the save outcome is unknown.");return result;}
+      cuttingJobs=window.cuttingJobs;completedCuttingJobs=window.completedCuttingJobs;
       editingJobs.delete(idStr);
-      saveCloudDebounced();
       toast("saved");
       renderJobs();
       return;
@@ -25926,7 +25914,7 @@ function renderDeletedItems(options){
           toast("Item restored");
           renderDeletedItems();
         } else {
-          alert("Unable to restore this item.");
+          alert(result?.error || "Unable to restore this item.");
         }
       } catch (err) {
         console.error("Restore failed", err);
