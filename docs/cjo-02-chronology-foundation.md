@@ -22,6 +22,33 @@ date, same-day position, then exact UTF-16 code-unit string ordering of stable
 IDs. It does not use locale-sensitive comparison. Equal positions are resolved
 by ID; they are deterministic but do not establish true historical time.
 
+## Read-only labels and readiness (CJO-03)
+
+`CuttingJobChronology.readCutLabel(job)` reads the materialized `cutNumber` for
+both canonical and unresolved legacy jobs. A string matching `C`/`c` followed by
+digits with a positive safe-integer rank is returned exactly as stored, preserving
+case and padding. Missing/invalid labels display the neutral `—`; readers never
+invent a C-number or normalize the stored field.
+
+Jobs/history titles, inline category labels, flow cards, dashboard search, and
+Data Center visible cut labels share this reader. Category counters, scheduling
+priority, financial ordering/calculations, and Data Center reverse-row ordering
+retain their existing behavior. Displays perform no chronology migration,
+renumbering, persistence, or coordinator operation.
+
+`chronologyReadiness(active, completed)` returns a read-only status, `eligible`
+flag, and validation issues:
+
+- `LEGACY_ONLY`: no included job has explicit chronology fields; eligibility is
+  false, including an empty domain. Legacy evidence is not promoted into fields.
+- `CANONICAL_READY`: every included job has a valid actual date/day order and
+  unique nonblank string identity; eligibility is true.
+- `REVIEW_REQUIRED`: explicit chronology exists but at least one date, order,
+  identity, or job array remains invalid/unresolved; eligibility is false.
+
+Readiness does not require a currently valid visible label and never repairs
+one. It describes chronology eligibility, while `readCutLabel` handles display.
+
 ## Legacy safeguard
 
 If any included job lacks valid explicit date/order, canonical renumbering is
@@ -93,9 +120,9 @@ No independent Firebase, cache, attachment, or per-job write system is introduce
 
 ## Scope remaining
 
-- Unify global number readers in Jobs, dashboard search, Data Center and flow
-  chart before adding final editing controls. Scheduling priority, cost-report
-  date order and per-category counts have separate meanings.
+- Build the reviewed chronology correction workflow using the guarded
+  coordinator and read-only readiness helper; final editing controls are not
+  included in the reader phase.
 - Review actual-cut evidence, the active/unperformed-job policy, same-day
   positions and business timezone for legacy history. No dates/timestamps should
   be invented to bypass eligibility.

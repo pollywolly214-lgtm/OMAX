@@ -3140,18 +3140,16 @@ function viewJobs(){
     if (aTime !== bTime) return aTime - bTime;
     return String(a?.id || "").localeCompare(String(b?.id || ""));
   });
-  const jobCutMap = new Map();
   const jobCategoryCutMap = new Map();
   const categoryCounts = new Map();
   cutOrder.forEach((job, idx)=>{
     const key = String(job?.id || `${job?.name || "job"}_${idx}`);
-    jobCutMap.set(key, `C${String(idx + 1).padStart(3, "0")}`);
     const catKey = String(job?.cat || (window.JOB_ROOT_FOLDER_ID || "jobs_root"));
     const nextCat = (categoryCounts.get(catKey) || 0) + 1;
     categoryCounts.set(catKey, nextCat);
     jobCategoryCutMap.set(key, String(nextCat));
   });
-  const jobCutLabel = (job)=> String(job?.cutNumber || jobCutMap.get(String(job?.id || "")) || "C000");
+  const jobCutLabel = (job)=> window.CuttingJobChronology?.readCutLabel(job) ?? "—";
   const jobCategoryCutLabel = (job)=> jobCategoryCutMap.get(String(job?.id || "")) || "0";
   const cutNumberValue = (job)=> {
     const label = jobCutLabel(job);

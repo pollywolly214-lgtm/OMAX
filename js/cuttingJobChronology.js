@@ -32,6 +32,11 @@
     const rank = Number(value.slice(1));
     return validDayOrder(rank) ? rank : null;
   }
+  // Rendering reads materialized labels only, including unresolved legacy jobs.
+  // Missing/invalid labels stay neutral; no view may invent a chronology rank.
+  function readCutLabel(job){
+    return visibleRank(job?.cutNumber) === null ? "—" : job.cutNumber;
+  }
   const hasExplicitChronology = (active = [], completed = []) => [...active, ...completed].some(job => job && FIELDS.some(field => own(job, field)));
 
   // Keys for a whole domain share one mode. Explicit: actual day, independent
@@ -66,6 +71,12 @@
     });
     entries.sort(compareCuttingJobChronology);
     return {mode, entries, issues, requiresReview:issues.length > 0};
+  }
+  function chronologyReadiness(active = [], completed = []){
+    const read = readChronology(active, completed);
+    const explicit = hasExplicitChronology(Array.isArray(active) ? active : [], Array.isArray(completed) ? completed : []);
+    const status = !explicit ? "LEGACY_ONLY" : read.requiresReview ? "REVIEW_REQUIRED" : "CANONICAL_READY";
+    return {status, eligible:status === "CANONICAL_READY", issues:read.issues};
   }
   function planRenumbering(active = [], completed = []){
     const read = readChronology(active, completed);
@@ -185,6 +196,6 @@
     }
     return Object.freeze({save, isBusy:() => busy});
   }
-  return Object.freeze({FIELDS, validCutDate, validDayOrder, hasExplicitChronology,
+  return Object.freeze({FIELDS, validCutDate, validDayOrder, hasExplicitChronology, readCutLabel, chronologyReadiness,
     compareCuttingJobChronology, readChronology, planRenumbering, prepareChronologyMutation, createMutationApi});
 });
