@@ -23604,26 +23604,11 @@ function renderJobs(){
       closeFileMenu();
       const id = histDelete.getAttribute("data-history-delete");
       if (!id) return;
-      const proceed = typeof window.confirm === "function"
-        ? window.confirm("Delete this completed job entry?")
-        : true;
-      if (!proceed) return;
       const idStr = String(id);
-      const entry = completedCuttingJobs.find(job => String(job?.id) === idStr);
-      if (entry){
-        try {
-          if (typeof recordDeletedItem === "function") recordDeletedItem("completed-job", entry, {});
-        } catch (err) {
-          console.warn("Failed to record deleted completed job", err);
-        }
-      }
-      completedCuttingJobs = completedCuttingJobs.filter(job => String(job?.id) !== idStr);
-      window.completedCuttingJobs = completedCuttingJobs;
+      const result = await deleteCuttingJob("completedCuttingJobs", idStr);
+      if (result.cancelled) return;
+      if (!result.saved){ toast(result.error || "Job deletion failed."); renderJobs(); return; }
       editingCompletedJobsSet().delete(idStr);
-      saveCloudDebounced();
-      if (typeof saveCloudNow === "function"){
-        try { saveCloudNow(); } catch (err) { console.warn("Immediate save failed after deleting completed cutting job", err); }
-      }
       toast("History entry deleted");
       renderJobs();
       return;
@@ -23864,20 +23849,9 @@ function renderJobs(){
       closeActionMenu();
       closeHistoryActionMenu();
       const id = rm.getAttribute("data-remove-job");
-      const idStr = String(id || "");
-      const job = cuttingJobs.find(x => String(x?.id) === idStr);
-      if (job){
-        try {
-          if (typeof recordDeletedItem === "function") recordDeletedItem("job", job, {});
-        } catch (err) {
-          console.warn("Failed to record deleted job", err);
-        }
-      }
-      const index = cuttingJobs.findIndex(x => String(x?.id) === idStr);
-      if (index >= 0) cuttingJobs.splice(index, 1);
-      window.cuttingJobs = cuttingJobs;
-      normalizeAllPriorities();
-      persistJobChanges();
+      const result = await deleteCuttingJob("cuttingJobs", id);
+      if (result.cancelled) return;
+      if (!result.saved){ toast(result.error || "Job deletion failed."); renderCalendarPreservingScroll(); renderJobs(); return; }
       toast("Removed");
       renderCalendarPreservingScroll();
       renderJobs();
