@@ -7842,6 +7842,12 @@ function renderDashboard(){
 
   jobForm?.addEventListener("submit", (e)=>{
     e.preventDefault();
+    const chronologyGate = window.CuttingJobHistory?.planDirectResequence(cuttingJobs, window.completedCuttingJobs);
+    if (!chronologyGate || window.CuttingJobHistory.isResequenceBlocked(chronologyGate)){
+      toast(chronologyGate?.error || "Cutting-job chronology is unavailable; review required.");
+      return chronologyGate || { ok:false, blocked:true, unavailable:true };
+    }
+
     const name = (jobNameInput?.value || "").trim();
     applyDashMinutesToHours();
     const est  = Number(jobEstimateInput?.value);
@@ -7874,8 +7880,12 @@ function renderDashboard(){
       ensureJobCategoryFolderOpen(categoryId);
     }
     const newJob = { id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, costRate, priority: 1, notes:"", manualLogs:[], cat: categoryId };
+    const resequence = window.CuttingJobHistory?.resequence([...cuttingJobs, newJob], window.completedCuttingJobs);
+    if (!resequence || window.CuttingJobHistory.isResequenceBlocked(resequence)){
+      toast(resequence?.error || "Cutting-job chronology is unavailable; review required.");
+      return resequence || { ok:false, blocked:true, unavailable:true };
+    }
     cuttingJobs.push(newJob);
-    window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
     reorderPriorities(newJob.id, newJob.priority);
     ensureJobCategories?.();
     if (jobCategoryInput){
@@ -22816,6 +22826,12 @@ function renderJobs(){
 
   document.getElementById("addJobForm")?.addEventListener("submit",async (e)=>{
     e.preventDefault();
+    const chronologyGate = window.CuttingJobHistory?.planDirectResequence(cuttingJobs, window.completedCuttingJobs);
+    if (!chronologyGate || window.CuttingJobHistory.isResequenceBlocked(chronologyGate)){
+      toast(chronologyGate?.error || "Cutting-job chronology is unavailable; review required.");
+      return chronologyGate || { ok:false, blocked:true, unavailable:true };
+    }
+
     recalcMaterialTotals();
     const name  = document.getElementById("jobName").value.trim();
     const estMinutesInput = document.getElementById("jobEstMinutes");
@@ -22873,8 +22889,12 @@ function renderJobs(){
     const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material,
       thickness, pathLength, pathWidth, materialCost, materialQty, materialWeight, materialCostComplete:materialCostRaw !== "",
       chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+    const resequence = window.CuttingJobHistory?.resequence([...cuttingJobs, newJob], window.completedCuttingJobs);
+    if (!resequence || window.CuttingJobHistory.isResequenceBlocked(resequence)){
+      toast(resequence?.error || "Cutting-job chronology is unavailable; review required.");
+      return resequence || { ok:false, blocked:true, unavailable:true };
+    }
     cuttingJobs.push(newJob);
-    window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
     reorderPriorities(newJob.id, priority);
     ensureJobCategories?.();
     window.jobCategoryFilter = previousCategoryFilter;
@@ -23468,6 +23488,11 @@ function renderJobs(){
       if (!id) return;
       const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
       if (!entry){ toast("Unable to locate completed job."); return; }
+      const chronologyGate = window.CuttingJobHistory?.planDirectResequence(cuttingJobs, window.completedCuttingJobs);
+      if (!chronologyGate || window.CuttingJobHistory.isResequenceBlocked(chronologyGate)){
+        toast(chronologyGate?.error || "Cutting-job chronology is unavailable; review required.");
+        return chronologyGate || { ok:false, blocked:true, unavailable:true };
+      }
 
       const hoursPerDay = typeof getSchedulingDailyHours === "function"
         ? getSchedulingDailyHours()
@@ -23537,6 +23562,12 @@ function renderJobs(){
         defaultEnd
       });
       if (!selection) return;
+      const postDialogChronologyGate = window.CuttingJobHistory?.planDirectResequence(cuttingJobs, window.completedCuttingJobs);
+      if (!postDialogChronologyGate || window.CuttingJobHistory.isResequenceBlocked(postDialogChronologyGate)){
+        toast(postDialogChronologyGate?.error || "Cutting-job chronology is unavailable; review required.");
+        return postDialogChronologyGate || { ok:false, blocked:true, unavailable:true };
+      }
+
       if (selection.startISO) startISO = selection.startISO;
       if (selection.dueISO) dueISO = selection.dueISO;
 
@@ -23574,8 +23605,12 @@ function renderJobs(){
         cat: entry.cat != null ? entry.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root")
       };
 
+      const resequence = window.CuttingJobHistory?.resequence([...cuttingJobs, newJob], window.completedCuttingJobs);
+      if (!resequence || window.CuttingJobHistory.isResequenceBlocked(resequence)){
+        toast(resequence?.error || "Cutting-job chronology is unavailable; review required.");
+        return resequence || { ok:false, blocked:true, unavailable:true };
+      }
       cuttingJobs.push(newJob);
-    window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
       reorderPriorities(newJob.id, newJob.priority);
       window.cuttingJobs = cuttingJobs;
       saveCloudDebounced();
@@ -23895,6 +23930,7 @@ function renderJobs(){
       const completed = typeof completeCuttingJob === "function"
         ? completeCuttingJob(id, { completedAtISO: completionISO, normalizePriorities: () => normalizeAllPriorities() })
         : null;
+      if (completed?.blocked){ toast(completed.error); return completed; }
       if (!completed){ toast("Unable to mark job complete"); return; }
       cuttingJobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : cuttingJobs;
       completedCuttingJobs = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : completedCuttingJobs;
@@ -25902,7 +25938,7 @@ function renderDeletedItems(options){
           toast("Item restored");
           renderDeletedItems();
         } else {
-          alert("Unable to restore this item.");
+          alert(result?.error || "Unable to restore this item.");
         }
       } catch (err) {
         console.error("Restore failed", err);

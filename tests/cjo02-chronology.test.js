@@ -138,10 +138,12 @@ test("real completion builder preserves explicit actual date/order despite a lat
   assert.equal(completed.cutOrderWithinDay,3);
   assert.deepEqual(labels(chronology.planRenumbering([], [completed])),labels(chronology.planRenumbering([active], [])));
 });
-test("existing resequence entry point delegates established chronology and blocks mixed unreviewed domains", () => {
+test("direct resequence requires the coordinator for canonical and mixed domains", () => {
   const explicit=[job("later",day(8),1,{cutNumber:"C001"}),job("earlier",day(5),1,{cutNumber:"C002"})];
-  assert.equal(history.resequence(explicit,[]).ok,true);
-  assert.equal(explicit[1].cutNumber,"C001");
+  const original=JSON.stringify(explicit);
+  assert.equal(history.planResequence(explicit,[]).ok,true);
+  assert.equal(history.resequence(explicit,[]).requiresCoordinator,true);
+  assert.equal(JSON.stringify(explicit),original);
   const mixed=[...explicit,{id:"unreviewed",cutNumber:"C003",startISO:day(1)}],before=JSON.stringify(mixed);
   assert.equal(history.resequence(mixed,[]).blocked,true);
   assert.equal(JSON.stringify(mixed),before);

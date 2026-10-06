@@ -3214,6 +3214,8 @@ function applyRestoreByType(entry, index){
       return { handledRemoval: false, value: { type: "inventory", id: clone.id } };
     }
     case "job": {
+      const gate = window.CuttingJobHistory?.planDirectResequence([...(cuttingJobs || []), clone], window.completedCuttingJobs);
+      if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
       if (!Array.isArray(cuttingJobs)) cuttingJobs = [];
       if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
       if (!Array.isArray(clone.files)) clone.files = [];
@@ -3222,12 +3224,15 @@ function applyRestoreByType(entry, index){
       while (existing.has(String(clone.id))){
         clone.id = genId(clone.name || "job");
       }
+      const resequence = window.CuttingJobHistory.resequence([...cuttingJobs, clone], window.completedCuttingJobs);
+      if (window.CuttingJobHistory.isResequenceBlocked(resequence))return {...resequence,ok:false,blocked:true};
       cuttingJobs.push(clone);
-      window.CuttingJobHistory?.resequence(cuttingJobs,window.completedCuttingJobs);
       window.cuttingJobs = cuttingJobs;
       return { handledRemoval: false, value: { type: "job", id: clone.id } };
     }
     case "completed-job": {
+      const gate = window.CuttingJobHistory?.planDirectResequence(window.cuttingJobs, [...(completedCuttingJobs || []), clone]);
+      if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
       if (!Array.isArray(completedCuttingJobs)) completedCuttingJobs = [];
       if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
       if (!Array.isArray(clone.files)) clone.files = [];
@@ -3236,8 +3241,9 @@ function applyRestoreByType(entry, index){
       while (existing.has(String(clone.id))){
         clone.id = genId(clone.name || "job");
       }
+      const resequence = window.CuttingJobHistory.resequence(window.cuttingJobs, [...completedCuttingJobs, clone]);
+      if (window.CuttingJobHistory.isResequenceBlocked(resequence))return {...resequence,ok:false,blocked:true};
       completedCuttingJobs.push(clone);
-      window.CuttingJobHistory?.resequence(window.cuttingJobs,completedCuttingJobs);
       window.completedCuttingJobs = completedCuttingJobs;
       return { handledRemoval: false, value: { type: "completed-job", id: clone.id } };
     }
@@ -3356,12 +3362,20 @@ function applyRestoreByType(entry, index){
 
 function restoreDeletedItem(id){
   refreshGlobalCollections();
+  const candidate = deletedItems.find(entry=>entry && entry.id === id);
+  if (candidate && ["job","completed-job"].includes(candidate.type)){
+    const active = candidate.type === "job" ? [...(cuttingJobs || []), candidate.payload] : cuttingJobs;
+    const completed = candidate.type === "completed-job" ? [...(completedCuttingJobs || []), candidate.payload] : completedCuttingJobs;
+    const gate = window.CuttingJobHistory?.planDirectResequence(active, completed);
+    if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
+  }
   purgeExpiredDeletedItems();
   const idx = deletedItems.findIndex(entry => entry && entry.id === id);
   if (idx < 0) return { ok:false, reason:"not_found" };
   const entry = deletedItems[idx];
   const result = applyRestoreByType(entry, idx);
   if (!result) return { ok:false, reason:"restore_failed" };
+  if (result.blocked) return { ...result, ok:false };
   if (!result.handledRemoval){
     const currentIdx = deletedItems.findIndex(e => e && e.id === entry.id);
     if (currentIdx >= 0){
@@ -3704,12 +3718,16 @@ function completeCuttingJob(jobId, { completedAtISO = null, normalizePriorities 
   const idx = cuttingJobs.findIndex(job => job && String(job.id) === idStr);
   if (idx < 0) return null;
 
+  const gate = window.CuttingJobHistory?.planDirectResequence(cuttingJobs, completedCuttingJobs);
+  if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
   const job = cuttingJobs[idx];
   const completionISO = typeof completedAtISO === "string" && completedAtISO
     ? completedAtISO
     : new Date().toISOString();
   const completed = buildCompletedJob(job, completionISO);
   if (!completed) return null;
+  const resequence = window.CuttingJobHistory.resequence(cuttingJobs.filter((_, index)=>index !== idx), [...completedCuttingJobs, completed]);
+  if (window.CuttingJobHistory.isResequenceBlocked(resequence))return {...resequence,ok:false,blocked:true};
 
   cuttingJobs.splice(idx, 1);
 
@@ -3728,7 +3746,6 @@ function completeCuttingJob(jobId, { completedAtISO = null, normalizePriorities 
 
   completedCuttingJobs.push(completed);
   window.completedCuttingJobs = completedCuttingJobs;
-  window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
 
   if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
   window.syncProcessLog.unshift({
@@ -4222,7 +4239,15 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
       // Additional chronology restriction, after all existing protected merges.
       // It cannot bypass CAS, identity, content, size or protected-state gates.
-      if (options.validatePreparedState && options.validatePreparedState(pending) !== true) throw Object.assign(new Error("Prepared chronology state changed; review again."), { definite:true, code:"chronology_state_changed" });
+      if (options.validatePreparedState){
+        // The atomic writer has already made this a JSON snapshot. Validation
+        // may inspect or mutate its own copy, but cannot alter the guarded save.
+        try {
+          if (options.validatePreparedState(JSON.parse(JSON.stringify(pending))) !== true) throw new Error("Prepared chronology state changed; review again.");
+        } catch (error){
+          throw Object.assign(new Error(String(error?.message || "Prepared chronology validation failed.")), { definite:true, code:"chronology_state_changed" });
+        }
+      }
       return pending;
     }
   });

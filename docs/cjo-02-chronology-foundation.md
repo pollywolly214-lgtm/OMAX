@@ -37,8 +37,10 @@ initialization plan for existing production history; no such plan runs here.
 
 Existing all-legacy creation/import/repair workflows retain their existing policy
 in `CuttingJobHistory`. Once a domain contains explicit chronology fields, its
-resequence entry point delegates to the canonical planner and refuses a mixed
-unreviewed domain. If the canonical module fails to load, it fails closed rather
+pure planner delegates to the canonical planner. Direct mutation via
+resequence refuses both canonical and mixed domains, requiring the coordinator;
+legacy repair/import/add/restore/copy/completion callers stop before dependent
+changes or saves when this guard blocks. If the canonical module fails to load, it fails closed rather
 than reverting explicit jobs to schedule/completion-date ordering.
 This compatibility boundary is not a certification or repair of the old legacy
 same-day resequencer identified in CJO-01.
@@ -73,7 +75,9 @@ foundation hook with no UI, hydration, creation, or import call site.
    `OMAXAtomicPersistence.save`. Existing transaction CAS, identity,
    protected-state, size and content-firewall guards remain authoritative.
 4. A further exact-state validator runs inside that transaction after protected
-   merges, before queueing. It rejects concurrent local edits and unexpected
+   merges, before queueing, using an isolated deep-cloned JSON snapshot. Callback
+   mutations cannot change the guarded pending write; false/throw fails closed.
+   It rejects concurrent local edits and unexpected
    changes to any unrelated business field. It cannot relax existing guards.
 5. Require acknowledgement and exact source-server read-back at a newer revision,
    including unchanged unrelated fields. Only then use existing authoritative

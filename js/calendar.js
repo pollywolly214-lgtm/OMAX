@@ -2370,6 +2370,7 @@ function showJobBubble(jobId, anchor){
       </div>`;
     b.querySelector("[data-bbl-complete-job]")?.addEventListener("click", ()=>{
       const completed = typeof completeCuttingJob === "function" ? completeCuttingJob(j.id) : null;
+      if (completed?.blocked){ toast(completed.error); return completed; }
       if (!completed){ toast("Unable to mark job complete"); return; }
       saveCloudDebounced();
       toast("Job marked complete");

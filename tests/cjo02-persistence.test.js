@@ -267,3 +267,46 @@ test("baseline capture failure releases the operation without any write",async()
   assert.equal(api.isBusy(),false);assert.equal(h.calls.writes,0);
   broken=false;assert.equal((await api.save([],{expectedRevision:7})).noOp,true);
 });
+
+for(const [name,mutate] of [
+  ["clears active jobs",snapshot=>{snapshot.cuttingJobs=[];}],
+  ["clears protected inventory",snapshot=>{snapshot.inventory=[];}],
+  ["changes nested protected data",snapshot=>{snapshot.inventory[0].qtyNew=999;}],
+  ["mutates arrays and nested job attachments",snapshot=>{snapshot.completedCuttingJobs.splice(0,1);snapshot.cuttingJobs[0].files.push({id:"injected"});}],
+  ["retains and later mutates its snapshot",snapshot=>{queueMicrotask(()=>{snapshot.cuttingJobs.length=0;snapshot.inventory[0].qtyNew=999;});}]
+])test("CJO-02B validator isolation: "+name,async()=>{
+  const h=harness(),input=clone(h.before),before=clone(input);
+  const result=await h.context.write(input,{merge:true},{expectedRevision:7,validatePreparedState:snapshot=>{mutate(snapshot);return true;}});
+  assert.equal(result.saved,true,result.error);assert.equal(h.remote.commits,1);
+  const expected=clone(before);expected.syncMeta=h.remote.state.syncMeta;
+  assert.deepEqual(h.remote.state,expected);assert.deepEqual(input,expected);
+  assert.deepEqual(h.live,h.before);
+});
+for(const [name,validate] of [["returns false",()=>false],["throws",()=>{throw Error("validator rejected");}]]){
+  test("CJO-02B validator "+name+" fails closed before transaction.set",async()=>{
+    const h=harness();
+    const result=await h.context.write(h.source,{merge:true},{expectedRevision:7,validatePreparedState:validate});
+    assert.equal(result.saved,false);assert.equal(result.definiteFailure,true);
+    assert.equal(result.errorCode,"chronology_state_changed");
+    assert.equal(h.remote.queues,0);assert.equal(h.remote.commits,0);
+    assert.deepEqual(h.remote.state,h.before);assert.deepEqual(h.live,h.before);
+  });
+}
+test("CJO-02B no-validator protected writer remains compatible",async()=>{
+  const h=harness(),result=await h.context.write(h.source,{merge:true},{expectedRevision:7});
+  assert.equal(result.saved,true);assert.equal(h.remote.commits,1);
+  assert.equal(h.calls.preflights,1);assert.equal(h.calls.merges,1);
+  const expected=clone(h.before);expected.syncMeta=h.remote.state.syncMeta;
+  assert.deepEqual(h.remote.state,expected);
+});
+test("CJO-02B direct history mutation is blocked; coordinator commits the same canonical domain",async()=>{
+  const h=harness(),history=require("../js/cuttingJobHistory");
+  const result=history.resequence(h.source.cuttingJobs,h.source.completedCuttingJobs);
+  assert.equal(result.requiresCoordinator,true);assert.equal(result.blocked,true);
+  assert.deepEqual(h.source,h.before);assert.equal(h.remote.commits,0);
+  const saved=await h.api.save(correction,{expectedRevision:7});
+  assert.equal(saved.saved,true,saved.error);assert.equal(saved.verified,true);
+  assert.equal(h.calls.writes,1);assert.equal(h.remote.commits,1);
+  assert.deepEqual(h.remote.state.completedCuttingJobs.map(job=>job.cutNumber),["C001","C003"]);
+  assert.equal(h.remote.state.cuttingJobs[0].cutNumber,"C002");
+});
