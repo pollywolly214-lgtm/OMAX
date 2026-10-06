@@ -4189,6 +4189,395 @@ function scanAuthoritativeCutFileContent(state, rootPath = "$"){
 }
 
 const inventoryIdentityRepairAuthorizations=new Map();
+// CJD authorizes one exact job-to-trash move, never general array shrinkage.
+const cuttingJobDeletionAuthorizations = new Map();
+const cuttingJobDeletionProofs = new WeakSet();
+const cuttingJobDeletionTransactions = new WeakSet();
+let cuttingJobDeletionInProgress = false;
+let activeCuttingJobHistoryMutation = null;
+const cuttingJobHistoryRestoreAuthorizations = new Map();
+const cuttingJobHistoryRestoreProofs = new WeakSet();
+const cuttingJobHistoryRestoreTransactions = new WeakSet();
+
+function reportCloudSaveSecondaryError(result, error){
+  const warning = `Persistence result retained after reporting failed: ${String(error?.message || error)}`;
+  try { console.warn(warning, error); } catch (_loggingError){ /* Preserve the known write classification even if logging fails. */ }
+  return { ...result, warnings:[...(result?.warnings || []), warning] };
+}
+
+function cuttingJobSaveIsIndeterminate(result){
+  return !result || result.indeterminate === true || result.stateWriteCompleted === true
+    || (result.stateWriteAttempted === true && result.definiteFailure !== true && result.saved !== true);
+}
+
+function requireCuttingJobCloudVerification(result){
+  const uncertain = { ...result, saved:false, indeterminate:true,
+    error:"Completion is uncertain. Reload authoritative cloud state to verify before retrying." };
+  window.__lastIndeterminateSave = uncertain;
+  return reportCuttingJobRecovery(uncertain);
+}
+
+function reportCuttingJobRecovery(result){
+  window.__autosaveDisabled = true; window.__recoveryInspectMode = true;
+  try { renderRecoveryDiagnosticsPanel(); } catch (error){ return reportCloudSaveSecondaryError(result, error); }
+  return result;
+}
+
+function validateCuttingJobHistoryRestoreSave(remote, pending, proof){
+  if (!proof) return { valid:true };
+  if (!cuttingJobHistoryRestoreProofs.has(proof) || Date.now() > proof.expiresAt
+    || remote?.syncMeta?.rev !== proof.expectedRevision
+    || cuttingJobDeletionProtectedKey(remote) !== proof.sourceKey
+    || cuttingJobDeletionProtectedKey(pending) !== proof.pendingKey) return { valid:false, error:"History restoration source, result, or revision changed; nothing was authorized." };
+  return { valid:true };
+}
+
+function cuttingJobHistoryBusinessKey(snapshot){
+  const state = { ...snapshot };
+  delete state.syncMeta; delete state.saveMeta; delete state.syncProcessLog;
+  return stableStringifyForIntegrity(state);
+}
+
+function recordCuttingJobHistorySnapshot(snapshot){
+  const json = JSON.stringify(snapshot);
+  if (currentSnapshotJSON && cuttingJobHistoryBusinessKey(JSON.parse(currentSnapshotJSON)) === cuttingJobHistoryBusinessKey(snapshot)) currentSnapshotJSON = json;
+  else captureHistoryState(json);
+}
+
+function beginCuttingJobHistoryMutation(mutation){
+  mutation.historySnapshots = [];
+  mutation.stagedSnapshot = cloneStructured(snapshotState({ skipLocalFileCacheSync:true }));
+  activeCuttingJobHistoryMutation = mutation;
+}
+
+function reconcileCuttingJobHistorySnapshot(snapshot, mutation){
+  const state = cloneStructured(snapshot), jobs = state[mutation.collection];
+  const orderOwned = stableStringifyForIntegrity(jobs.map(job => String(job?.id))) === stableStringifyForIntegrity(mutation.stagedSnapshot[mutation.collection].map(job => String(job?.id)));
+  const matches = jobs.filter(job => String(job?.id) === mutation.id);
+  if (mutation.restoring){
+    if (matches.length !== 1 || stableStringifyForIntegrity(matches[0]) !== mutation.restoredKey) return null;
+    jobs.splice(jobs.indexOf(matches[0]), 1);
+    if (state.deletedItems.some(entry => entry.id === mutation.trash.id)) return null;
+    state.deletedItems.unshift(cloneStructured(mutation.trash));
+  } else {
+    if (matches.length) return null;
+    jobs.splice(Math.min(mutation.before.findIndex(job => String(job?.id) === mutation.id), jobs.length), 0, cloneStructured(mutation.job));
+    const index = state.deletedItems.findIndex(entry => entry.id === mutation.trash.id);
+    if (index < 0 || stableStringifyForIntegrity(state.deletedItems[index]) !== mutation.trashKey) return null;
+    state.deletedItems.splice(index, 1);
+  }
+  for (const change of mutation.priorities){
+    const job = jobs.find(entry => String(entry?.id) === String(change.job.id));
+    if (job && job.priority === change.after){
+      if (change.had) job.priority = change.before;
+      else delete job.priority;
+    }
+  }
+  const beforeIds = mutation.before.map(job => String(job?.id));
+  if (orderOwned && jobs.length === beforeIds.length && jobs.every(job => beforeIds.includes(String(job?.id)))){
+    const byId = new Map(jobs.map(job => [String(job?.id), job]));
+    state[mutation.collection] = beforeIds.map(id => byId.get(id));
+  }
+  return state;
+}
+
+function finishCuttingJobHistoryMutation(mutation, confirmed, replay = false){
+  if (activeCuttingJobHistoryMutation === mutation) activeCuttingJobHistoryMutation = null;
+  if (confirmed && replay) return { historyBaseline:mutation.stagedSnapshot, historySnapshots:mutation.historySnapshots };
+  if (confirmed) recordCuttingJobHistorySnapshot(mutation.stagedSnapshot);
+  for (const snapshot of mutation.historySnapshots){
+    const state = confirmed ? snapshot : reconcileCuttingJobHistorySnapshot(snapshot, mutation);
+    if (state) recordCuttingJobHistorySnapshot(state);
+  }
+  recordCuttingJobHistorySnapshot(snapshotState({ skipLocalFileCacheSync:true }));
+  return {};
+}
+
+function cuttingJobDeletionFailure(error){
+  return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false,
+    stateWriteCompleted:false, errorCode:"cutting_job_deletion_rejected", error };
+}
+
+function saveCloudNowForHistory(saveOptions = {}){
+  const priorSuppression = suppressHistory;
+  try {
+    // Suppress only this flush's synchronous capture, never concurrent edits
+    // captured while the queued persistence is being awaited.
+    suppressHistory = true;
+    return saveCloudNow(saveOptions);
+  } finally { suppressHistory = priorSuppression; }
+}
+
+function cuttingJobDeletionProtectedKey(state){
+  const keys = Array.from(new Set(PROTECTED_FIELD_REGISTRY.map(entry => entry.path.split(".")[0]).concat("deletedItems"))).sort();
+  return stableStringifyForIntegrity(keys.map(key => [key, Object.prototype.hasOwnProperty.call(state || {}, key), state?.[key]]));
+}
+
+function cuttingJobDeletionArray(source, collection, id){
+  const remaining = source.filter(job => String(job?.id) !== id).map(job => cloneStructured(job));
+  if (collection === "cuttingJobs"){
+    // Same stable priority sort and contiguous priorities as the Jobs table.
+    const priority = job => Number.isFinite(Number(job?.priority)) && Number(job.priority) > 0 ? Math.max(1, Math.floor(Number(job.priority))) : 1;
+    remaining.sort((a, b) => priority(a) - priority(b));
+    remaining.forEach((job, index) => { job.priority = index + 1; });
+  }
+  return remaining;
+}
+
+function validateCuttingJobDeletionSave(remote, pending, proof = null){
+  const collections = ["cuttingJobs", "completedCuttingJobs"];
+  if (!proof){
+    // Completion retains the stable ID in completed history. Ordinary record
+    // loss, even below the count thresholds, must not masquerade as deletion.
+    const counts = state => Object.fromEntries(collections.map(key => {
+      const result = new Map();
+      for (const job of (Array.isArray(state?.[key]) ? state[key] : [])){
+        const id = String(job?.id); result.set(id, (result.get(id) || 0) + 1);
+      }
+      return [key, result];
+    }));
+    const prior = counts(remote), next = counts(pending);
+    const lost = collections.some(key => Array.from(prior[key]).some(([id, count]) => {
+      const completedTransfer = key === "cuttingJobs" ? Math.max(0, (next.completedCuttingJobs.get(id) || 0) - (prior.completedCuttingJobs.get(id) || 0)) : 0;
+      return (next[key].get(id) || 0) + completedTransfer < count;
+    }));
+    return lost ? { valid:false, error:"Cutting-job loss requires an exact job-to-trash authorization." } : { valid:true };
+  }
+  if (!cuttingJobDeletionProofs.has(proof) || Date.now() > proof.expiresAt) return { valid:false, error:"Cutting-job deletion authorization is invalid or expired." };
+  if (remote?.syncMeta?.rev !== proof.expectedRevision) return { valid:false, error:"Cutting-job deletion revision changed; reload before retrying." };
+  if (cuttingJobDeletionProtectedKey(remote) !== proof.sourceKey) return { valid:false, error:"Cutting-job deletion source or unrelated protected data changed." };
+  if (cuttingJobDeletionProtectedKey(pending) !== proof.pendingKey) return { valid:false, error:"Cutting-job deletion result or trash preservation changed." };
+  const matches = collections.flatMap(key => (Array.isArray(remote?.[key]) ? remote[key] : []).filter(job => String(job?.id) === proof.id).map(job => ({ key, job })));
+  if (matches.length !== 1 || matches[0].key !== proof.collection || stableStringifyForIntegrity(matches[0].job) !== proof.payloadKey) return { valid:false, error:"Cutting-job deletion identity or payload is ambiguous or changed." };
+  if (!Array.isArray(remote.deletedItems) || !Array.isArray(pending.deletedItems)) return { valid:false, error:"Cutting-job deletion requires authoritative trash." };
+  const entries = pending.deletedItems.filter(entry => entry?.id === proof.trash.id);
+  if (entries.length !== 1 || stableStringifyForIntegrity(entries[0]) !== stableStringifyForIntegrity(proof.trash)
+    || entries[0].type !== (proof.collection === "cuttingJobs" ? "job" : "completed-job")
+    || stableStringifyForIntegrity(entries[0].payload) !== proof.payloadKey) return { valid:false, error:"The exact deleted job is not preserved in matching trash." };
+  const expected = { ...remote, [proof.collection]:cuttingJobDeletionArray(remote[proof.collection], proof.collection, proof.id), deletedItems:[proof.trash, ...remote.deletedItems] };
+  if (remote.deletedItems.some(entry => entry?.id === proof.trash.id) || cuttingJobDeletionProtectedKey(expected) !== cuttingJobDeletionProtectedKey(pending)) return { valid:false, error:"Only one job and its bounded priority changes may move into new trash." };
+  return { valid:true };
+}
+
+function authorizeCuttingJobDeletion(before, pending, collection, id, trash, expectedRevision){
+  if (!["cuttingJobs", "completedCuttingJobs"].includes(collection) || !id || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) return { authorized:false, error:"Invalid cutting-job deletion identity or revision." };
+  const source = before?.[collection];
+  const matches = Array.isArray(source) ? source.filter(job => String(job?.id) === id) : [];
+  if (matches.length !== 1) return { authorized:false, error:"Select one unambiguous cutting job." };
+  const proof = Object.freeze({ collection, id, expectedRevision, sourceKey:cuttingJobDeletionProtectedKey(before),
+    pendingKey:cuttingJobDeletionProtectedKey(pending), payloadKey:stableStringifyForIntegrity(matches[0]),
+    trash:cloneStructured(trash), expiresAt:Date.now() + 60000 });
+  cuttingJobDeletionProofs.add(proof);
+  const checked = validateCuttingJobDeletionSave(before, pending, proof);
+  if (!checked.valid){ cuttingJobDeletionProofs.delete(proof); return { authorized:false, error:checked.error }; }
+  const token = genId("cutting_job_deletion");
+  cuttingJobDeletionAuthorizations.set(token, proof);
+  return { authorized:true, token };
+}
+
+function consumeCuttingJobDeletionAuthorization(token, pending, expectedRevision){
+  const proof = cuttingJobDeletionAuthorizations.get(token);
+  cuttingJobDeletionAuthorizations.delete(token);
+  if (!proof || proof.expectedRevision !== expectedRevision || Date.now() > proof.expiresAt
+    || cuttingJobDeletionProtectedKey(pending) !== proof.pendingKey) return { authorized:false, error:"Cutting-job deletion authorization is missing, stale, altered, or already used." };
+  return { authorized:true, proof };
+}
+
+function cuttingJobDeletionSafetyBaseline(state, pending, proof){
+  // Called only after exact proof validation; all other guard inputs stay intact.
+  return proof && state ? { ...state, [proof.collection]:pending[proof.collection] } : state;
+}
+
+function rollbackCuttingJobDeletion(mutation){
+  const { collection, id, job, before, staged, trash, priorities } = mutation;
+  const current = window[collection];
+  const allJobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])];
+  if (current !== staged || allJobs.some(entry => String(entry?.id) === id)) return false;
+  const stagedIds = cuttingJobDeletionArray(before, collection, id).map(entry => String(entry?.id));
+  const orderOwned = stableStringifyForIntegrity(current.map(entry => String(entry?.id))) === stableStringifyForIntegrity(stagedIds);
+  for (const change of priorities){
+    if (current.includes(change.job) && change.job.priority === change.after){
+      if (change.had) change.job.priority = change.before;
+      else delete change.job.priority;
+    }
+  }
+  if (orderOwned){
+    const byId = new Map(current.map(entry => [String(entry?.id), entry]));
+    current.splice(0, current.length, ...before.map(entry => String(entry?.id) === id ? job : byId.get(String(entry?.id))));
+  } else {
+    const originalIndex = before.findIndex(entry => String(entry?.id) === id);
+    current.splice(Math.min(originalIndex, current.length), 0, job);
+  }
+  const trashIndex = window.deletedItems?.findIndex(entry => entry === trash);
+  if (trashIndex >= 0 && stableStringifyForIntegrity(window.deletedItems[trashIndex]) === mutation.trashKey) window.deletedItems.splice(trashIndex, 1);
+  else return false;
+  refreshGlobalCollections();
+  // Replace this operation's rejected staged backup using the existing helper.
+  persistLocalStateBackup(snapshotState({ skipLocalFileCacheSync:true }));
+  return true;
+}
+
+async function deleteCuttingJob(collection, jobId, historyTarget = null){
+  if (cuttingJobDeletionInProgress) return cuttingJobDeletionFailure("Another cutting-job deletion is still saving.");
+  if (!["cuttingJobs", "completedCuttingJobs"].includes(collection) || jobId == null || String(jobId) === "") return cuttingJobDeletionFailure("Select a valid cutting job.");
+  if (!canWriteCloud("cutting-job deletion") || !FB.ready || !FB.user || isVercelPreviewRuntime()) return cuttingJobDeletionFailure("Cloud writes are unavailable; the cutting job was not removed.");
+  const id = String(jobId);
+  const matches = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])].filter(job => String(job?.id) === id);
+  if (matches.length !== 1 || !(window[collection] || []).includes(matches[0])) return cuttingJobDeletionFailure("Select one unambiguous cutting job; duplicate or missing IDs cannot be deleted.");
+  const job = matches[0];
+  const originalPayloadKey = stableStringifyForIntegrity(job);
+  if (!historyTarget && (typeof window.confirm !== "function" || !window.confirm(`Remove cutting job "${String(job.name || id)}"? It will be placed in Trash and can be restored for 30 days.`))) return { saved:false, cancelled:true };
+  cuttingJobDeletionInProgress = true;
+  let mutation = null, token = null, writeOutcome = null;
+  try {
+    // Finish earlier saves before binding this operation to one cloud revision.
+    if (hasPendingLocalChanges){
+      const settled = await (historyTarget ? saveCloudNowForHistory() : saveCloudNow());
+      if (!settled?.saved || !settled.stateWriteCompleted) return cuttingJobDeletionFailure("Existing changes could not be confirmed; the cutting job was not removed.");
+    } else await cloudSaveQueue;
+    if (!canWriteCloud("cutting-job deletion")) return cuttingJobDeletionFailure("Cloud writes are blocked; the cutting job was not removed.");
+    refreshGlobalCollections();
+    const before = compactStateForStorage(snapshotState({ skipLocalFileCacheSync:true }));
+    const expectedRevision = window.__loadedCloudRevisionForSaveGuard;
+    before.syncMeta = { ...before.syncMeta, rev:expectedRevision };
+    if (stableStringifyForIntegrity(job) !== originalPayloadKey || cuttingJobDeletionProtectedKey(before) !== cuttingJobDeletionProtectedKey(window.__lastLoadedCloudState)) return cuttingJobDeletionFailure("The job or protected state changed; save/reload and review before deleting.");
+    const type = collection === "cuttingJobs" ? "job" : "completed-job";
+    // Preserve existing trash verbatim; addDeletedItem also purges/schedules a
+    // separate save, so this bounded operation stages the same schema itself.
+    const trash = historyTarget ? cloneStructured(historyTarget.deletedItems?.[0])
+      : { id:genId(`trash_${type}`), type, payload:cloneStructured(job), meta:{}, label:buildTrashLabel(type, job, {}), deletedAt:new Date().toISOString() };
+    if (!trash || !Number.isFinite(Date.parse(trash.deletedAt)) || Date.now() - Date.parse(trash.deletedAt) > 30 * 24 * 60 * 60 * 1000) return cuttingJobDeletionFailure("History deletion requires a recoverable matching trash record.");
+    const next = historyTarget || { ...before, [collection]:cuttingJobDeletionArray(before[collection], collection, id), deletedItems:[trash, ...before.deletedItems] };
+    const authorization = authorizeCuttingJobDeletion(before, next, collection, id, trash, expectedRevision);
+    if (!authorization.authorized) return cuttingJobDeletionFailure(authorization.error);
+    token = authorization.token;
+    const originals = new Map(window[collection].map(entry => [String(entry?.id), entry]));
+    const priorities = [];
+    const staged = next[collection].map(entry => {
+      const live = originals.get(String(entry?.id));
+      if (collection === "cuttingJobs"){
+        priorities.push({ job:live, had:Object.prototype.hasOwnProperty.call(live, "priority"), before:live.priority, after:entry.priority });
+        live.priority = entry.priority;
+      }
+      return live;
+    });
+    mutation = { collection, id, job, before:before[collection], staged, trash, priorities, trashKey:stableStringifyForIntegrity(trash) };
+    window[collection] = staged;
+    window.deletedItems.unshift(trash);
+    refreshGlobalCollections();
+    beginCuttingJobHistoryMutation(mutation);
+    let result;
+    try { result = await saveCloudNow({ expectedRevision, cuttingJobDeletionToken:token }); }
+    catch (error){ result = { saved:false, indeterminate:true, error:String(error?.message || error) }; }
+    writeOutcome = result;
+    if (result?.saved === true && result.stateWriteCompleted === true){
+      return { ...result, ...finishCuttingJobHistoryMutation(mutation, true, Boolean(historyTarget)) };
+    }
+    if (cuttingJobSaveIsIndeterminate(result)) return requireCuttingJobCloudVerification({ ...result, historySnapshots:mutation.historySnapshots });
+    const rolledBack = rollbackCuttingJobDeletion(mutation);
+    if (rolledBack) finishCuttingJobHistoryMutation(mutation, false);
+    const failed = { ...result, saved:false, rolledBack, error:rolledBack ? `Job was not deleted: ${result.error || "cloud save failed"}` : "Deletion failed and local state changed. Reload authoritative cloud state before retrying." };
+    return rolledBack ? failed : reportCuttingJobRecovery(failed);
+  } catch (error){
+    if (writeOutcome?.saved && writeOutcome.stateWriteCompleted) return reportCloudSaveSecondaryError(writeOutcome, error);
+    if (writeOutcome && cuttingJobSaveIsIndeterminate(writeOutcome)) return requireCuttingJobCloudVerification(reportCloudSaveSecondaryError(writeOutcome, error));
+    const rolledBack = !mutation || rollbackCuttingJobDeletion(mutation);
+    if (mutation && rolledBack) finishCuttingJobHistoryMutation(mutation, false);
+    const failed = { ...cuttingJobDeletionFailure(String(error?.message || error)), rolledBack };
+    return rolledBack ? failed : reportCuttingJobRecovery(failed);
+  } finally {
+    if (activeCuttingJobHistoryMutation === mutation) activeCuttingJobHistoryMutation = null;
+    if (token) cuttingJobDeletionAuthorizations.delete(token);
+    cuttingJobDeletionInProgress = false;
+  }
+}
+window.deleteCuttingJob = deleteCuttingJob;
+
+function rollbackCuttingJobHistoryRestore(mutation){
+  const current = window[mutation.collection];
+  if (current !== mutation.staged || window.deletedItems !== mutation.trashArray
+    || !current.includes(mutation.job) || stableStringifyForIntegrity(mutation.job) !== mutation.restoredKey
+    || window.deletedItems.some(entry => entry.id === mutation.trash.id)) return false;
+  const orderOwned = stableStringifyForIntegrity(current.map(job => String(job?.id))) === stableStringifyForIntegrity(mutation.stagedSnapshot[mutation.collection].map(job => String(job?.id)));
+  current.splice(current.indexOf(mutation.job), 1);
+  for (const change of mutation.priorities){
+    if (current.includes(change.job) && change.job.priority === change.after){
+      if (change.had) change.job.priority = change.before;
+      else delete change.job.priority;
+    }
+  }
+  if (orderOwned){
+    const byId = new Map(current.map(job => [String(job?.id), job]));
+    current.splice(0, current.length, ...mutation.before.map(job => byId.get(String(job?.id))));
+  }
+  window.deletedItems.unshift(mutation.trash);
+  refreshGlobalCollections();
+  persistLocalStateBackup(snapshotState({ skipLocalFileCacheSync:true }));
+  return true;
+}
+
+async function restoreCuttingJobHistory(collection, id, target){
+  if (cuttingJobDeletionInProgress || !canWriteCloud("cutting-job history restoration")) return cuttingJobDeletionFailure("Another operation or recovery review prevents history restoration.");
+  cuttingJobDeletionInProgress = true;
+  let mutation = null, writeOutcome = null, token = null;
+  try {
+    if (hasPendingLocalChanges){
+      const settled = await saveCloudNowForHistory();
+      if (!settled?.saved || !settled.stateWriteCompleted) return cuttingJobDeletionFailure("Existing changes could not be confirmed before history restoration.");
+    } else await cloudSaveQueue;
+    if (!canWriteCloud("cutting-job history restoration")) return cuttingJobDeletionFailure("Cloud writes are blocked.");
+    const before = compactStateForStorage(snapshotState({ skipLocalFileCacheSync:true }));
+    const archive = before.deletedItems?.[0];
+    const restored = target[collection].filter(job => String(job?.id) === id);
+    const existing = [...before.cuttingJobs, ...before.completedCuttingJobs].filter(job => String(job?.id) === id);
+    if (existing.length || restored.length !== 1 || !archive || archive.type !== (collection === "cuttingJobs" ? "job" : "completed-job")
+      || stableStringifyForIntegrity(archive.payload) !== stableStringifyForIntegrity(restored[0])
+      || cuttingJobDeletionProtectedKey(before) !== cuttingJobDeletionProtectedKey(window.__lastLoadedCloudState)) return cuttingJobDeletionFailure("History restoration does not match one exact archived job and the current cloud baseline.");
+    const inverse = { ...target, [collection]:cuttingJobDeletionArray(target[collection], collection, id), deletedItems:[archive, ...target.deletedItems] };
+    if (cuttingJobDeletionProtectedKey(inverse) !== cuttingJobDeletionProtectedKey(before)) return cuttingJobDeletionFailure("History restoration would change unrelated protected data.");
+    const expectedRevision = window.__loadedCloudRevisionForSaveGuard;
+    const proof = Object.freeze({ expectedRevision, sourceKey:cuttingJobDeletionProtectedKey(before), pendingKey:cuttingJobDeletionProtectedKey(target), expiresAt:Date.now() + 60000 });
+    cuttingJobHistoryRestoreProofs.add(proof);
+    token = genId("cutting_job_history_restore");
+    cuttingJobHistoryRestoreAuthorizations.set(token, proof);
+    const originals = new Map(window[collection].map(job => [String(job?.id), job]));
+    const job = cloneStructured(archive.payload), priorities = [];
+    const staged = target[collection].map(entry => {
+      if (String(entry?.id) === id) return job;
+      const live = originals.get(String(entry?.id));
+      if (collection === "cuttingJobs"){
+        priorities.push({ job:live, had:Object.prototype.hasOwnProperty.call(live, "priority"), before:live.priority, after:entry.priority });
+        if (Object.prototype.hasOwnProperty.call(entry, "priority")) live.priority = entry.priority;
+        else delete live.priority;
+      }
+      return live;
+    });
+    mutation = { restoring:true, collection, id, job, restoredKey:stableStringifyForIntegrity(job), before:before[collection], staged,
+      trash:window.deletedItems[0], trashArray:window.deletedItems, priorities };
+    window[collection] = staged; window.deletedItems.shift(); refreshGlobalCollections();
+    beginCuttingJobHistoryMutation(mutation);
+    const saving = saveCloudNowForHistory({ expectedRevision, cuttingJobHistoryRestoreToken:token });
+    try { writeOutcome = await saving; }
+    catch (error){ writeOutcome = { saved:false, indeterminate:true, error:String(error?.message || error) }; }
+    if (writeOutcome?.saved && writeOutcome.stateWriteCompleted) return { ...writeOutcome, ...finishCuttingJobHistoryMutation(mutation, true, true) };
+    if (cuttingJobSaveIsIndeterminate(writeOutcome)) return requireCuttingJobCloudVerification({ ...writeOutcome, historySnapshots:mutation.historySnapshots });
+    const rolledBack = rollbackCuttingJobHistoryRestore(mutation);
+    if (rolledBack) finishCuttingJobHistoryMutation(mutation, false);
+    const failed = { ...writeOutcome, saved:false, rolledBack, error:"History restoration was not confirmed; the owned restoration was rolled back or retained for recovery review." };
+    return rolledBack ? failed : reportCuttingJobRecovery(failed);
+  } catch (error){
+    if (writeOutcome?.saved && writeOutcome.stateWriteCompleted) return reportCloudSaveSecondaryError(writeOutcome, error);
+    if (writeOutcome && cuttingJobSaveIsIndeterminate(writeOutcome)) return requireCuttingJobCloudVerification(reportCloudSaveSecondaryError(writeOutcome, error));
+    const rolledBack = !mutation || rollbackCuttingJobHistoryRestore(mutation);
+    if (mutation && rolledBack) finishCuttingJobHistoryMutation(mutation, false);
+    const failed = { ...cuttingJobDeletionFailure(String(error?.message || error)), rolledBack };
+    return rolledBack ? failed : reportCuttingJobRecovery(failed);
+  } finally {
+    if (token) cuttingJobHistoryRestoreAuthorizations.delete(token);
+    if (activeCuttingJobHistoryMutation === mutation) activeCuttingJobHistoryMutation = null;
+    cuttingJobDeletionInProgress = false;
+  }
+}
 async function writeReviewedGlobalIdentityRepair(next,{source,expectedRevision}){
   const api=window.OMAXGlobalIdentityRepair,plan=api.preview(source);
   if(window.__lastIndeterminateSave||window.__globalIdentityVerificationPending||window.__lastImportVerificationError||window.__lastInventoryIdentityRepairError)throw Error("Unresolved write verification blocks identity repair.");
@@ -4214,10 +4603,20 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
   const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
     &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
-  if (!identityAuthorized && !canWriteCloud("authoritative transaction")) return { saved:false, blocked:true, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
+  if (!identityAuthorized && !canWriteCloud("authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
+  const deletionProof = options.cuttingJobDeletionProof;
+  if (deletionProof){
+    if (!cuttingJobDeletionProofs.has(deletionProof) || cuttingJobDeletionTransactions.has(deletionProof)) return cuttingJobDeletionFailure("Cutting-job deletion transaction authorization is invalid or already used.");
+    cuttingJobDeletionTransactions.add(deletionProof);
+  }
+  const historyRestoreProof = options.cuttingJobHistoryRestoreProof;
+  if (historyRestoreProof){
+    if (!cuttingJobHistoryRestoreProofs.has(historyRestoreProof) || cuttingJobHistoryRestoreTransactions.has(historyRestoreProof)) return cuttingJobDeletionFailure("History restoration transaction proof is invalid or already used.");
+    cuttingJobHistoryRestoreTransactions.add(historyRestoreProof);
+  }
   const writer = window.OMAXAtomicPersistence?.save;
   if (typeof writer !== "function" || !window.CuttingFileContentFirewall){
-    return { saved:false, blocked:true, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
+    return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
   }
   const result = await writer({ db:FB.db, docRef:FB.docRef, state, setOptions,
     expectedRevision:options.expectedRevision ?? Number(window.__loadedCloudRevisionForSaveGuard || 0),
@@ -4229,16 +4628,22 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
         return pending;
       }
       const proof = options.repairProof;
+      const deletionCheck = validateCuttingJobDeletionSave(remote, pending, deletionProof);
+      if (!deletionCheck.valid) throw Object.assign(new Error(deletionCheck.error), { definite:true, code:"cutting_job_deletion_rejected" });
+      const historyRestoreCheck = validateCuttingJobHistoryRestoreSave(remote, pending, historyRestoreProof);
+      if (!historyRestoreCheck.valid) throw Object.assign(new Error(historyRestoreCheck.error), { definite:true, code:"cutting_job_history_restore_rejected" });
       if (proof && !validateMaintenanceV2RepairRemoteBaseline(proof, remote)) throw Object.assign(new Error("Latest V2 state no longer matches the authorized repair baseline."), { definite:true, code:"repair_conflict" });
-      const safetyRemote = proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote;
-      const safetyBaseline = proof ? { ...window.__lastLoadedCloudState, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : window.__lastLoadedCloudState;
+      const safetyRemote = cuttingJobDeletionSafetyBaseline(proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote, pending, deletionProof);
+      const safetyBaseline = cuttingJobDeletionSafetyBaseline(proof ? { ...window.__lastLoadedCloudState, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : window.__lastLoadedCloudState, pending, deletionProof);
       const backup = readLocalStateBackup();
-      const safetyBackup = proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup;
+      const safetyBackup = cuttingJobDeletionSafetyBaseline(proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup, pending, deletionProof);
       const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:buildWindowProtectedStateForCoverage(), coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
       if (preflight.blocked || detectDangerousProtectedFieldReduction(safetyRemote, pending).blocked) throw Object.assign(new Error("Protected-state transaction preflight blocked the write."), { definite:true, code:"protected_preflight_blocked" });
-      pending.totalHistory = mergeTotalHistoryForSave(pending.totalHistory, remote.totalHistory);
-      pending.dailyCutHours = mergeDailyCutHoursForSave(pending.dailyCutHours, remote.dailyCutHours);
-      pending.pumpEff = mergePumpEffForSave(pending.pumpEff, remote.pumpEff);
+      if (!deletionProof && !historyRestoreProof){
+        pending.totalHistory = mergeTotalHistoryForSave(pending.totalHistory, remote.totalHistory);
+        pending.dailyCutHours = mergeDailyCutHoursForSave(pending.dailyCutHours, remote.dailyCutHours);
+        pending.pumpEff = mergePumpEffForSave(pending.pumpEff, remote.pumpEff);
+      }
       if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
       // Additional chronology restriction, after all existing protected merges.
       // It cannot bypass CAS, identity, content, size or protected-state gates.
@@ -4254,14 +4659,16 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       return pending;
     }
   });
-  if (result.saved && result.committedState) Object.assign(state, result.committedState);
-  if (result.errorCode === "authoritative_state_missing") enterMissingStateRecovery();
   if (result.indeterminate){
     window.__autosaveDisabled = true;
     window.__recoveryInspectMode = true;
     window.__lastIndeterminateSave = result;
-    renderRecoveryDiagnosticsPanel();
   }
+  try {
+    if (result.saved && result.committedState) Object.assign(state, result.committedState);
+    if (result.errorCode === "authoritative_state_missing") enterMissingStateRecovery();
+    if (result.indeterminate) renderRecoveryDiagnosticsPanel();
+  } catch (error){ return reportCloudSaveSecondaryError(result, error); }
   return result;
 }
 
@@ -4680,6 +5087,7 @@ const redoStack = [];
 let currentSnapshotJSON = null;
 let suppressHistory = false;
 let skipNextHistoryCapture = false;
+let historyApplicationInProgress = false;
 
 function syncRenderTotalsFromHistory(){
   const len = Array.isArray(totalHistory) ? totalHistory.length : 0;
@@ -4713,32 +5121,73 @@ function resetHistoryToCurrent(options={}){
 
 function captureHistorySnapshot(){
   if (suppressHistory) return;
+  if (activeCuttingJobHistoryMutation){
+    activeCuttingJobHistoryMutation.historySnapshots.push(cloneStructured(snapshotState({ skipLocalFileCacheSync:true })));
+    return;
+  }
   if (skipNextHistoryCapture){
     skipNextHistoryCapture = false;
     return;
   }
   try {
-    const nextSnapshot = JSON.stringify(snapshotState());
-    if (nextSnapshot === currentSnapshotJSON) return;
-    if (currentSnapshotJSON){
-      undoStack.push(currentSnapshotJSON);
-      if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
-    }
-    currentSnapshotJSON = nextSnapshot;
-    redoStack.length = 0;
+    captureHistoryState(JSON.stringify(snapshotState()));
   } catch (err) {
     console.warn("History capture failed:", err);
   }
 }
 
-function applyHistorySnapshot(json){
+function captureHistoryState(nextSnapshot){
+  if (nextSnapshot === currentSnapshotJSON) return;
+  if (currentSnapshotJSON){
+    undoStack.push(currentSnapshotJSON);
+    if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+  }
+  currentSnapshotJSON = nextSnapshot;
+  redoStack.length = 0;
+}
+
+async function applyHistorySnapshot(json, onConfirmed = null){
   if (!json) return false;
+  if (cuttingJobDeletionInProgress){ toast("A cutting-job operation is still saving; history was not changed."); return false; }
   let data;
   try {
     data = JSON.parse(json);
   } catch (err) {
     console.warn("Could not parse history snapshot:", err);
     return false;
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)){ toast("History snapshot is invalid; nothing was changed."); return false; }
+  const current = compactStateForStorage(snapshotState({ skipLocalFileCacheSync:true }));
+  const removed = [], added = [];
+  for (const collection of ["cuttingJobs", "completedCuttingJobs"]){
+    if (!Array.isArray(data[collection])){ toast("History contains invalid cutting-job state; nothing was changed."); return false; }
+    const previousIds = new Set(current[collection].map(job => String(job?.id)));
+    const nextIds = new Set(data[collection].map(job => String(job?.id)));
+    current[collection].filter(job => !nextIds.has(String(job?.id))).forEach(job => removed.push({ collection, id:String(job.id) }));
+    data[collection].filter(job => !previousIds.has(String(job?.id))).forEach(job => added.push({ collection, id:String(job.id) }));
+    if (previousIds.size !== current[collection].length || nextIds.size !== data[collection].length){ toast("History job identity is ambiguous; nothing was changed."); return false; }
+  }
+  if (removed.length || added.length){
+    let result;
+    if (removed.length === 1 && !added.length) result = await deleteCuttingJob(removed[0].collection, removed[0].id, data);
+    else if (added.length === 1 && !removed.length) result = await restoreCuttingJobHistory(added[0].collection, added[0].id, data);
+    else { toast("History cannot remove or transfer multiple cutting jobs; nothing was changed."); return false; }
+    if (!result.saved){ toast(result.error || "History change was not confirmed."); return false; }
+    if (onConfirmed) onConfirmed();
+    currentSnapshotJSON = JSON.stringify(result.historyBaseline || snapshotState({ skipLocalFileCacheSync:true }));
+    for (const snapshot of (result.historySnapshots || [])) recordCuttingJobHistorySnapshot(snapshot);
+    recordCuttingJobHistorySnapshot(snapshotState({ skipLocalFileCacheSync:true }));
+    if (typeof route === "function"){ try { route(); } catch (error){ console.warn("Route after confirmed job history failed", error); } }
+    return true;
+  }
+  // History retains the same default protected-data checks before adoption;
+  // this is a preflight, never an exemption for a whole historical snapshot.
+  const pending = compactStateForStorage(data);
+  const preflight = validateProtectedSavePreflight({ baselineState:window.__lastLoadedCloudState, latestRemoteState:window.__lastLoadedCloudState,
+    pendingState:pending, localBackupState:readLocalStateBackup(), windowState:buildWindowProtectedStateForCoverage(),
+    coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"history application", allowFirstRun:false });
+  if (preflight.blocked || detectDangerousProtectedFieldReduction(window.__lastLoadedCloudState, pending).blocked || scanAuthoritativeCutFileContent(data).contaminated){
+    toast("Protected-data history change was rejected; nothing was changed."); return false;
   }
   suppressHistory = true;
   try {
@@ -4755,45 +5204,56 @@ function applyHistorySnapshot(json){
   }
   skipNextHistoryCapture = true;
   saveCloudDebounced();
+  if (onConfirmed) onConfirmed();
   return true;
 }
 
-function undoLastChange(){
+async function undoLastChange(){
+  if (historyApplicationInProgress) return false;
   if (!undoStack.length){
     toast("Nothing to undo");
     return false;
   }
-  const target = undoStack.pop();
+  const target = undoStack[undoStack.length - 1];
   const previous = currentSnapshotJSON;
-  if (applyHistorySnapshot(target)){
+  historyApplicationInProgress = true;
+  try { if (await applyHistorySnapshot(target, ()=>{
+    if (undoStack[undoStack.length - 1] !== target) return;
+    undoStack.pop();
     if (previous){
       redoStack.push(previous);
       if (redoStack.length > HISTORY_LIMIT) redoStack.shift();
     }
+  })){
     toast("Undid last change");
     return true;
   }
-  undoStack.push(target);
   return false;
+  } finally { historyApplicationInProgress = false; }
 }
 
-function redoLastUndo(){
+async function redoLastUndo(){
+  if (historyApplicationInProgress) return false;
   if (!redoStack.length){
     toast("Nothing to redo");
     return false;
   }
-  const target = redoStack.pop();
+  const target = redoStack[redoStack.length - 1];
   const previous = currentSnapshotJSON;
-  if (applyHistorySnapshot(target)){
+  historyApplicationInProgress = true;
+  try { if (await applyHistorySnapshot(target, ()=>{
+    if (redoStack[redoStack.length - 1] !== target) return;
+    redoStack.pop();
     if (previous){
       undoStack.push(previous);
       if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
     }
+  })){
     toast("Redid change");
     return true;
   }
-  redoStack.push(target);
   return false;
+  } finally { historyApplicationInProgress = false; }
 }
 
 resetHistoryToCurrent();
@@ -5439,9 +5899,26 @@ function jobFolderChildren(parentId){
   });
 }
 
-function addJobFolder(name, parentId, color){
+function validateManualJobProjectCategory(cat, project, original = null){
+  const jobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])];
+  const result = window.CuttingJobHistory.validateManualProjectCategory(cat, project, window.jobFolders || [], jobs, original);
+  if (!result.ok) toast(result.reason);
+  return result;
+}
+
+function applyManualJobProjectCategory(job, result){
+  if (!result.ok) throw new Error("Project/category validation is required.");
+  if (!result.unchanged){ job.projectNumber = result.projectNumber; job.cat = result.cat; }
+}
+
+function addJobFolder(name, parentId, color, projectNumber){
+  let ownership = null;
+  if (projectNumber !== undefined){
+    ownership = window.CuttingJobHistory.validateNewProjectCategory(projectNumber, name, window.jobFolders || [], [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])]);
+    if (!ownership.ok) throw new Error(ownership.reason);
+  }
   const folders = ensureJobFolderState();
-  const label = (name || "").trim();
+  const label = ownership ? ownership.name : (name || "").trim();
   const parentKey = parentId != null ? String(parentId) : JOB_ROOT_FOLDER_ID;
   const fallbackParent = folders.some(folder => String(folder.id) === parentKey)
     ? parentKey
@@ -5458,10 +5935,11 @@ function addJobFolder(name, parentId, color){
     order: orderBase + 1
   };
   const normalizedColor = normalizeHexColor(color);
+  if (ownership) folder.projectNumber = ownership.projectNumber;
   if (normalizedColor) folder.color = normalizedColor;
   folders.push(folder);
   setJobFolders(folders);
-  ensureJobCategories();
+  if (!ownership) ensureJobCategories();
   return folder;
 }
 
@@ -6353,6 +6831,11 @@ const saveCloudInternal = debounce((saveOptions = {})=>{
   return queued;
 }, 1800);
 
+function cloudSaveNoWriteFailure(errorCode, error){
+  return { saved:false, blocked:true, definiteFailure:true, indeterminate:false,
+    stateWriteAttempted:false, stateWriteCompleted:false, errorCode, error };
+}
+
 async function performCloudSave(saveOptions = {}){
   let authoritativeStateWriteAttempted = false;
   let authoritativeStateWriteCompleted = false;
@@ -6373,7 +6856,8 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.saveCloudInternalReturnValue = "firebase_not_ready";
       explicitTrace.saveCloudInternalReturnType = "early_return";
     }
-    return;
+    return cloudSaveNoWriteFailure(!FB.ready ? "firebase_not_ready" : "authoritative_doc_ref_unavailable",
+      !FB.ready ? "Firebase is not ready; no authoritative write was attempted." : "The authoritative document reference is unavailable; no write was attempted.");
   }
   const canWrite = canWriteCloud("saveCloudInternal");
   if (explicitTrace) explicitTrace.canWriteCloudPassed = Boolean(canWrite);
@@ -6383,8 +6867,9 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.saveCloudInternalReturnType = "early_return";
       explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
     }
-    return;
+    return cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked; no authoritative write was attempted.");
   }
+  if (isVercelPreviewRuntime()) return cloudSaveNoWriteFailure("preview_readonly", "Cloud save is disabled in preview read-only mode.");
   try{
     const expectedRevision = Number(saveOptions.expectedRevision ?? window.__loadedCloudRevisionForSaveGuard ?? 0);
     const mutationVersionAtSave = lastLocalMutationAt;
@@ -6393,10 +6878,7 @@ async function performCloudSave(saveOptions = {}){
     if (rawFirewall.contaminated){
       hasPendingLocalChanges = true;
       const blocked = {
-        saved:false, blocked:true,
-        error:"Embedded cutting-file content was blocked from authoritative state.",
-        errorCode:"embedded_cutting_file_content_blocked",
-        stateWriteAttempted:false, stateWriteCompleted:false,
+        ...cloudSaveNoWriteFailure("embedded_cutting_file_content_blocked", "Embedded cutting-file content was blocked from authoritative state."),
         findings:rawFirewall.findings
       };
       if (explicitTrace){
@@ -6416,6 +6898,17 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.snapshotOccurrenceFoundInsideSave = rawOccurrences.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
     }
     const snap = compactStateForStorage(rawSnap);
+    const deletionAuthorization = saveOptions.cuttingJobDeletionToken
+      ? consumeCuttingJobDeletionAuthorization(saveOptions.cuttingJobDeletionToken, snap, expectedRevision)
+      : { authorized:false };
+    if (saveOptions.cuttingJobDeletionToken && !deletionAuthorization.authorized) return cuttingJobDeletionFailure(deletionAuthorization.error);
+    const deletionProof = deletionAuthorization.proof || null;
+    const historyRestoreProof = saveOptions.cuttingJobHistoryRestoreToken ? cuttingJobHistoryRestoreAuthorizations.get(saveOptions.cuttingJobHistoryRestoreToken) : null;
+    if (saveOptions.cuttingJobHistoryRestoreToken){
+      cuttingJobHistoryRestoreAuthorizations.delete(saveOptions.cuttingJobHistoryRestoreToken);
+      if (!historyRestoreProof || historyRestoreProof.expectedRevision !== expectedRevision || Date.now() > historyRestoreProof.expiresAt
+        || cuttingJobDeletionProtectedKey(snap) !== historyRestoreProof.pendingKey) return cuttingJobDeletionFailure("History restoration proof is missing, stale, altered, or already used.");
+    }
     if (explicitTrace){
       const compactedInstances = Array.isArray(snap?.maintenanceCalendarInstancesV2) ? snap.maintenanceCalendarInstancesV2 : [];
       const compactedOccurrences = Array.isArray(snap?.maintenanceOccurrencesV2) ? snap.maintenanceOccurrencesV2 : [];
@@ -6431,7 +6924,7 @@ async function performCloudSave(saveOptions = {}){
     const repairAuthorization = consumeMaintenanceV2RepairAuthorization(saveOptions?.maintenanceV2RepairToken, snap);
     const allowScheduledV2Dedupe = repairAuthorization.authorized === true;
     if (saveOptions?.maintenanceV2RepairToken && !allowScheduledV2Dedupe){
-      return { saved:false, error:repairAuthorization.error || "V2 repair authorization was rejected." };
+      return cloudSaveNoWriteFailure("maintenance_repair_authorization_rejected", repairAuthorization.error || "V2 repair authorization was rejected.");
     }
     if (!allowScheduledV2Dedupe && (pendingMetrics.completedDatesCount + pendingMetrics.manualHistoryCount + pendingMetrics.maintenanceOccurrencesV2Count + 10) < (baselineMetrics.completedDatesCount + baselineMetrics.manualHistoryCount + baselineMetrics.maintenanceOccurrencesV2Count)){
       if (explicitTrace){
@@ -6441,7 +6934,7 @@ async function performCloudSave(saveOptions = {}){
         explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
       }
       console.error("Cloud save blocked: maintenance completion history would be reduced unexpectedly.", { pendingMetrics, baselineMetrics });
-      return { saved:false, error:"Maintenance completion history reduction was blocked." };
+      return cloudSaveNoWriteFailure("maintenance_history_reduction_blocked", "Maintenance completion history reduction was blocked.");
     }
     if (pendingCore.inventoryCount + 5 < baselineCore.inventoryCount || pendingCore.orderRequestsCount + 2 < baselineCore.orderRequestsCount || pendingCore.orderLineItemCount + 5 < baselineCore.orderLineItemCount || pendingCore.settingsFoldersCount + 1 < baselineCore.settingsFoldersCount || pendingCore.toleranceFieldCount + 1 < baselineCore.toleranceFieldCount || (!pendingCore.layoutPresent && baselineCore.layoutPresent)){
       if (explicitTrace){
@@ -6451,7 +6944,7 @@ async function performCloudSave(saveOptions = {}){
         explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
       }
       console.error("Cloud save blocked: core business data would be reduced unexpectedly.", { pendingCore, baselineCore });
-      return { saved:false, error:"Core business data reduction was blocked." };
+      return cloudSaveNoWriteFailure("core_business_reduction_blocked", "Core business data reduction was blocked.");
     }
     const sizeBytes = estimatePayloadBytes(snap);
     if (sizeBytes >= FIRESTORE_WARN_BYTES){
@@ -6470,7 +6963,7 @@ async function performCloudSave(saveOptions = {}){
       logStateSizeDiagnostics(snap, "blocked-save");
       hasPendingLocalChanges = true;
       persistLocalStateBackup(snap);
-      return { saved:false, error:"State payload is too large." };
+      return cloudSaveNoWriteFailure("payload_too_large", "State payload is too large.");
     }
     try {
       recordDataFlowEvent("cloud_save", snap);
@@ -6480,8 +6973,12 @@ async function performCloudSave(saveOptions = {}){
     window.__lastSnapshot = snap;
     const remoteSnap = await FB.docRef.get();
     const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+    const deletionCheck = validateCuttingJobDeletionSave(remoteData, snap, deletionProof);
+    if (!deletionCheck.valid) return cuttingJobDeletionFailure(deletionCheck.error);
+    const historyRestoreCheck = validateCuttingJobHistoryRestoreSave(remoteData, snap, historyRestoreProof);
+    if (!historyRestoreCheck.valid) return cuttingJobDeletionFailure(historyRestoreCheck.error);
     if (allowScheduledV2Dedupe && !validateMaintenanceV2RepairRemoteBaseline(repairAuthorization.proof, remoteData)){
-      return { saved:false, error:"Latest Firestore V2 state no longer matches the authorized repair baseline." };
+      return cloudSaveNoWriteFailure("maintenance_repair_conflict", "Latest Firestore V2 state no longer matches the authorized repair baseline.");
     }
     const localBackupForPreflight = readLocalStateBackup();
     const revisionConflict = remoteData && typeof remoteData === "object"
@@ -6496,15 +6993,15 @@ async function performCloudSave(saveOptions = {}){
     const allowFirstRunPreflight = Boolean(remoteSnap && !remoteSnap.exists)
       && !stateHasMeaningfulData(window.__lastLoadedCloudState || {})
       && !stateHasMeaningfulData(localBackupForPreflight || {});
-    const safetyBaseline = allowScheduledV2Dedupe
+    const safetyBaseline = cuttingJobDeletionSafetyBaseline(allowScheduledV2Dedupe
       ? { ...(window.__lastLoadedCloudState || {}), maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
-      : (window.__lastLoadedCloudState || null);
-    const safetyRemote = allowScheduledV2Dedupe && remoteData
+      : (window.__lastLoadedCloudState || null), snap, deletionProof);
+    const safetyRemote = cuttingJobDeletionSafetyBaseline(allowScheduledV2Dedupe && remoteData
       ? { ...remoteData, maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
-      : remoteData;
-    const safetyLocalBackup = allowScheduledV2Dedupe && localBackupForPreflight
+      : remoteData, snap, deletionProof);
+    const safetyLocalBackup = cuttingJobDeletionSafetyBaseline(allowScheduledV2Dedupe && localBackupForPreflight
       ? { ...localBackupForPreflight, maintenanceOccurrencesV2: snap.maintenanceOccurrencesV2 }
-      : localBackupForPreflight;
+      : localBackupForPreflight, snap, deletionProof);
     const saveSchemaCoverage = getSaveSchemaCoverageReport({ pendingSnapshot: snap });
     const registryPreflight = validateProtectedSavePreflight({
       baselineState: safetyBaseline,
@@ -6531,7 +7028,7 @@ async function performCloudSave(saveOptions = {}){
       });
       hasPendingLocalChanges = true;
       await writeBlockedSaveLog(registryPreflight, { reason: "saveCloudInternal" });
-      return { saved:false, error:"Protected-state save preflight blocked the write." };
+      return cloudSaveNoWriteFailure("protected_preflight_blocked", "Protected-state save preflight blocked the write.");
     }
     if (remoteData && typeof remoteData === "object"){
       if (revisionConflict.blocked){
@@ -6542,7 +7039,7 @@ async function performCloudSave(saveOptions = {}){
         }
         blockCloudSave("remote state is newer than this client. Export/reload/merge review before saving.", revisionConflict);
         hasPendingLocalChanges = true;
-        return { saved:false, error:"Remote state is newer than this client." };
+        return cloudSaveNoWriteFailure("revision_conflict", "Remote state is newer than this client.");
       }
       const dangerous = detectDangerousProtectedFieldReduction(safetyRemote, snap);
       if (dangerous.blocked){
@@ -6554,11 +7051,13 @@ async function performCloudSave(saveOptions = {}){
         }
         blockCloudSave("protected field reduction detected.", dangerous.issues);
         hasPendingLocalChanges = true;
-        return { saved:false, error:"Protected field reduction was blocked." };
+        return cloudSaveNoWriteFailure("protected_reduction_blocked", "Protected field reduction was blocked.");
       }
-      snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
-      snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
-      snap.pumpEff = mergePumpEffForSave(snap.pumpEff, remoteData.pumpEff);
+      if (!deletionProof && !historyRestoreProof){
+        snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
+        snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
+        snap.pumpEff = mergePumpEffForSave(snap.pumpEff, remoteData.pumpEff);
+      }
     }
     persistLocalStateBackup(snap);
     let writeRev = Number(snap?.syncMeta?.rev || 0);
@@ -6569,7 +7068,7 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.firestoreWritePayloadInstanceFound = Array.isArray(snap.maintenanceCalendarInstancesV2) && snap.maintenanceCalendarInstancesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
       explicitTrace.firestoreWritePayloadOccurrenceFound = Array.isArray(snap.maintenanceOccurrencesV2) && snap.maintenanceOccurrencesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
     }
-    const writeResult = await writeAuthoritativeStateSnapshot(snap, { merge:true }, { expectedRevision, repairProof:allowScheduledV2Dedupe ? repairAuthorization.proof : null });
+    const writeResult = await writeAuthoritativeStateSnapshot(snap, { merge:true }, { expectedRevision, repairProof:allowScheduledV2Dedupe ? repairAuthorization.proof : null, cuttingJobDeletionProof:deletionProof, cuttingJobHistoryRestoreProof:historyRestoreProof });
     writeRev = Number(snap?.syncMeta?.rev || 0);
     authoritativeStateWriteAttempted = writeResult.stateWriteAttempted;
     authoritativeStateWriteCompleted = writeResult.stateWriteCompleted;
@@ -6840,11 +7339,11 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
-  if (!canWriteCloud("saveCloudDebounced")) return;
+  if (!canWriteCloud("saveCloudDebounced")) return cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked.");
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
-    return;
+    return cloudSaveNoWriteFailure("preview_readonly", "Cloud save is disabled in preview read-only mode.");
   }
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Math.max(Date.now(), lastLocalMutationAt + 1);
@@ -6861,11 +7360,11 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(saveOptions = {}){
-  if (!canWriteCloud("saveCloudNow")) return Promise.resolve({ saved:false, error:"Cloud writes are currently blocked." });
+  if (!canWriteCloud("saveCloudNow")) return Promise.resolve(cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked."));
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
-    return Promise.resolve({ saved:false, error:"Cloud save is disabled in preview read-only mode." });
+    return Promise.resolve(cloudSaveNoWriteFailure("preview_readonly", "Cloud save is disabled in preview read-only mode."));
   }
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Math.max(Date.now(), lastLocalMutationAt + 1);
@@ -6875,7 +7374,8 @@ function saveCloudNow(saveOptions = {}){
     console.warn("Failed to normalize folders before save:", err);
   }
   try {
-    if (typeof captureHistorySnapshot === "function") captureHistorySnapshot();
+    // CJD captures history only after the authoritative deletion is confirmed.
+    if (!saveOptions.cuttingJobDeletionToken && typeof captureHistorySnapshot === "function") captureHistorySnapshot();
   } catch (err) {
     console.warn("History capture before save failed:", err);
   }

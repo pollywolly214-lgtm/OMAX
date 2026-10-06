@@ -342,12 +342,13 @@ function viewDashboard(){
             <label>Material quantity<input type="number" min="0" step="0.01" id="dashJobMaterialQty" placeholder="optional"></label>
             <label>Start date<input type="date" id="dashJobStart" required value="${dashboardDefaultJobDateISO}"></label>
             <label>Due date<input type="date" id="dashJobDue" required value="${dashboardDefaultJobDateISO}"></label>
+            <label>Project #<input id="dashJobProjectNumber" type="text" readonly placeholder="Select a project category"><span class="small muted" data-project-category-status aria-live="polite"></span></label>
             <label>Category<select id="dashJobCategory" required>
               ${dashboardCategoryOptions}
               <option value="__new__">+ Create new category…</option>
             </select>
             <span class="small muted job-category-hint" id="dashJobCategoryHint" aria-live="polite">
-              Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
+              Choose a category with verified project ownership.
             </span></label>
             <datalist id="dashJobMaterialOptions">${dashboardMaterialOptionsMarkup}</datalist>
           </div>
@@ -3400,15 +3401,17 @@ function viewJobs(){
   const rootFolder = folderMap.get(rootCategoryId) || { id: rootCategoryId, name: "All Jobs", parent: null, order: 1 };
   ensureFolderEntry(rootFolder, 0);
 
-  const categoryOptionsMarkup = (selectedId, { includeCreateOption = false, rootLabel } = {})=>{
-    const target = normalizeCategory(selectedId);
+  const categoryOptionsMarkup = (selectedId, { includeCreateOption = false, rootLabel, preserveLegacySelection = false } = {})=>{
+    const target = preserveLegacySelection ? String(selectedId ?? "") : normalizeCategory(selectedId);
     const optionsHtml = folderOptions.map(option => {
       const selectedAttr = option.id === target ? " selected" : "";
       const label = option.id === rootCategoryId && rootLabel ? esc(rootLabel) : option.label;
       return `<option value="${esc(option.id)}"${selectedAttr}>${label}</option>`;
     }).join("");
-    if (!includeCreateOption) return optionsHtml;
-    return `${optionsHtml}<option value="__new__">+ Create new category…</option>`;
+    const legacyOption = preserveLegacySelection && !folderOptions.some(option=>option.id===target)
+      ? `<option value="${esc(target)}" selected>Stored category (needs project-number review)</option>` : "";
+    if (!includeCreateOption) return legacyOption + optionsHtml;
+    return `${legacyOption}${optionsHtml}<option value="__new__">+ Create new category…</option>`;
   };
 
   const priorityLevels = [1, 2, 3, 4, 5];
@@ -4050,8 +4053,9 @@ function viewJobs(){
                 <label>Material quantity<input type="number" min="0" step="0.01" data-history-field="materialQty" data-history-id="${job.id}" value="${materialQtyVal}"></label>
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-history-field="chargeRate" data-history-id="${job.id}" value="${chargeRateVal}"></label>
                 <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-history-field="costRate" data-history-id="${job.id}" value="${costRateVal}"></label>
+                <label>Project #<input type="text" data-history-field="projectNumber" data-history-id="${job.id}" readonly value="${esc(String(job.projectNumber ?? ""))}"><span class="small muted" data-project-category-status aria-live="polite"></span></label>
                 <label>Category<select data-history-field="cat" data-history-id="${job.id}" data-job-category-select>
-                  ${categoryOptionsMarkup(job.cat, { includeCreateOption: true })}
+                  ${categoryOptionsMarkup(job.cat, { includeCreateOption: true, preserveLegacySelection: true })}
                 </select></label>
               </div>
               <aside class="job-edit-summary" aria-label="Completed job summary">
@@ -4391,7 +4395,7 @@ function viewJobs(){
               </div>
               <div class="job-main-category-picker small" data-category-color="1"${colorStyleAttr}>
                 <select data-job-category-inline="${esc(j.id)}" data-job-category-select aria-label="Change category for ${esc(jobNameWithCut(j, "Job"))}">
-                  ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
+                  ${categoryOptionsMarkup(j.cat, { includeCreateOption: true, preserveLegacySelection: true })}
                 </select>
               </div>
               <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
@@ -4469,10 +4473,10 @@ function viewJobs(){
                 <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-j="costRate" data-id="${j.id}" value="${Number.isFinite(costRate) ? costRate : 45}"></label>
                 <label>Start date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
-                <label>Project #<input type="text" data-j="projectNumber" data-id="${j.id}" inputmode="text" maxlength="8" value="${esc(projectLabel(j) === "Unassigned" ? "" : projectLabel(j))}"></label>
+                <label>Project #<input type="text" data-j="projectNumber" data-id="${j.id}" readonly value="${esc(String(j.projectNumber ?? ""))}"><span class="small muted" data-project-category-status aria-live="polite"></span></label>
                 <label>Priority<select data-j="priority" data-id="${j.id}">${priorityOptionsMarkup(priorityValue)}</select></label>
                 <label>Category<select data-j="cat" data-id="${j.id}" data-job-category-select>
-                  ${categoryOptionsMarkup(j.cat, { includeCreateOption: true })}
+                  ${categoryOptionsMarkup(j.cat, { includeCreateOption: true, preserveLegacySelection: true })}
                 </select></label>
                 <label>Category color
                   <div class="category-color-control category-color-control-compact" data-job-category-color-editor="${esc(j.id)}" data-category-color="1"${colorStyleAttr}>
@@ -4652,7 +4656,7 @@ function viewJobs(){
             <input type="date" id="jobDue" required value="${esc(addJobDraftField("due", defaultJobDateISO))}">
           </label>
           <label>Project #
-            <input type="text" id="jobProjectNumber" placeholder="Project #" inputmode="text" maxlength="8" required value="${esc(addJobDraftField("projectNumber"))}">
+            <input type="text" id="jobProjectNumber" placeholder="Select a project category" readonly value="${esc(addJobDraftField("projectNumber"))}"><span class="small muted" data-project-category-status aria-live="polite"></span>
           </label>
           <div class="job-category-field">
             <label for="jobCategory">Category</label>
@@ -4660,7 +4664,7 @@ function viewJobs(){
               ${categoryOptionsMarkup(addJobCategoryDefault, { includeCreateOption: true })}
             </select>
             <p class="small muted job-category-hint" id="jobCategoryHint" aria-live="polite">
-              Choose a category to keep jobs organized. We'll save it under All Jobs if you skip this step.
+              Choose a category with verified project ownership.
             </p>
           </div>
           </div>

@@ -58,6 +58,7 @@ function harness(flags={}){
   });
   const start=core.indexOf("async function writeAuthoritativeStateSnapshot"),end=core.indexOf("// Foundation adapter only.",start);
   assert.ok(start>=0&&end>start);
+  for(const name of ["validateCuttingJobDeletionSave","validateCuttingJobHistoryRestoreSave","cuttingJobDeletionSafetyBaseline","reportCloudSaveSecondaryError"]){const a=core.indexOf("function "+name+"("),b=core.indexOf("\n}",a);assert.ok(a>=0&&b>a,name);vm.runInContext(core.slice(a,b+2),context);}
   vm.runInContext(core.slice(start,end)+";this.write=writeAuthoritativeStateSnapshot",context);
   const env={
     canWrite:()=>allowed,localVersion:()=>({version:localVersion,jobs:live.cuttingJobs}),
