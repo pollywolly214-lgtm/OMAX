@@ -4673,12 +4673,19 @@ function getInventoryIdentityRepairLocalState(){
   return live;
 }
 
-// The existing shared read returns full application state. Give the material
-// coordinator an explicit envelope; its compact diagnostic summary is not this
-// authoritative snapshot. Keep the shared helper's other callers unchanged.
+// Firebase v8 document.get({source:"server"}) uses a SnapshotListener and can
+// reuse an active view that has not observed a just-committed transaction yet.
+// Transaction.get performs a backend lookup independent of that view. This
+// transaction is read-only: never queue set/update/delete during verification.
 async function readInventoryMaterialAuthoritativeState(){
-  const state = await readCurrentCloudStateReadOnly();
-  return {revision:state?.syncMeta?.rev ?? null, state};
+  const db = FB.db, docRef = FB.docRef;
+  if (!FB.ready || !docRef || typeof db?.runTransaction !== "function")
+    throw Error("A backend transaction read is unavailable; material verification cannot use a cached view.");
+  return db.runTransaction(async transaction=>{
+    const snapshot = await transaction.get(docRef);
+    const state = snapshot?.exists ? (typeof snapshot.data === "function" ? snapshot.data() : snapshot.data) : null;
+    return {revision:state?.syncMeta?.rev ?? null, state, path:docRef.path, readSource:"backend_transaction"};
+  });
 }
 
 let inventoryMaterialOwnedSuspension = null;

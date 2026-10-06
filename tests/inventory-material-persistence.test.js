@@ -22,11 +22,25 @@ function harness(options={}){
   if(options.baselineSyncMeta)cloud.syncMeta=clone(options.baselineSyncMeta);
   cloud.unknownFutureState={retain:[{id:"future-record",payload:"exact"}]};
   options.initialStateMutation?.(cloud);
-  let reads=0,transactions=0,commits=0,diagnostics=0, queued, writeOptions;
+  const listenerState=clone(cloud);
+  let reads=0,transactions=0,readTransactions=0,commits=0,diagnostics=0, queued, writeOptions,writing=false;
   const events={};const window={...clone(cloud),OMAXInventoryMaterialMutations:materials,OMAXAtomicPersistence:atomic,OMAXGlobalIdentityRepair:identities,CuttingFileContentFirewall:firewall,
     __cloudLoadAttemptComplete:true,__initialAdoptComplete:true,__loadedCloudRevisionForSaveGuard:cloud.syncMeta.rev,addEventListener:(name,handler)=>{events[name]=handler;},location:{hostname:"localhost",search:""}};
-  const db={async runTransaction(callback){transactions++;await options.beforeTransaction?.(window,cloud);const transaction={get:async()=>({exists:true,data:()=>clone(cloud)}),set:(_ref,value,setOptions)=>{writeOptions=clone(setOptions);queued=clone(value);}};
-    await callback(transaction);if(options.retry)await callback(transaction);
+  const serverSnapshot=async(fromListener)=>{
+    reads++;await options.duringRead?.(reads,window,cloud);
+    if(reads>1&&options.readFailure)throw Error("Server unavailable");
+    const data=clone(fromListener&&options.staleListenerView ? listenerState : cloud);
+    if(reads>1&&options.mismatch)data.inventory[0].qtyNew++;
+    if(reads>1)options.readbackMutation?.(data);
+    return{exists:true,data:()=>data};
+  };
+  const db={async runTransaction(callback){
+    if(!writing){
+      readTransactions++;
+      return callback({get:()=>serverSnapshot(false),set:()=>{throw Error("A verification read must not write state");},update:()=>{throw Error("A verification read must not update state");},delete:()=>{throw Error("A verification read must not delete state");}});
+    }
+    transactions++;await options.beforeTransaction?.(window,cloud);const transaction={get:async()=>({exists:true,data:()=>clone(cloud)}),set:(_ref,value,setOptions)=>{writeOptions=clone(setOptions);queued=clone(value);}};
+    const result=await callback(transaction);if(options.retry)await callback(transaction);
     await options.afterQueue?.(window,cloud);
     if(options.reject)throw Object.assign(Error("Permission denied"),{code:"permission-denied"});
     if(options.unknownWithoutCommit)throw Error("Acknowledgement lost");
@@ -35,11 +49,11 @@ function harness(options={}){
       const merge=(before,next)=>{const result={...before};for(const [name,value]of Object.entries(next))result[name]=value&&typeof value==="object"&&!Array.isArray(value)&&Object.keys(value).length?merge(before?.[name]||{},value):clone(value);return result;};
       cloud=merge(cloud,queued);
     }else cloud=clone(queued);
-    commits++;if(options.loseAck)throw Error("Acknowledgement lost after commit");
+    commits++;if(options.loseAck)throw Error("Acknowledgement lost after commit");return result;
   }};
   const c=vm.createContext({window,URLSearchParams,TextEncoder,structuredClone,Blob,Map,WeakSet,setTimeout,clearTimeout,
     console:{warn(){},error(){},info(){}},document:{getElementById:()=>null},WORKSPACE_ID:"fixture",
-    FB:{ready:true,user:{uid:"fixture"},db,docRef:{path:"fixture/app/state",get:async readOptions=>{assert.equal(readOptions.source,"server");reads++;await options.duringRead?.(reads,window,cloud);if(reads>1&&options.readFailure)throw Error("Server unavailable");const data=clone(cloud);if(reads>1&&options.mismatch)data.inventory[0].qtyNew++;if(reads>1)options.readbackMutation?.(data);return{exists:true,data:()=>data};}}},
+    FB:{ready:true,user:{uid:"fixture"},db,docRef:{path:"fixture/app/state",get:async readOptions=>{assert.equal(readOptions.source,"server");return serverSnapshot(true);}}},
     FIRESTORE_BLOCK_BYTES:950000,getCloudSyncClientId:()=>options.rotateClientIdAfterCommit&&commits ? "fresh-storage-client" : "fixture-client",readLocalStateBackup:()=>null,
     getSaveSchemaCoverageReport:()=>({cloudExcludedProtectedPaths:[]}),classifyMissingProtectedPathsForSave:()=>({blocking:[],warnings:[]}),
     renderRecoveryDiagnosticsPanel:()=>diagnostics++,showLocalBackupConflictWarning(){},syncRenderTotalsFromHistory(){},resetHistoryToCurrent(){},
@@ -51,6 +65,8 @@ function harness(options={}){
   functions.push("readInventoryMaterialAuthoritativeState");
   vm.runInContext(bindings.map(name=>"let "+name+"=window."+name+";").join("\n")+"\nlet lastAppliedCloudRevision=7,lastLocalMutationAt=0,hasPendingLocalChanges=false,cloudSaveQueue=Promise.resolve();const inventoryIdentityRepairAuthorizations=new Map(),cuttingJobDeletionProofs=new WeakSet(),cuttingJobDeletionTransactions=new WeakSet(),cuttingJobHistoryRestoreProofs=new WeakSet(),cuttingJobHistoryRestoreTransactions=new WeakSet();\n"+constants.map(constant).join("\n")+"\n"+functions.map(name=>fn(core,name)).join("\n"),c);
   assert.equal(c.adoptIdentityCheckedAuthoritativeState(clone(cloud)).recovery,Boolean(options.preview));
+  const guardedWriter=c.writeAuthoritativeStateSnapshot;
+  c.writeAuthoritativeStateSnapshot=async(...args)=>{writing=true;try{return await guardedWriter(...args);}finally{writing=false;}};
   if(options.quotaClientId){
     let sequence=0;c.CLOUD_SYNC_CLIENT_KEY="fixture-client-key";c.Math=Object.create(Math);c.Math.random=()=>++sequence/1000;
     window.localStorage={getItem:()=>"",setItem:()=>{throw Error("QuotaExceededError");}};
@@ -64,7 +80,7 @@ function harness(options={}){
   if(options.autosaveDisabled)window.__autosaveDisabled=true;
   if(options.pending)vm.runInContext("hasPendingLocalChanges=true",c);
   if(options.loadedRevision!==undefined)window.__loadedCloudRevisionForSaveGuard=options.loadedRevision;
-  return {api:window.inventoryMaterialMutationApi,window,c,events,get readbacks(){return clone(readbacks);},get writeOptions(){return clone(writeOptions);},get cloud(){return clone(cloud);},get local(){return clone(c.getInventoryIdentityRepairLocalState());},get commits(){return commits;},get transactions(){return transactions;},get reads(){return reads;},get diagnostics(){return diagnostics;},editCloud:change=>change(cloud),reload:()=>c.loadFromCloud(),bump:()=>vm.runInContext("lastLocalMutationAt++",c)};
+  return {api:window.inventoryMaterialMutationApi,window,c,events,get readTransactions(){return readTransactions;},get readbacks(){return clone(readbacks);},get writeOptions(){return clone(writeOptions);},get cloud(){return clone(cloud);},get local(){return clone(c.getInventoryIdentityRepairLocalState());},get commits(){return commits;},get transactions(){return transactions;},get reads(){return reads;},get diagnostics(){return diagnostics;},editCloud:change=>change(cloud),reload:()=>c.loadFromCloud(),bump:()=>vm.runInContext("lastLocalMutationAt++",c)};
 }
 const action=(kind,other={})=>({kind,typeId:"steel",rowIndex:1,colIndex:0,...other});
 const unrelated=state=>Object.fromEntries(Object.entries(state).filter(([name])=>!["inventoryMaterials","syncMeta"].includes(name)));
@@ -303,11 +319,41 @@ test("INV-01E exact third Aluminum quantity -> 15 uses full SERVER state and sur
   assert.deepEqual(h.readbacks[0].state.inventoryMaterials.sheets.aluminum.rows[0].values,["10","654","",""]);
   assert.deepEqual(intended.sheets.aluminum.rows[0].values,["10","654","15",""]);
   assert.equal(acknowledgement.saved,true);assert.equal(acknowledgement.stateWriteAttempted,true);assert.equal(acknowledgement.stateWriteCompleted,true);assert.equal(acknowledgement.indeterminate,false);
-  const server=h.readbacks[1];assert.deepEqual(Object.keys(server).sort(),["revision","state"]);assert.ok(server.revision>1791322619177);assert.equal(server.revision,acknowledgement.committedState.syncMeta.rev);
+  const server=h.readbacks[1];assert.equal(server.readSource,"backend_transaction");assert.equal(server.path,"fixture/app/state");assert.ok(server.revision>1791322619177);assert.equal(server.revision,acknowledgement.committedState.syncMeta.rev);
   assert.deepEqual(server.state.inventoryMaterials.sheets.aluminum.rows[0].values,["10","654","15",""]);
   assert.ok(server.state.inventory);assert.ok(server.state.unknownFutureState);assert.equal(materials.semanticMaterialEqual(intended,server.state.inventoryMaterials),true);
   assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(result.indeterminate,false);assert.equal(h.window.__recoveryInspectMode,false);assert.equal(h.diagnostics,0);assert.equal(h.transactions,1);assert.equal(h.reads,2);assert.equal(u.calls.length,1);
   assert.deepEqual(h.local.inventoryMaterials,server.state.inventoryMaterials);assert.equal((await h.reload()).recovery,false);assert.equal(h.local.inventoryMaterials.sheets.aluminum.rows[0].values[2],"15");assert.equal(h.transactions,1);
+});
+test("acknowledged Aluminum row 1 -> 15 verifies fresh backend while the server-get listener view still shows blank",async()=>{
+  const h=harness({thirdAluminumCell:true,baselineSyncMeta:{...browserBaselineMeta,rev:1791323670772},staleListenerView:true}),result=await h.api.run({...thirdCellAction,rowIndex:1});
+  assert.equal(h.commits,1);assert.equal(h.cloud.inventoryMaterials.sheets.aluminum.rows[1].values[2],"15");
+  assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(result.indeterminate,false);assert.equal(h.window.__recoveryInspectMode,false);
+  assert.equal(h.local.inventoryMaterials.sheets.aluminum.rows[1].values[2],"15");assert.equal(h.transactions,1);assert.equal(h.readTransactions,2);
+  const stale=(await h.c.FB.docRef.get({source:"server"})).data();assert.equal(stale.syncMeta.rev,1791323670772);assert.equal(stale.inventoryMaterials.sheets.aluminum.rows[1].values[2],"");
+  const cold=harness({initialStateMutation:state=>Object.assign(state,h.cloud)});assert.equal((await cold.reload()).recovery,false);assert.equal(cold.local.inventoryMaterials.sheets.aluminum.rows[1].values[2],"15");assert.equal(cold.commits,0);
+});
+test("read-only material verification never queues a state write and preserves every unrelated field",async()=>{
+  const h=harness(),before=h.cloud,readback=await h.c.readInventoryMaterialAuthoritativeState();
+  assert.deepEqual(readback.state,before);assert.equal(readback.path,"fixture/app/state");assert.equal(readback.readSource,"backend_transaction");assert.equal(h.readTransactions,1);assert.equal(h.transactions,0);assert.equal(h.commits,0);assert.deepEqual(h.cloud,before);
+});
+test("material verification cannot fall back to listener get when backend transaction reads are unavailable",async()=>{
+  const h=harness();h.c.FB.db.runTransaction=null;
+  const result=await h.api.run({...thirdCellAction,rowIndex:1});assert.equal(result.saved,false);assert.equal(result.errorCode,"authoritative_server_read_failed");assert.equal(result.stateWriteAttempted,false);assert.equal(h.reads,0);assert.equal(h.commits,0);
+});
+test("a newer backend overwrite still fails verification and reports all three revisions",async()=>{
+  const h=harness({thirdAluminumCell:true,duringRead:(n,_w,state)=>{if(n===2){state.syncMeta.rev++;state.syncMeta.updatedBy="other-client";state.inventoryMaterials.sheets.aluminum.rows[1].values[2]="";}}}),before=h.local;
+  const result=await h.api.run({...thirdCellAction,rowIndex:1}),v=result.evidence.verification;
+  assert.equal(result.saved,false);assert.equal(result.indeterminate,true);assert.equal(h.window.__recoveryInspectMode,true);assert.equal(v.materialsMatch,false);assert.equal(v.revisionValid,false);assert.equal(v.revisionRelationship,"newer_than_committed");assert.ok(v.committedRevision>v.baselineRevision);assert.equal(v.serverRevision,v.committedRevision+1);
+  assert.equal(v.mismatchPath,"inventoryMaterials.sheets.aluminum.rows[1].values[2]");assert.equal(v.expected,"15");assert.equal(v.actual,"");assert.equal(result.evidence.serverReadback.readSource,"backend_transaction");assert.equal(h.transactions,1);assert.equal(h.commits,1);assert.deepEqual(h.local,before);
+});
+test("a backend response older than the acknowledgement is not accepted merely because materials match",async()=>{
+  const h=harness({thirdAluminumCell:true,readbackMutation:state=>{state.syncMeta.rev=7;}}),result=await h.api.run({...thirdCellAction,rowIndex:1}),v=result.evidence.verification;
+  assert.equal(result.saved,false);assert.equal(result.indeterminate,true);assert.equal(v.materialsMatch,true);assert.equal(v.revisionRelationship,"older_than_committed");assert.equal(v.serverRevision,7);assert.equal(v.baselineRevision,7);assert.ok(v.committedRevision>7);assert.equal(h.transactions,1);
+});
+test("verification binds the baseline, acknowledged writer and backend read to the same document",async()=>{
+  const h=harness({thirdAluminumCell:true,readContract:(readback,n)=>n===2?{...readback,path:"another/workspace/state"}:readback}),result=await h.api.run({...thirdCellAction,rowIndex:1});
+  assert.equal(result.saved,false);assert.equal(result.indeterminate,true);assert.equal(result.errorCode,"authoritative_document_changed");assert.equal(h.transactions,1);assert.equal(h.api.undoCount(),0);assert.equal(h.window.__recoveryInspectMode,true);
 });
 for(const [name,broken] of [
   ["revision only",readback=>({revision:readback.revision})],

@@ -97,8 +97,15 @@
     const revisionValid = Number.isSafeInteger(actual?.syncMeta?.rev) && actual.syncMeta.rev > source.syncMeta.rev
       && (!acknowledged || (Number.isSafeInteger(committed?.syncMeta?.rev) && actual.syncMeta.rev === committed.syncMeta.rev));
     const metadataDifference = acknowledged ? firstDifference(committed?.syncMeta, actual?.syncMeta, "syncMeta") : null;
+    const serverRevision = actual.syncMeta?.rev, committedRevision = committed?.syncMeta?.rev;
+    const revisionRelationship = !Number.isSafeInteger(serverRevision) ? "invalid_server_revision"
+      : acknowledged ? !Number.isSafeInteger(committedRevision) ? "missing_committed_revision"
+        : serverRevision === committedRevision ? "matches_committed"
+          : serverRevision < committedRevision ? "older_than_committed" : "newer_than_committed"
+        : serverRevision > source.syncMeta.rev ? "advanced_past_baseline" : "not_advanced";
     const verification = {readbackAvailable:true, fullStateAvailable:true, materialsMatch:!materialDifference,
       committedMaterialsMatch:acknowledged ? !!committed && !committedMaterialDifference : null,
+      baselineRevision:source.syncMeta.rev, committedRevision:committedRevision ?? null, serverRevision, revisionRelationship,
       revisionValid, unrelatedBusinessStateMatch:!unrelatedDifference,
       metadataValid:!!metadataValid(actual?.syncMeta) && (!acknowledged || (!!metadataValid(committed?.syncMeta) && !metadataDifference))};
     const fail = (message, difference, comparison, protectedValue, reason) => {
@@ -293,9 +300,11 @@
         }
         // Also read after a lost acknowledgement. Never retry an uncertain write.
         const readback = await readAuthoritative();
-        evidence.serverReadback = {revision:compactValue(readback?.revision ?? null), stateAvailable:!!readback?.state,
+        evidence.serverReadback = {revision:compactValue(readback?.revision ?? null), path:compactValue(readback?.path), readSource:compactValue(readback?.readSource), stateAvailable:!!readback?.state,
           materialsAvailable:!!readback?.state?.inventoryMaterials};
         const actual = authoritativeState(readback), actualRevision = readback.revision;
+        if (readback.path !== baseline.path || (acknowledged && writeResult.path !== baseline.path))
+          throw readContractError("The material write and verification read refer to different authoritative documents.", "document_changed", readback);
         verifyReadback(proofSource, proofIntended, actual, writeResult, writerClientId);
         evidence.verification = {reason:"confirmed", readbackAvailable:true, fullStateAvailable:true, materialsMatch:true, committedMaterialsMatch:acknowledged ? true : null,
           revisionValid:true, unrelatedBusinessStateMatch:true, metadataValid:true};
