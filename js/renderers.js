@@ -10795,7 +10795,6 @@ function renderSettings(){
           <div class="toolbar-actions">
             <button id="btnAddCategory">+ Add Category</button>
             <button id="btnAddTask">+ Add Task</button>
-            <button id="btnClearAllDataInline" class="danger" data-clear-all="1" title="Reset all maintenance data">🧹 Clear All Data</button>
           </div>
           <div class="toolbar-search">
             <span class="icon" aria-hidden="true">🔍</span>
