@@ -221,8 +221,9 @@ test("production adapter checks the complete live baseline, including unsaved un
   const source=base(),live=clone(source);
   const context=vm.createContext({
     window:{CuttingJobChronology:{createMutationApi:env=>env},__lastLoadedCloudState:clone(source),__loadedCloudRevisionForSaveGuard:7},
+    FB:{user:{uid:"fixture"}},
     canWriteCloud:()=>true,hasPendingLocalChanges:false,isVercelPreviewRuntime:()=>false,lastLocalMutationAt:0,
-    getInventoryIdentityRepairLocalState:()=>live,stableStringify:JSON.stringify,
+    getInventoryIdentityRepairLocalState:()=>live,snapshotState:()=>live,compactStateForStorage:value=>value,stableStringify:JSON.stringify,
     readCurrentCloudStateReadOnly:async()=>clone(source),writeAuthoritativeStateSnapshot(){},
     adoptIdentityCheckedAuthoritativeState:()=>({recovery:false}),renderRecoveryDiagnosticsPanel(){}
   });

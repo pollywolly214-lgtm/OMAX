@@ -2745,6 +2745,9 @@ function startWorkspaceStateListener(){
     if (!incomingRev) return;
     const incomingBy = String(meta?.updatedBy || "");
     if (hasPendingLocalChanges) return;
+    // The chronology coordinator owns acknowledgement, exact server readback,
+    // and adoption. Its realtime echo must not normalize live state mid-save.
+    if (window.isCuttingJobChronologySaving?.()) return;
     const localEditAgeMs = Date.now() - (Number(lastLocalMutationAt) || 0);
     if (incomingBy !== localClientId && localEditAgeMs >= 0 && localEditAgeMs < 15000) return;
     if (incomingRev && incomingRev <= lastAppliedCloudRevision) return;
@@ -4262,20 +4265,20 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   return result;
 }
 
-// Foundation adapter only. No UI, hydration, creation, or import invokes it.
-// The future reviewed correction flow must supply the loaded expected revision.
+// Foundation adapter only. The reviewed UI supplies an exact preview binding.
 const cuttingJobChronologyMutationApi = window.CuttingJobChronology?.createMutationApi({
   canWrite:()=>canWriteCloud("cutting-job chronology") && !hasPendingLocalChanges
     && !isVercelPreviewRuntime() && !window.__lastIndeterminateSave,
   localVersion:()=>({
     revision:window.__loadedCloudRevisionForSaveGuard, mutation:lastLocalMutationAt,
-    state:getInventoryIdentityRepairLocalState()
+    actorUid:String(FB.user?.uid||""),state:getCuttingJobChronologyLocalState()
   }),
   readState:readCurrentCloudStateReadOnly,
   baselineMatches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)
-    && stableStringify(source)===stableStringify(getInventoryIdentityRepairLocalState()),
+    && stableStringify(source)===stableStringify(getCuttingJobChronologyLocalState()),
   writeState:(next,expectedRevision,validatePreparedState)=>writeAuthoritativeStateSnapshot(next,{merge:true},{expectedRevision,validatePreparedState}),
   adoptVerifiedState:cloud=>adoptIdentityCheckedAuthoritativeState(cloud)?.recovery===false,
+  audit:()=>({operationId:genId("cut_chronology"),atISO:new Date().toISOString(),actorUid:String(FB.user?.uid||"")}),
   suspend:result=>{
     window.__autosaveDisabled=true;
     window.__recoveryInspectMode=true;
@@ -4283,6 +4286,29 @@ const cuttingJobChronologyMutationApi = window.CuttingJobChronology?.createMutat
     renderRecoveryDiagnosticsPanel();
   }
 });
+
+window.isCuttingJobChronologySaving=()=>cuttingJobChronologyMutationApi?.isBusy?.()===true;
+window.cuttingJobChronologyWorkflow = window.CuttingJobChronologyReview?.createWorkflow({
+  canWrite:()=>canWriteCloud("cutting-job chronology")&&!hasPendingLocalChanges&&!isVercelPreviewRuntime()&&!window.__lastIndeterminateSave,
+  state:()=>getCuttingJobChronologyLocalState(),
+  version:()=>({revision:window.__loadedCloudRevisionForSaveGuard,mutation:lastLocalMutationAt,actorUid:String(FB.user?.uid||"")}),
+  audit:()=>({operationId:genId("cut_chronology"),atISO:new Date().toISOString(),actorUid:String(FB.user?.uid||"")}),
+  coordinator:cuttingJobChronologyMutationApi,
+  suspend:result=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastIndeterminateSave=result;renderRecoveryDiagnosticsPanel();}
+});
+
+function getCuttingJobChronologyLocalState(){
+  // Normal adoption does not populate every recovery-display global. Preserve
+  // loaded metadata/evidence and read current supported fields from the ordinary
+  // snapshot. This projection never writes and never invents chronology.
+  const source=window.__lastLoadedCloudState||{},live={};
+  const snapshot=compactStateForStorage(snapshotState({skipLocalFileCacheSync:true}));
+  for(const field of Object.keys(source)){
+    if(["schema","syncMeta","saveMeta","syncProcessLog"].includes(field)){live[field]=source[field];continue;}
+    live[field]=Object.prototype.hasOwnProperty.call(snapshot,field)?snapshot[field]:source[field];
+  }
+  return live;
+}
 
 function getInventoryIdentityRepairLocalState(){
   const source=window.__lastLoadedCloudState||{},live={};

@@ -4017,6 +4017,7 @@ function viewJobs(){
               <div class="job-actions-menu" id="${esc(actionMenuId)}" data-history-actions-menu="${job.id}" hidden>
                 <button type="button" data-history-activate="${job.id}">Make active copy</button>
                 <button type="button" data-history-edit="${job.id}">Edit</button>
+                <button type="button" data-edit-cut-chronology="${esc(job.id)}">Edit Cut Date / Order</button>
                 <button type="button" class="danger" data-history-delete="${job.id}">Delete</button>
               </div>
             </div>
@@ -4441,6 +4442,7 @@ function viewJobs(){
               <div class="job-actions-menu" id="${esc(actionMenuId)}" data-job-actions-menu="${j.id}" hidden>
                 <button type="button" data-log-job="${j.id}">Log time</button>
                 <button type="button" data-edit-job="${j.id}">Edit</button>
+                <button type="button" data-edit-cut-chronology="${esc(j.id)}">Edit Cut Date / Order</button>
                 <button type="button" data-complete-job="${j.id}">Mark complete</button>
                 <button type="button" class="danger" data-remove-job="${j.id}">Remove</button>
               </div>

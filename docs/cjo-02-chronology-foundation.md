@@ -1,7 +1,8 @@
 # CJO-02: chronological ordering foundation
 
-This phase adds a model and a guarded persistence adapter. It does not provide
-date/order editing controls, change number displays, or migrate production data.
+The foundation adds a model and guarded persistence adapter. CJO-03 unifies
+number readers, and CJO-04 adds operator-reviewed correction controls. No phase
+migrates production chronology automatically.
 The domain remains the union of active and completed business jobs in
 `workspaces/github-prod/app/state`. The stable job `id` remains identity.
 
@@ -92,7 +93,8 @@ not rename files, Storage objects, Firebase documents, or jobs.
 
 `createMutationApi(env).save(changes, {expectedRevision})` is the reusable
 operation. The application-owned `cuttingJobChronologyMutationApi` in core is a
-foundation hook with no UI, hydration, creation, or import call site.
+adapter used by the reviewed operator workflow, with no hydration, creation,
+or import call site.
 
 1. Require ordinary write gates, no pending local mutation, a loaded matching
    server revision, and exact complete local/loaded/server baseline equality.
@@ -118,18 +120,61 @@ the operation does not overwrite them while adopting server state.
 
 No independent Firebase, cache, attachment, or per-job write system is introduced.
 
-## Scope remaining
+## Operator review and correction (CJO-04)
 
-- Build the reviewed chronology correction workflow using the guarded
-  coordinator and read-only readiness helper; final editing controls are not
-  included in the reader phase.
-- Review actual-cut evidence, the active/unperformed-job policy, same-day
-  positions and business timezone for legacy history. No dates/timestamps should
-  be invented to bypass eligibility.
-- Design durable correction audit retention separately. Existing compacted
-  debug logs and session undo are not a durable old/new chronology ledger.
-- Exercise real browser hydration and fixture-backed save/reload later. Current
-  automated coverage uses local Firestore mocks, not production writes.
+Active and completed job Actions menus offer **Edit Cut Date / Order**, keyed by
+stable job ID. The modal accepts an actual performed date and a simple same-day
+placement (first, before/after another cut, last, or keep the reviewed position).
+Placement updates positive day positions on a private cloned draft, never by
+using source-array position as durable chronology.
+
+Unresolved domains enter **Review Chronology**. A compact job selector shows
+stored label, name/project, active/completed status and remaining review count.
+Historical schedule/completion/import dates appear as reference information;
+unresolved inputs start blank. Rows are reviewed locally, and a complete batch
+is required before preview/commit. Unperformed active jobs remain unresolved;
+operators must not enter a guessed date just to make numbering eligible.
+
+The pure canonical planner creates the preview, including old/new actual date,
+day position, label and affected number range/count. Confirmation is a separate
+action. The preview binds the complete source state, expected revision, proposed
+business state (including audit evidence), draft version and local/actor version.
+Any change requires another review rather than silently recomputing a new commit.
+Cancellation saves nothing.
+
+One confirmation calls the existing chronology coordinator and protected atomic
+writer once. Local state is not staged. Success requires acknowledgement, exact
+server readback and verified adoption; unknown outcomes suspend writes without
+retry/rollback. During this operation, the realtime listener leaves the echo's
+adoption to the coordinator. Normal-adoption state is projected using the
+ordinary snapshot plus loaded metadata/unsupported evidence; unrelated runtime
+business edits still invalidate the baseline.
+
+Each affected job receives an append-only `cutChronologyHistory` record in the
+same atomic snapshot: operation ID, stable job ID, actor UID, UTC review timestamp,
+before/after actual date, same-day position and cut number, and affected range/count.
+Initial establishment is marked `operator_review_initialization`; actual field
+corrections and number-only shifts are marked `correction` and `renumber`.
+Existing entries are preserved, and malformed history blocks the operation.
+The audit timestamp is captured with the confirmed preview; the authoritative
+commit timestamp remains in `syncMeta`. Job history survives hydration and
+snapshot/backup sanitization. It is retained with the job/trash payload rather
+than in a separate service or transient debug/undo log. Existing payload limits
+reject an oversized operation rather than trimming correction evidence.
+
+## Deployment verification and policy limits
+
+- Verify the final feature on the intended Vercel deployment and operator device
+  before merge/production use; automated browser writes use disposable localhost
+  state, and no production chronology correction has been performed.
+- Global corrections remain blocked while any included job has unresolved actual
+  chronology, including an unperformed active job. No inferred dates or automatic
+  exclusion/migration is introduced.
+- Established legacy creation/import/completion/repair actions retain the
+  CJO-02B fail-closed boundary in canonical domains; this correction UI does not
+  silently convert those actions into canonical writers.
+- Audit retention follows the existing job/trash lifecycle and Firestore payload
+  limits; no independent permanent retention/archive service is introduced.
 
 ## Validation
 

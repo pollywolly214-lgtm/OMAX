@@ -93,7 +93,7 @@
       affectedRange:ranks.length ? {from:Math.min(...ranks), to:Math.max(...ranks)} : null,
       sequence:sequence.map(({id, cutNumber}) => ({id, cutNumber}))};
   }
-  function prepareChronologyMutation(state, changes = []){
+  function prepareChronologyMutation(state, changes = [], {audit} = {}){
     const fail = (code, detail) => ({ok:false, blocked:true, issues:[{code, ...detail}]});
     if (!state || !Array.isArray(state.cuttingJobs) || !Array.isArray(state.completedCuttingJobs)) return fail("invalid_job_array");
     if (!Array.isArray(changes)) return fail("invalid_chronology_changes");
@@ -116,6 +116,25 @@
     const renumbering = planRenumbering(nextState.cuttingJobs, nextState.completedCuttingJobs);
     if (!renumbering.ok) return {...renumbering, chronologyChanges};
     for (const item of renumbering.changed) byId.get(item.id).cutNumber = item.to;
+    if (audit && (chronologyChanges.length || renumbering.changed.length)){
+      if (typeof audit.operationId !== "string" || !audit.operationId.trim() || typeof audit.actorUid !== "string" || !audit.actorUid.trim()
+        || typeof audit.atISO !== "string" || !Number.isFinite(Date.parse(audit.atISO)) || new Date(audit.atISO).toISOString() !== audit.atISO) return fail("invalid_chronology_audit");
+      const beforeById = new Map([...state.cuttingJobs, ...state.completedCuttingJobs].map(job => [job.id, job]));
+      const edited = new Set(chronologyChanges.map(item => item.id));
+      const affected = new Set([...edited, ...renumbering.changed.map(item => item.id)]);
+      for (const id of affected){
+        const job = byId.get(id), before = beforeById.get(id);
+        if (job.cutChronologyHistory !== undefined && !Array.isArray(job.cutChronologyHistory)) return fail("invalid_chronology_history", {id});
+        if ((job.cutChronologyHistory || []).some(entry => entry?.operationId === audit.operationId)) return fail("duplicate_chronology_operation", {id});
+        const values = value => ({cutDateISO:value.cutDateISO ?? null, cutOrderWithinDay:value.cutOrderWithinDay ?? null, cutNumber:value.cutNumber ?? null});
+        const initialized = !validCutDate(before.cutDateISO) || !validDayOrder(before.cutOrderWithinDay);
+        job.cutChronologyHistory = [...(job.cutChronologyHistory || []), {
+          operationId:audit.operationId, jobId:id, actorUid:audit.actorUid, atISO:audit.atISO,
+          kind:initialized ? "operator_review_initialization" : edited.has(id) ? "correction" : "renumber",
+          before:values(before), after:values(job), affectedRange:clone(renumbering.affectedRange), affectedCount:renumbering.changed.length
+        }];
+      }
+    }
     return {ok:true, nextState, renumbering, chronologyChanges,
       hasChanges:chronologyChanges.length > 0 || renumbering.changed.length > 0};
   }
@@ -125,7 +144,7 @@
   // stages changes into live arrays. Success requires exact server read-back.
   function createMutationApi(env){
     let busy = false;
-    async function save(changes, {expectedRevision} = {}){
+    async function save(changes, {expectedRevision, expectedSourceKey, expectedPreparedKey, audit} = {}){
       const result = {saved:false, verified:false, stateWriteAttempted:false, stateWriteCompleted:false, indeterminate:false, error:""};
       if (busy) return {...result, blocked:true, error:"A chronology mutation is already in progress."};
       if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || !env.canWrite()) return {...result, blocked:true, error:"Current authoritative revision and write permission are required."};
@@ -142,10 +161,13 @@
         localVersion = stateKey(env.localVersion());
         // Freeze the caller's request before any asynchronous baseline read.
         const requestedChanges = clone(changes);
+        const requestedAudit = audit ? clone(audit) : env.audit ? clone(env.audit()) : undefined;
         const source = await env.readState();
         if (!current() || !source || source.syncMeta?.rev !== expectedRevision || !env.baselineMatches(source)) return {...result, blocked:true, error:"Authoritative or local baseline changed; review again."};
-        const prepared = prepareChronologyMutation(source, requestedChanges);
+        if (expectedSourceKey !== undefined && stateKey(source) !== expectedSourceKey) return {...result, blocked:true, error:"Data changed after preview; reload and review again."};
+        const prepared = prepareChronologyMutation(source, requestedChanges, {audit:requestedAudit});
         if (!prepared.ok) return {...result, blocked:true, issues:prepared.issues, error:"Every included job needs verified cut date/order and unique stable identity."};
+        if (expectedPreparedKey !== undefined && businessKey(prepared.nextState) !== expectedPreparedKey) return {...result, blocked:true, error:"Chronology preview changed; review again."};
         result.renumbering = prepared.renumbering;
         result.chronologyChanges = prepared.chronologyChanges;
         if (!prepared.hasChanges) return {...result, saved:true, verified:true, noOp:true};
@@ -196,6 +218,6 @@
     }
     return Object.freeze({save, isBusy:() => busy});
   }
-  return Object.freeze({FIELDS, validCutDate, validDayOrder, hasExplicitChronology, readCutLabel, chronologyReadiness,
+  return Object.freeze({FIELDS, validCutDate, validDayOrder, hasExplicitChronology, readCutLabel, chronologyReadiness, stateKey, businessKey,
     compareCuttingJobChronology, readChronology, planRenumbering, prepareChronologyMutation, createMutationApi});
 });
