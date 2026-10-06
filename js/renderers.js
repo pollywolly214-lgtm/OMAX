@@ -5860,6 +5860,58 @@ function redirectToCuttingJobPage(jobId){
   }
 }
 
+function promptCreateCategory(parentId){
+  const name = window.prompt("New category name?");
+  if (!name) return null;
+  const project = window.prompt("Project number for this category (1–8 digits, ALAMO, or XXXX)?", window.CuttingJobHistory.leadingProject(name) || window.CuttingJobHistory.reversedProject(name));
+  if (project == null) return null;
+  try {
+    const folder = addJobFolder(name, parentId, undefined, project);
+    saveCloudDebounced();
+    return folder;
+  } catch (err){ toast(err.message || "Unable to create category."); return null; }
+}
+
+function selectManualJobCategory(select, folder){
+  const id = String(folder.id);
+  if (!Array.from(select.options).some(option=>option.value===id)){
+    const option = document.createElement("option");
+    option.value = id; option.textContent = folder.name;
+    select.appendChild(option);
+  }
+  select.value = id;
+  select.dataset.prevValue = id;
+}
+
+function syncManualJobProjectControl(select, input, original = null){
+  if (!select || !input) return;
+  input.readOnly = true;
+  let message;
+  if (original && String(select.value) === String(original.cat ?? "")){
+    input.value = String(original.projectNumber ?? "");
+    message = "Stored pair is preserved until Category changes.";
+  } else {
+    const jobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])].filter(job=>job!==original);
+    const pair = window.CuttingJobHistory.resolveCategoryProject(select.value, window.jobFolders || [], jobs);
+    input.value = pair.ok ? pair.projectNumber : "";
+    message = pair.ok ? "Project Number follows Category." : pair.reason;
+  }
+  input.title = message;
+  const status = input.parentElement?.querySelector("[data-project-category-status]");
+  if (status) status.textContent = message;
+}
+
+function syncManualJobProjectControls(root){
+  syncManualJobProjectControl(root.querySelector("#jobCategory"), root.querySelector("#jobProjectNumber"));
+  root.querySelectorAll("[data-j='cat'], [data-history-field='cat']").forEach(select=>{
+    const history = select.hasAttribute("data-history-id");
+    const id = select.getAttribute(history ? "data-history-id" : "data-id");
+    const job = (history ? window.completedCuttingJobs : window.cuttingJobs)?.find(job=>String(job.id)===id);
+    const input = select.closest(".job-edit-card")?.querySelector(history ? "[data-history-field='projectNumber']" : "[data-j='projectNumber']");
+    syncManualJobProjectControl(select, input, job);
+  });
+}
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   const activeDashboardModal = document.getElementById("dashboardAddModal");
@@ -6122,6 +6174,7 @@ function renderDashboard(){
   const jobStartInput    = document.getElementById("dashJobStart");
   const jobDueInput      = document.getElementById("dashJobDue");
   const jobCategoryInput = document.getElementById("dashJobCategory");
+  const jobProjectInput = document.getElementById("dashJobProjectNumber");
   const dashJobCategoryHint = document.getElementById("dashJobCategoryHint");
   const dashRootCategoryId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root";
   const updateDashJobCategoryHint = ()=>{
@@ -7810,6 +7863,7 @@ function renderDashboard(){
   });
 
   updateDashJobCategoryHint();
+  syncManualJobProjectControl(jobCategoryInput, jobProjectInput);
   const formatDashEstimateBreakdown = (hoursValue)=>{
     const totalHours = Number(hoursValue);
     const safeHours = Number.isFinite(totalHours) && totalHours >= 0 ? totalHours : 0;
@@ -7871,18 +7925,22 @@ function renderDashboard(){
       const folder = promptCreateCategory(parent);
       if (!folder){ toast("Category not created."); return; }
       categoryId = String(folder.id);
+      selectManualJobCategory(jobCategoryInput, folder);
+      syncManualJobProjectControl(jobCategoryInput, jobProjectInput);
       ensureJobCategoryFolderOpen(categoryId);
     }
-    const newJob = { id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, material, materialCost, materialQty, chargeRate, costRate, priority: 1, notes:"", manualLogs:[], cat: categoryId };
+    const pair = validateManualJobProjectCategory(categoryId, jobProjectInput?.value);
+    if (!pair.ok) return;
+    const newJob = { id: genId(name), name, estimateHours: est, startISO: start, dueISO: due, projectNumber:pair.projectNumber, material, materialCost, materialQty, chargeRate, costRate, priority: 1, notes:"", manualLogs:[], cat: pair.cat };
     cuttingJobs.push(newJob);
     window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
     reorderPriorities(newJob.id, newJob.priority);
-    ensureJobCategories?.();
     if (jobCategoryInput){
       jobCategoryInput.value = dashRootCategoryId;
       jobCategoryInput.dataset.prevValue = dashRootCategoryId;
     }
     updateDashJobCategoryHint();
+    syncManualJobProjectControl(jobCategoryInput, jobProjectInput);
     window.jobCategoryFilter = previousCategoryFilter;
     saveCloudDebounced();
     renderCalendarPreservingScroll();
@@ -7917,6 +7975,7 @@ function renderDashboard(){
         jobCategoryInput.dataset.prevValue = jobCategoryInput.value;
         updateDashJobCategoryHint();
       }
+      syncManualJobProjectControl(jobCategoryInput, jobProjectInput);
     });
   }
 
@@ -20325,11 +20384,7 @@ function renderJobs(){
     if (window.DEBUG_MODE) console.info("[cutting-job-files] renderJobs end");
   }, 0);
   document.body.classList.remove("job-naming-open");
-  try {
-    ensureJobCategories?.();
-  } catch (err){
-    console.warn("Failed to normalize job categories before render", err);
-  }
+  // Category fallbacks belong to the view; rendering must preserve stored pairs.
   setAppSettingsContext("jobs");
   wireDashboardSettingsMenu();
 
@@ -21277,9 +21332,6 @@ function renderJobs(){
 
   const rerenderPreservingState = (categoryId)=>{
     const formState = captureNewJobFormState();
-    if (formState && formState.fields && categoryId){
-      formState.fields.category = categoryId;
-    }
     const editingState = captureEditingJobForms();
     const historyEditingState = captureEditingHistoryJobForms();
     const scrollPosition = captureScrollPosition();
@@ -21289,6 +21341,7 @@ function renderJobs(){
       restoreNewJobFormState(formState);
       restoreEditingJobForms(editingState);
       restoreEditingHistoryJobForms(historyEditingState);
+      syncManualJobProjectControls(content);
     });
   };
 
@@ -21314,8 +21367,6 @@ function renderJobs(){
       return;
     }
     if (!changed) return;
-    try { ensureJobCategories?.(); }
-    catch (err){ console.warn("Failed to refresh job categories", err); }
     saveCloudDebounced();
     rerenderPreservingState(currentCategoryFilter());
     if (typeof refreshDashboardWidgets === "function"){
@@ -21325,23 +21376,6 @@ function renderJobs(){
     }
     if (typeof updateCalendarJobCategoryStyles === "function"){
       updateCalendarJobCategoryStyles(categoryId);
-    }
-  };
-
-  const promptCreateCategory = (parentId)=>{
-    const name = window.prompt("New category name?");
-    if (!name) return null;
-    try {
-      const folder = typeof addJobFolder === "function" ? addJobFolder(name, parentId) : null;
-      if (folder){
-        ensureJobCategories?.();
-        saveCloudDebounced();
-      }
-      return folder;
-    } catch (err){
-      console.warn("Failed to create job category", err);
-      toast("Unable to create category.");
-      return null;
     }
   };
 
@@ -22319,12 +22353,11 @@ function renderJobs(){
         const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
         const folder = promptCreateCategory(parent);
         if (folder){
-          select.value = String(folder.id);
-          select.dataset.prevValue = String(folder.id);
+          selectManualJobCategory(select, folder);
           const openSet = readOpenFolderSet();
           openSet.add(String(folder.id));
           writeOpenFolderSet(openSet);
-          rerenderPreservingState(currentCategoryFilter());
+          rerenderPreservingState(String(folder.id));
         }else{
           const fallback = select.dataset.prevValue || (window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"));
           select.value = fallback;
@@ -22333,6 +22366,7 @@ function renderJobs(){
         select.dataset.prevValue = select.value;
       }
       updateJobCategoryHint();
+      syncManualJobProjectControl(select, document.getElementById("jobProjectNumber"));
     });
   }
 
@@ -22409,13 +22443,13 @@ function renderJobs(){
         const folder = promptCreateCategory(parent);
         if (folder){
           const nextId = String(folder.id);
-          select.value = nextId;
-          select.dataset.prevValue = nextId;
+          selectManualJobCategory(select, folder);
           if (isInline){
             const job = cuttingJobs.find(j => String(j?.id) === inlineId);
             if (job){
-              job.cat = nextId;
-              ensureJobCategories?.();
+              const pair = validateManualJobProjectCategory(nextId, undefined, job);
+              if (!pair.ok){ select.value = String(job.cat ?? ""); return; }
+              applyManualJobProjectCategory(job, pair);
               saveCloudDebounced();
             }
           }
@@ -22423,6 +22457,7 @@ function renderJobs(){
           openSet.add(nextId);
           writeOpenFolderSet(openSet);
           window.jobCategoryFilter = nextId;
+          syncManualJobProjectControls(content);
           rerenderPreservingState(nextId);
         }else{
           const fallback = previousValue || (window.jobCategoryFilter || rootId);
@@ -22431,7 +22466,7 @@ function renderJobs(){
         return;
       }
 
-      const nextSelection = String(select.value || rootId);
+      const nextSelection = String(select.value);
       select.dataset.prevValue = nextSelection;
 
       if (isInline){
@@ -22442,18 +22477,21 @@ function renderJobs(){
           select.dataset.prevValue = fallback;
           return;
         }
-        job.cat = nextSelection;
-        ensureJobCategories?.();
+        const pair = validateManualJobProjectCategory(nextSelection, undefined, job);
+        if (!pair.ok){ select.value = String(job.cat ?? ""); select.dataset.prevValue = select.value; return; }
+        applyManualJobProjectCategory(job, pair);
         saveCloudDebounced();
         const currentFilter = typeof window.jobCategoryFilter === "string" ? window.jobCategoryFilter : rootId;
         rerenderPreservingState(currentFilter);
-      } else if (select.hasAttribute("data-id")){
+      } else if (select.hasAttribute("data-id") || select.hasAttribute("data-history-id")){
+        syncManualJobProjectControls(content);
         rerenderPreservingState(currentCategoryFilter());
       }
     });
   }
 
   // 2) Small, scoped helpers for manual log math + defaults
+  syncManualJobProjectControls(content);
   const todayISO = (()=>{ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); })();
   const curTotal = ()=> (RENDER_TOTAL ?? currentTotal());
 
@@ -22829,7 +22867,6 @@ function renderJobs(){
     const start = document.getElementById("jobStart").value;
     const due   = document.getElementById("jobDue").value;
     const projectNumberRaw = document.getElementById("jobProjectNumber")?.value ?? "";
-    const projectNumber = window.CuttingJobHistory.normalizeProjectKey(projectNumberRaw);
     const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
     const priorityNum = Number(priorityRaw);
     const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
@@ -22843,7 +22880,7 @@ function renderJobs(){
     const materialQty = 1;
     const chargeRate = chargeRaw === "" ? 200 : Number(chargeRaw);
     const costRate = costRateRaw === "" ? 45 : Number(costRateRaw);
-    if (!name || !isFinite(est) || est<=0 || !start || !due || !projectNumber){ toast("Fill job fields, including project #."); return; }
+    if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){
       materialCost = 0;
     }
@@ -22863,8 +22900,13 @@ function renderJobs(){
       const folder = promptCreateCategory(parent);
       if (!folder){ toast("Category not created."); return; }
       categoryId = String(folder.id);
+      selectManualJobCategory(categorySelect, folder);
+      syncManualJobProjectControl(categorySelect, document.getElementById("jobProjectNumber"));
       ensureJobCategoryFolderOpen(categoryId);
     }
+    const pair = validateManualJobProjectCategory(categoryId, document.getElementById("jobProjectNumber")?.value ?? projectNumberRaw);
+    if (!pair.ok) return;
+    const projectNumber = pair.projectNumber;
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
     const pendingCloudFiles = pendingSecureCloudJobFiles.map(entry=>entry?.file).filter(file=>file && typeof file.arrayBuffer === "function");
     const thickness = fractionToNumber(document.getElementById("jobMaterialThickness")?.value);
@@ -22872,11 +22914,10 @@ function renderJobs(){
     const pathWidth = Number(document.getElementById("jobMaterialWidthFt")?.value);
     const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material,
       thickness, pathLength, pathWidth, materialCost, materialQty, materialWeight, materialCostComplete:materialCostRaw !== "",
-      chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: categoryId };
+      chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: pair.cat };
     cuttingJobs.push(newJob);
     window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
     reorderPriorities(newJob.id, priority);
-    ensureJobCategories?.();
     window.jobCategoryFilter = previousCategoryFilter;
     if (!pendingCloudFiles.length){
       pendingNewJobFiles.length = 0;
@@ -23537,6 +23578,8 @@ function renderJobs(){
         defaultEnd
       });
       if (!selection) return;
+      const pair = validateManualJobProjectCategory(entry.cat, undefined);
+      if (!pair.ok) return;
       if (selection.startISO) startISO = selection.startISO;
       if (selection.dueISO) dueISO = selection.dueISO;
 
@@ -23554,6 +23597,7 @@ function renderJobs(){
       const newJob = {
         id: genId(entry.name || "job"),
         name: entry.name || "Cutting job",
+        projectNumber: pair.projectNumber,
         estimateHours,
         startISO,
         dueISO,
@@ -23571,7 +23615,7 @@ function renderJobs(){
         notes: entry.notes || "",
         manualLogs: [],
         files: Array.isArray(entry.files) ? entry.files.map(f => ({ ...f })) : [],
-        cat: entry.cat != null ? entry.cat : (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root")
+        cat: pair.cat
       };
 
       cuttingJobs.push(newJob);
@@ -23622,6 +23666,8 @@ function renderJobs(){
       if (!entry) return;
       const filesBeforeSave = Array.isArray(entry.files) ? entry.files.slice() : [];
       const field = (key)=> content.querySelector(`[data-history-field="${key}"][data-history-id="${id}"]`);
+      const pair = validateManualJobProjectCategory(field("cat")?.value, field("projectNumber")?.value, entry);
+      if (!pair.ok) return;
       const nameInput = field("name");
       const estimateInput = field("estimateHours");
       const actualInput = field("actualHours");
@@ -23632,7 +23678,6 @@ function renderJobs(){
       const costRateInput = field("costRate");
       const notesInput = field("notes");
       const completedInput = field("completedAtISO");
-      const categoryInput = field("cat");
       const priorityInput = field("priority");
 
       const name = (nameInput?.value || entry.name || "").trim();
@@ -23718,9 +23763,7 @@ function renderJobs(){
         filesBeforeSave: filesBeforeSave.length,
         filesAfterSave: Array.isArray(entry.files) ? entry.files.length : 0
       });
-      if (categoryInput && categoryInput.value && categoryInput.value !== "__new__"){
-        entry.cat = categoryInput.value;
-      }
+      applyManualJobProjectCategory(entry, pair);
 
       const rate = Number.isFinite(netRate) ? netRate : (Number(entry.efficiency?.rate) || JOB_RATE_PER_HOUR);
       const deltaHours = actualHours != null ? (estimateHours - actualHours) : (entry.efficiency?.deltaHours ?? null);
@@ -23888,9 +23931,8 @@ function renderJobs(){
       const j  = cuttingJobs.find(x => String(x?.id) === idStr); if (!j) return;
       const filesBeforeSave = Array.isArray(j.files) ? j.files.slice() : [];
       const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${idStr}"]`)?.value;
-      const projectRaw=String(qs("projectNumber")||"").trim();
-      const projectInput=window.CuttingJobHistory.normalizeProjectKey(projectRaw);
-      if(projectRaw&&!projectInput){toast("Project # must be 1-8 digits, ALAMO, or XXXX.");return;}
+      const pair = validateManualJobProjectCategory(qs("cat"), qs("projectNumber"), j);
+      if (!pair.ok) return;
       const chargeRaw = qs("chargeRate");
       const chargeVal = chargeRaw === "" || chargeRaw == null ? null : Number(chargeRaw);
       if (chargeVal != null && (!Number.isFinite(chargeVal) || chargeVal < 0)){ toast("Enter a valid charge rate."); return; }
@@ -23905,7 +23947,6 @@ function renderJobs(){
         ? Number(j.costRate)
         : 45;
       const costToSet = costVal == null ? existingCost : costVal;
-      const catVal = qs("cat");
       j.name = qs("name") || j.name;
       j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
       j.material = qs("material") || j.material || "";
@@ -23913,7 +23954,7 @@ function renderJobs(){
       j.materialQty = Math.max(0, Number(qs("materialQty")) || 0);
       j.startISO = qs("startISO") || j.startISO;
       j.dueISO   = qs("dueISO")   || j.dueISO;
-      if (projectInput) j.projectNumber = projectInput;
+      applyManualJobProjectCategory(j, pair);
       j.notes    = content.querySelector(`[data-j="notes"][data-id="${idStr}"]`)?.value || j.notes || "";
       j.chargeRate = chargeToSet;
       j.costRate = costToSet;
@@ -23938,7 +23979,6 @@ function renderJobs(){
         filesBeforeSave: filesBeforeSave.length,
         filesAfterSave: Array.isArray(j.files) ? j.files.length : 0
       });
-      if (catVal && catVal !== "__new__") j.cat = catVal;
       editingJobs.delete(idStr);
       saveCloudDebounced();
       toast("saved");
