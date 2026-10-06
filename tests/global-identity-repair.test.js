@@ -100,6 +100,16 @@ function loadHarness(initial,options={}){
   return{context,window,removed,get adoptions(){return adoptions;},replace:value=>cloud=clone(value)};
 }
 const cleanFixture=()=>{const source=fixture();return repair.repairedState(source,repair.preview(source));};
+test("Material Inventory __all is allowed only as its selector sentinel",()=>{
+  const source=cleanFixture();source.inventoryMaterials={activeType:"__all",types:[{id:"steel",name:"Steel"}],sheets:{steel:{columns:["QTY 4x8"],rows:[{thickness:"0.0625",values:[""]}]}}};
+  assert.equal(repair.integrity(source).valid,true);
+  source.inventoryMaterials.activeType="missing-material";
+  assert.equal(repair.integrity(source).valid,false);
+  source.inventoryMaterials.activeType="__all";source.inventoryMaterials.sheets.__all={rows:[]};
+  assert.equal(repair.integrity(source).valid,false,"sentinel cannot excuse an unknown sheet identity");
+  delete source.inventoryMaterials.sheets.__all;source.maintenanceTasksV2[0].inventoryId="__all";
+  assert.equal(repair.integrity(source).valid,false,"unrelated foreign keys receive no sentinel exemption");
+});
 test("normal load of unresolved global identities displays exact authoritative data read-only",async()=>{const source=fixture(),h=loadHarness(source),result=await h.context.load();assert.equal(result.recovery,true);assert.equal(h.context.canWrite(),false);assert.deepEqual(h.window.__lastLoadedCloudState,source);assert.deepEqual(h.window.maintenanceOccurrencesV2,source.maintenanceOccurrencesV2);assert.ok(h.window.__globalIdentityIssues.some(message=>message.includes(oldTask)));assert.equal(h.window.__initialAdoptComplete,true);});
 test("inventory-only correction cannot exit recovery while V2 identities remain corrupt",async()=>{const source=fixture(),next=inventoryRepair.repairedState(source,inventoryRepair.preview(source)),h=loadHarness(next);assert.equal((await h.context.load()).recovery,true);assert.equal(h.context.canWrite(),false);});
 test("clean repaired SERVER state automatically exits recovery after exact adoption",async()=>{const source=cleanFixture(),h=loadHarness(source),result=await h.context.load();assert.equal(result.recovery,false);assert.equal(h.window.__recoveryInspectMode,false);assert.equal(h.window.__autosaveDisabled,false);assert.equal(h.window.__inventoryIdentityRecoveryDisplay,false);assert.equal(h.context.canWrite(),true);assert.deepEqual(h.window.__lastLoadedCloudState,source);assert.deepEqual(h.removed,["recoveryModeBanner","recoveryDiagnosticsPanel"]);});

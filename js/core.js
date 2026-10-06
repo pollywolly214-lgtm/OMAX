@@ -2732,6 +2732,8 @@ function startWorkspaceStateListener(){
   workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
     if (!snap || !snap.exists){ enterMissingStateRecovery(); return; }
     if (isRecoveryMode()) return;
+    // The isolated material writer owns adoption until SERVER verification.
+    if (window.inventoryMaterialMutationApi?.isBusy()) return;
     if (snap.metadata && snap.metadata.hasPendingWrites) return;
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
@@ -4605,6 +4607,9 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
     expectedRevision,
     clientId:getCloudSyncClientId(), scan:scanAuthoritativeCutFileContent,
     prepare:(pending, remote)=>{
+      if (options.validateSourceState && options.validateSourceState(JSON.parse(JSON.stringify(remote))) !== true){
+        throw Object.assign(new Error("Material mutation source or local evidence changed."), { definite:true, code:"mutation_source_changed" });
+      }
       if(identityAuthorized){
         if(stableStringify(remote)!==identityProof.sourceKey||stableStringify(pending)!==identityProof.pendingKey)throw Object.assign(new Error("Inventory repair source or exact authorized changes no longer match."),{definite:true,code:"inventory_repair_conflict"});
         if(estimatePayloadBytes(pending)>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
@@ -4623,11 +4628,26 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:buildWindowProtectedStateForCoverage(), coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
       if (preflight.blocked || detectDangerousProtectedFieldReduction(safetyRemote, pending).blocked) throw Object.assign(new Error("Protected-state transaction preflight blocked the write."), { definite:true, code:"protected_preflight_blocked" });
       if (!deletionProof && !historyRestoreProof){
-        pending.totalHistory = mergeTotalHistoryForSave(pending.totalHistory, remote.totalHistory, totalHistoryBaseline);
-        pending.dailyCutHours = mergeDailyCutHoursForSave(pending.dailyCutHours, remote.dailyCutHours);
-        pending.pumpEff = mergePumpEffForSave(pending.pumpEff, remote.pumpEff);
+        // An exact isolated mutation must not normalize unrelated evidence.
+        // Only fields proven identical to this transaction's remote snapshot
+        // are retained verbatim; differences still use the existing merges.
+        const mergeUnlessIdentical=(field,merge,baseline)=>options.validateSourceState && options.validatePreparedState
+          && stableStringifyForIntegrity(pending[field])===stableStringifyForIntegrity(remote[field])
+          ? pending[field] : merge(pending[field],remote[field],baseline);
+        pending.totalHistory = mergeUnlessIdentical("totalHistory",mergeTotalHistoryForSave,totalHistoryBaseline);
+        pending.dailyCutHours = mergeUnlessIdentical("dailyCutHours",mergeDailyCutHoursForSave);
+        pending.pumpEff = mergeUnlessIdentical("pumpEff",mergePumpEffForSave);
       }
       if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
+      // Additional restriction only: validate an isolated copy after protected
+      // merges, without granting any exception to the existing save guards.
+      if (options.validatePreparedState){
+        try {
+          if (options.validatePreparedState(JSON.parse(JSON.stringify(pending))) !== true) throw Error("Prepared mutation changed; review again.");
+        } catch (error){
+          throw Object.assign(new Error(String(error?.message || error)), { definite:true, code:"mutation_state_changed" });
+        }
+      }
       return pending;
     }
   });
@@ -4652,6 +4672,72 @@ function getInventoryIdentityRepairLocalState(){
   Object.keys(bindings).forEach(name=>{if(Object.prototype.hasOwnProperty.call(source,name))live[name]=bindings[name];});
   return live;
 }
+
+// Firebase v8 document.get({source:"server"}) uses a SnapshotListener and can
+// reuse an active view that has not observed a just-committed transaction yet.
+// Transaction.get performs a backend lookup independent of that view. This
+// transaction is read-only: never queue set/update/delete during verification.
+async function readInventoryMaterialAuthoritativeState(){
+  const db = FB.db, docRef = FB.docRef;
+  if (!FB.ready || !docRef || typeof db?.runTransaction !== "function")
+    throw Error("A backend transaction read is unavailable; material verification cannot use a cached view.");
+  return db.runTransaction(async transaction=>{
+    const snapshot = await transaction.get(docRef);
+    const state = snapshot?.exists ? (typeof snapshot.data === "function" ? snapshot.data() : snapshot.data) : null;
+    return {revision:state?.syncMeta?.rev ?? null, state, path:docRef.path, readSource:"backend_transaction"};
+  });
+}
+
+let inventoryMaterialOwnedSuspension = null;
+const inventoryMaterialMutationApi = window.OMAXInventoryMaterialMutations?.createApi({
+  canWrite:()=>canWriteCloud("Material Inventory") && FB.ready && Boolean(FB.user) && !isVercelPreviewRuntime() && !window.__lastIndeterminateSave,
+  settle:async()=>{
+    await cloudSaveQueue;
+    // Do not initiate a normalizing whole-app save from a material action.
+    if (hasPendingLocalChanges) throw Error("Other changes are still pending. Wait for their save, or reload/review before editing materials.");
+  },
+  lock:value=>{window.__inventoryMaterialMutationPending=value;},
+  localState:getInventoryIdentityRepairLocalState,
+  localVersion:()=>({revision:window.__loadedCloudRevisionForSaveGuard, mutation:lastLocalMutationAt}),
+  loadedRevision:()=>window.__loadedCloudRevisionForSaveGuard,
+  baselineMatches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)
+    && window.OMAXInventoryMaterialMutations.key(window.OMAXInventoryMaterialMutations.business(source))===window.OMAXInventoryMaterialMutations.key(window.OMAXInventoryMaterialMutations.business(getInventoryIdentityRepairLocalState())),
+  readAuthoritativeState:readInventoryMaterialAuthoritativeState,
+  clientId:getCloudSyncClientId,
+  validate:state=>window.OMAXGlobalIdentityRepair?.integrity(state).valid===true && !scanAuthoritativeCutFileContent(state).contaminated,
+  writeState:(next,expectedRevision,validateSourceState,validatePreparedState)=>{
+    const queued=cloudSaveQueue.then(async()=>{
+      // Replace the complete owned map (including an undone newly added type),
+      // while leaving every unrelated top-level field physically untouched.
+      const result=await writeAuthoritativeStateSnapshot(next,{mergeFields:["inventoryMaterials","syncMeta"]},{expectedRevision,validateSourceState,validatePreparedState});
+      inventoryMaterialOwnedSuspension=result.indeterminate ? window.__lastIndeterminateSave : null;
+      return result;
+    });
+    cloudSaveQueue=queued.catch(()=>{});
+    return queued;
+  },
+  adoptVerifiedState:(cloud,{uncertain})=>{
+    if (uncertain && window.__lastIndeterminateSave){
+      if (!inventoryMaterialOwnedSuspension || window.__lastIndeterminateSave!==inventoryMaterialOwnedSuspension) return false;
+      // Clear only this write's uncertainty after exact server proof. The
+      // central adoption gate still checks every other recovery blocker.
+      window.__lastIndeterminateSave=null;
+    }
+    inventoryMaterialOwnedSuspension=null;
+    return adoptIdentityCheckedAuthoritativeState(cloud)?.recovery===false;
+  },
+  suspend:result=>{
+    window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
+    window.__lastInventoryMaterialMutationEvidence=result;
+    window.__lastIndeterminateSave=result;
+    try { renderRecoveryDiagnosticsPanel(); } catch (error){ console.warn("Material verification diagnostics failed",error); }
+  }
+});
+window.inventoryMaterialMutationApi=inventoryMaterialMutationApi;
+window.addEventListener?.("beforeunload",event=>{
+  if (!inventoryMaterialMutationApi?.isBusy()) return;
+  event.preventDefault();event.returnValue="";
+});
 const inventoryIdentityRepairApi=window.OMAXInventoryIdentityRepair?.createApi({
   localState:getInventoryIdentityRepairLocalState,
   loadedRevision:()=>window.__loadedCloudRevisionForSaveGuard,
@@ -6764,6 +6850,7 @@ function cloudSaveNoWriteFailure(errorCode, error){
 }
 
 async function performCloudSave(saveOptions = {}){
+  if (window.__inventoryMaterialMutationPending) return cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending.");
   let authoritativeStateWriteAttempted = false;
   let authoritativeStateWriteCompleted = false;
   const explicitTrace = (typeof window !== "undefined" && window.__activeExplicitMaintenanceAddSaveTrace && typeof window.__activeExplicitMaintenanceAddSaveTrace === "object")
@@ -7287,6 +7374,10 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
+  if (window.__inventoryMaterialMutationPending){
+    hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
+    return cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending.");
+  }
   if (!canWriteCloud("saveCloudDebounced")) return cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked.");
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
@@ -7308,6 +7399,10 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(saveOptions = {}){
+  if (window.__inventoryMaterialMutationPending){
+    hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
+    return Promise.resolve(cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending."));
+  }
   if (!canWriteCloud("saveCloudNow")) return Promise.resolve(cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked."));
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
@@ -7788,10 +7883,17 @@ function isEditableTarget(el){
 }
 
 window.addEventListener("keydown", (e)=>{
+  if (e.defaultPrevented) return;
   if (!(e.ctrlKey || e.metaKey)) return;
   const key = (e.key || "").toLowerCase();
   if (key !== "z" && key !== "y") return;
   if (isEditableTarget(e.target)) return;
+
+  if (["#/inventory","#inventory"].includes(String(location.hash || "").split("?")[0]) && window.inventorySection==="material"){
+    e.preventDefault();
+    if (key==="z" && !e.shiftKey && !e.altKey) void window.__runInventoryMaterialAction?.({kind:"undo"});
+    return;
+  }
 
   if (key === "z" && !e.shiftKey){
     e.preventDefault();

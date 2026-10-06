@@ -24146,10 +24146,17 @@ function renderInventory(){
   let isInventoryDragging = false;
   const finishInventoryDrag = ()=>{ setTimeout(()=>{ isInventoryDragging = false; }, 0); };
 
-  const persistInventoryMaterials = ()=>{
-    window.inventoryMaterials = normalizeInventoryMaterials(window.inventoryMaterials);
-    saveCloudDebounced();
+  const persistInventoryMaterials = async action=>{
+    const api=window.inventoryMaterialMutationApi;
+    if (!api){ toast("Material persistence is unavailable. Reload before editing."); return {saved:false}; }
+    const saving=api.run({...action,baselineMaterials:cloneStructured(window.inventoryMaterials)});
+    renderInventory();
+    const result=await saving;
+    if (!result.saved || !result.verified) toast(result.error || "Material change was not confirmed. Reload/review before retrying.");
+    if (["#/inventory","#inventory"].includes(String(location.hash || "").split("?")[0])) renderInventory();
+    return result;
   };
+  window.__runInventoryMaterialAction=persistInventoryMaterials;
 
   const isFolderDescendant = (folderId, maybeAncestorId)=>{
     if (!folderId || !maybeAncestorId) return false;
@@ -24252,397 +24259,74 @@ function renderInventory(){
     });
   });
 
-  const getMaterialModel = ()=> normalizeInventoryMaterials(window.inventoryMaterials);
   window.inventoryMaterialEditMode = !!window.inventoryMaterialEditMode;
-  if (!Array.isArray(window.inventoryMaterialUndoStack)) window.inventoryMaterialUndoStack = [];
-  const pushMaterialUndo = ()=>{
-    window.inventoryMaterialUndoStack.push(cloneStructured(getMaterialModel()));
-    if (window.inventoryMaterialUndoStack.length > 20){
-      window.inventoryMaterialUndoStack.splice(0, window.inventoryMaterialUndoStack.length - 20);
-    }
-  };
-  const popMaterialUndo = ()=>{
-    if (!Array.isArray(window.inventoryMaterialUndoStack) || !window.inventoryMaterialUndoStack.length) return null;
-    return window.inventoryMaterialUndoStack.pop();
-  };
-  const formatQtyHeading = (raw)=>{
-    const txt = String(raw || "").trim();
-    if (!txt) return "QTY 4x8";
-    const body = txt.replace(/^qty\s*/i, "").trim();
-    return `QTY ${body || "4x8"}`;
-  };
-  const parseThicknessNumber = (raw)=>{
-    const txt = String(raw ?? "").replace(/"/g, "").trim();
-    if (!txt) return NaN;
-    const mixed = txt.match(/^(\d+)\s+(\d+)\/(\d+)$/);
-    if (mixed){
-      const whole = Number(mixed[1]);
-      const top = Number(mixed[2]);
-      const bot = Number(mixed[3]);
-      if (Number.isFinite(whole) && Number.isFinite(top) && Number.isFinite(bot) && bot > 0) return whole + (top / bot);
-    }
-    const frac = txt.match(/^(\d+)\/(\d+)$/);
-    if (frac){
-      const top = Number(frac[1]);
-      const bot = Number(frac[2]);
-      if (Number.isFinite(top) && Number.isFinite(bot) && bot > 0) return top / bot;
-    }
-    const num = Number(txt);
-    return Number.isFinite(num) ? num : NaN;
-  };
-  const normalizeSheetShape = (sheet)=>{
-    if (!sheet) return;
-    if (!Array.isArray(sheet.columns) || !sheet.columns.length) sheet.columns = ["QTY 4x8"];
-    sheet.columns = sheet.columns.map(formatQtyHeading);
-    if (!Array.isArray(sheet.rows) || !sheet.rows.length) sheet.rows = [{ thickness: "0.0625", values: sheet.columns.map(()=>"") }];
-    sheet.rows = sheet.rows.filter(row => String(row?.thickness || "").trim() !== "");
-    if (!sheet.rows.length) sheet.rows = [{ thickness: "0.0625", values: sheet.columns.map(()=>"") }];
-    sheet.rows.forEach(row => {
-      if (!Array.isArray(row.values)) row.values = [];
-      while (row.values.length < sheet.columns.length) row.values.push("");
-      if (row.values.length > sheet.columns.length) row.values = row.values.slice(0, sheet.columns.length);
-    });
-  };
-  const normalizeAllSheets = (model)=>{
-    if (!model || !Array.isArray(model.types)) return;
-    model.types.forEach(type => {
-      const key = String(type?.id || "");
-      if (!key) return;
-      if (!model.sheets[key]) model.sheets[key] = { columns: ["QTY 4x8"], rows: [{ thickness: "0.0625", values: [""] }] };
-      normalizeSheetShape(model.sheets[key]);
-    });
-  };
-
-  const materialKeydownHandler = (e)=>{
-    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
-    if (String(e.key || "").toLowerCase() !== "z") return;
-    if (String(window.inventorySection || "") !== "material") return;
-    const target = e.target;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
-    const prev = popMaterialUndo();
-    if (!prev) return;
+  const materialKeydownHandler = e=>{
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || String(e.key || "").toLowerCase()!=="z") return;
+    if (String(window.inventorySection || "")!=="material" || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     e.preventDefault();
-    window.inventoryMaterials = normalizeInventoryMaterials(prev);
-    saveCloudDebounced();
-    renderInventory();
+    e.stopPropagation();
+    void persistInventoryMaterials({kind:"undo"});
   };
-  if (window.__inventoryMaterialKeydownHandler){
-    content.removeEventListener("keydown", window.__inventoryMaterialKeydownHandler);
-  }
-  window.__inventoryMaterialKeydownHandler = materialKeydownHandler;
-  content.addEventListener("keydown", materialKeydownHandler);
-
-  const materialEditModeBtn = content.querySelector("#materialEditModeBtn");
-  materialEditModeBtn?.addEventListener("click", ()=>{
-    window.inventoryMaterialEditMode = !window.inventoryMaterialEditMode;
-    renderInventory();
+  if (window.__inventoryMaterialKeydownHandler) content.removeEventListener("keydown",window.__inventoryMaterialKeydownHandler);
+  window.__inventoryMaterialKeydownHandler=materialKeydownHandler;
+  content.addEventListener("keydown",materialKeydownHandler);
+  content.querySelector("#materialEditModeBtn")?.addEventListener("click",()=>{
+    window.inventoryMaterialEditMode=!window.inventoryMaterialEditMode;renderInventory();
   });
-
-  const materialTypeSelect = content.querySelector("#materialTypeSelect");
-  materialTypeSelect?.addEventListener("change", ()=>{
-    const model = getMaterialModel();
-    const selected = String(materialTypeSelect.value || "__all");
-    const valid = selected === "__all" || model.types.some(t => String(t.id) === selected);
-    model.activeType = valid ? selected : "__all";
-    window.inventoryMaterials = model;
-    saveCloudDebounced();
-    renderInventory();
+  const materialTypeSelect=content.querySelector("#materialTypeSelect");
+  materialTypeSelect?.addEventListener("change",()=>{void persistInventoryMaterials({kind:"select",value:materialTypeSelect.value});});
+  content.querySelector("#materialAddTypeBtn")?.addEventListener("click",()=>{
+    const value=window.prompt("Material type name:","Titanium");
+    if (value?.trim()) void persistInventoryMaterials({kind:"add-type",value});
   });
-
-  const materialAddTypeBtn = content.querySelector("#materialAddTypeBtn");
-  materialAddTypeBtn?.addEventListener("click", ()=>{
-    const raw = window.prompt("Material type name:", "Titanium");
-    if (!raw) return;
-    const model = getMaterialModel();
-    const name = raw.trim();
-    if (!name) return;
-    let id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
-    if (!id) id = `material_${Date.now()}`;
-    let counter = 1;
-    const used = new Set(model.types.map(t => String(t.id)));
-    while (used.has(id)){ id = `${id}_${counter++}`; }
-    pushMaterialUndo();
-    model.types.push({ id, name });
-    const baseRows = (typeof buildMaterialThicknessList === "function" ? buildMaterialThicknessList() : [])
-      .map(t => ({
-        thickness: (Number(t.sixteenths) / 16).toFixed(4).replace(/0+$/, "").replace(/\.$/, ""),
-        values: ["", ""]
-      }));
-    model.sheets[id] = {
-      columns: ["QTY 4x8", "QTY 4x10"],
-      rows: baseRows.length ? baseRows : [{ thickness: "0.0625", values: ["", ""] }]
-    };
-    model.activeType = id;
-    window.inventoryMaterials = model;
-    saveCloudDebounced();
-    renderInventory();
+  const materialClickHandler=e=>{
+    if (String(window.inventorySection || "")!=="material" || !window.inventoryMaterialEditMode) return;
+    const actions=[
+      ["data-material-row-add","add-row"], ["data-material-row-add-after","insert-row"],
+      ["data-material-row-delete","delete-row"], ["data-material-col-add","add-column"],
+      ["data-material-col-add-after","insert-column"], ["data-material-col-delete-index","delete-column"]
+    ];
+    for (const [attribute,kind] of actions){
+      const target=e.target.closest("["+attribute+"]");
+      if (!target) continue;
+      e.preventDefault();e.stopPropagation();
+      void persistInventoryMaterials({kind,typeId:target.getAttribute(attribute),rowIndex:Number(target.getAttribute("data-row-index")),colIndex:Number(target.getAttribute("data-col-index"))});
+      return;
+    }
+  };
+  if (window.__inventoryMaterialClickHandler) content.removeEventListener("click",window.__inventoryMaterialClickHandler);
+  window.__inventoryMaterialClickHandler=materialClickHandler;
+  content.addEventListener("click",materialClickHandler);
+  const updateMaterialCellValue=(cell,value)=>persistInventoryMaterials({
+    kind:cell.getAttribute("data-edit-kind"),typeId:cell.getAttribute("data-type-id"),
+    rowIndex:Number(cell.getAttribute("data-row-index")),colIndex:Number(cell.getAttribute("data-col-index")),value
   });
-
-  const materialClickHandler = (e)=>{
-    if (String(window.inventorySection || "") !== "material") return;
-    const addRow = e.target.closest("[data-material-row-add]");
-    if (addRow){
-      e.preventDefault();
-      e.stopPropagation();
-      if (!window.inventoryMaterialEditMode) return;
-      const typeId = addRow.getAttribute("data-material-row-add") || "";
-      const model = getMaterialModel();
-      const sheet = model.sheets[typeId];
-      if (!sheet) return;
-      normalizeSheetShape(sheet);
-      pushMaterialUndo();
-      const last = sheet.rows[sheet.rows.length - 1];
-      const lastVal = parseThicknessNumber(last?.thickness);
-      const predicted = Number.isFinite(lastVal) ? (lastVal + (1/16)) : (1/16);
-      sheet.rows.push({ thickness: String(predicted), values: sheet.columns.map(()=>"") });
-      window.inventoryMaterials = model;
-      saveCloudDebounced();
-      renderInventory();
-      return;
-    }
-
-    const delRow = e.target.closest("[data-material-row-delete]");
-    if (delRow){
-      e.preventDefault();
-      e.stopPropagation();
-      if (!window.inventoryMaterialEditMode) return;
-      const typeId = delRow.getAttribute("data-material-row-delete") || "";
-      const rowIndex = Number(delRow.getAttribute("data-row-index"));
-      const model = getMaterialModel();
-      const sheet = model.sheets[typeId];
-      if (!sheet || !Number.isFinite(rowIndex)) return;
-      if (sheet.rows.length <= 1) return;
-      pushMaterialUndo();
-      sheet.rows.splice(rowIndex, 1);
-      window.inventoryMaterials = model;
-      saveCloudDebounced();
-      renderInventory();
-      return;
-    }
-
-    const addAfterRow = e.target.closest("[data-material-row-add-after]");
-    if (addAfterRow){
-      e.preventDefault();
-      e.stopPropagation();
-      if (!window.inventoryMaterialEditMode) return;
-      const typeId = addAfterRow.getAttribute("data-material-row-add-after") || "";
-      const rowIndex = Number(addAfterRow.getAttribute("data-row-index"));
-      const model = getMaterialModel();
-      const sheet = model.sheets[typeId];
-      if (!sheet || !Number.isFinite(rowIndex)) return;
-      normalizeSheetShape(sheet);
-      pushMaterialUndo();
-      const current = parseThicknessNumber(sheet.rows[rowIndex]?.thickness);
-      const next = parseThicknessNumber(sheet.rows[rowIndex + 1]?.thickness);
-      let predicted = Number.isFinite(current) ? current + (1/16) : (1/16);
-      if (Number.isFinite(current) && Number.isFinite(next) && next > current){
-        predicted = current + ((next - current) / 2);
-      }
-      sheet.rows.splice(Math.max(0, rowIndex + 1), 0, { thickness: String(predicted), values: sheet.columns.map(()=>"") });
-      window.inventoryMaterials = model;
-      saveCloudDebounced();
-      renderInventory();
-      return;
-    }
-
-    const addCol = e.target.closest("[data-material-col-add]");
-    if (addCol){
-      e.preventDefault();
-      e.stopPropagation();
-      if (!window.inventoryMaterialEditMode) return;
-      const typeId = addCol.getAttribute("data-material-col-add") || "";
-      const model = getMaterialModel();
-      const sheet = model.sheets[typeId];
-      if (!sheet) return;
-      normalizeAllSheets(model);
-      const sharedColumns = Array.isArray(sheet.columns) ? sheet.columns.slice() : ["QTY 4x8"];
-      pushMaterialUndo();
-      sharedColumns.push(formatQtyHeading("4x8"));
-      model.types.forEach(type => {
-        const s = model.sheets[String(type.id)];
-        if (!s) return;
-        s.columns = sharedColumns.slice();
-        s.rows.forEach(row => {
-          if (!Array.isArray(row.values)) row.values = [];
-          row.values.push("");
-        });
-      });
-      window.inventoryMaterials = model;
-      saveCloudDebounced();
-      renderInventory();
-      return;
-    }
-
-    const addAfterCol = e.target.closest("[data-material-col-add-after]");
-    if (addAfterCol){
-      e.preventDefault();
-      e.stopPropagation();
-      if (!window.inventoryMaterialEditMode) return;
-      const typeId = addAfterCol.getAttribute("data-material-col-add-after") || "";
-      const colIndex = Number(addAfterCol.getAttribute("data-col-index"));
-      const model = getMaterialModel();
-      const sheet = model.sheets[typeId];
-      if (!sheet || !Number.isFinite(colIndex)) return;
-      normalizeAllSheets(model);
-      const sharedColumns = Array.isArray(sheet.columns) ? sheet.columns.slice() : ["QTY 4x8"];
-      pushMaterialUndo();
-      const insertAt = Math.max(0, colIndex + 1);
-      sharedColumns.splice(insertAt, 0, formatQtyHeading("4x8"));
-      model.types.forEach(type => {
-        const s = model.sheets[String(type.id)];
-        if (!s) return;
-        s.columns = sharedColumns.slice();
-        s.rows.forEach(row => {
-          if (!Array.isArray(row.values)) row.values = [];
-          row.values.splice(insertAt, 0, "");
-        });
-      });
-      window.inventoryMaterials = model;
-      saveCloudDebounced();
-      renderInventory();
-      return;
-    }
-
-    const delColByIndex = e.target.closest("[data-material-col-delete-index]");
-    if (delColByIndex){
-      e.preventDefault();
-      e.stopPropagation();
-      if (!window.inventoryMaterialEditMode) return;
-      const typeId = delColByIndex.getAttribute("data-material-col-delete-index") || "";
-      const colIndex = Number(delColByIndex.getAttribute("data-col-index"));
-      const model = getMaterialModel();
-      const sheet = model.sheets[typeId];
-      if (!sheet || !Number.isFinite(colIndex) || colIndex < 0 || colIndex >= sheet.columns.length) return;
-      if (sheet.columns.length <= 1) return;
-      normalizeAllSheets(model);
-      const sharedColumns = Array.isArray(sheet.columns) ? sheet.columns.slice() : ["QTY 4x8"];
-      pushMaterialUndo();
-      sharedColumns.splice(colIndex, 1);
-      model.types.forEach(type => {
-        const s = model.sheets[String(type.id)];
-        if (!s) return;
-        s.columns = sharedColumns.slice();
-        s.rows.forEach(row => {
-          if (!Array.isArray(row.values)) row.values = [];
-          row.values.splice(colIndex, 1);
-        });
-      });
-      window.inventoryMaterials = model;
-      saveCloudDebounced();
-      renderInventory();
-      return;
-    }
-
-  };
-  if (window.__inventoryMaterialClickHandler){
-    content.removeEventListener("click", window.__inventoryMaterialClickHandler);
-  }
-  window.__inventoryMaterialClickHandler = materialClickHandler;
-  content.addEventListener("click", materialClickHandler);
-
-  const parseThicknessToStored = (raw)=>{
-    const txt = String(raw ?? "").replace(/"/g, "").trim();
-    if (!txt) return "";
-    const mixed = txt.match(/^(\d+)\s+(\d+)\/(\d+)$/);
-    if (mixed){
-      const whole = Number(mixed[1]);
-      const top = Number(mixed[2]);
-      const bot = Number(mixed[3]);
-      if (Number.isFinite(whole) && Number.isFinite(top) && Number.isFinite(bot) && bot > 0){
-        return String(whole + (top / bot));
-      }
-    }
-    const frac = txt.match(/^(\d+)\/(\d+)$/);
-    if (frac){
-      const top = Number(frac[1]);
-      const bot = Number(frac[2]);
-      if (Number.isFinite(top) && Number.isFinite(bot) && bot > 0){
-        return String(top / bot);
-      }
-    }
-    return null;
-  };
-
-  const updateMaterialCellValue = (cell, value)=>{
-    const kind = cell.getAttribute("data-edit-kind") || "";
-    const typeId = cell.getAttribute("data-type-id") || "";
-    const model = getMaterialModel();
-    const sheet = model.sheets[typeId];
-    if (!sheet) return;
-    pushMaterialUndo();
-
-    if ((kind === "material-name" || kind === "column" || kind === "thickness") && !window.inventoryMaterialEditMode) return;
-
-    if (kind === "material-name"){
-      const type = model.types.find(t => String(t.id) === String(typeId));
-      if (!type) return;
-      type.name = value || type.name;
-    } else if (kind === "column"){
-      const colIndex = Number(cell.getAttribute("data-col-index"));
-      if (!Number.isFinite(colIndex) || colIndex < 0 || colIndex >= sheet.columns.length) return;
-      const bodyOnly = String(value || "").replace(/^qty\s*/i, "").trim();
-      const heading = formatQtyHeading(bodyOnly);
-      model.types.forEach(type => {
-        const s = model.sheets[String(type.id)];
-        if (!s || !Array.isArray(s.columns) || colIndex < 0 || colIndex >= s.columns.length) return;
-        s.columns[colIndex] = heading;
-      });
-    } else if (kind === "thickness"){
-      const rowIndex = Number(cell.getAttribute("data-row-index"));
-      if (!Number.isFinite(rowIndex) || rowIndex < 0 || rowIndex >= sheet.rows.length) return;
-      const parsed = parseThicknessToStored(value);
-      if (!parsed){ toast("Thickness must be a fraction like 1/16 or 1 1/2."); return; }
-      sheet.rows[rowIndex].thickness = parsed;
-    } else if (kind === "cell"){
-      const rowIndex = Number(cell.getAttribute("data-row-index"));
-      const colIndex = Number(cell.getAttribute("data-col-index"));
-      if (!Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return;
-      if (rowIndex < 0 || rowIndex >= sheet.rows.length || colIndex < 0 || colIndex >= sheet.columns.length) return;
-      sheet.rows[rowIndex].values[colIndex] = value;
-    } else {
-      return;
-    }
-
-    normalizeSheetShape(sheet);
-    window.inventoryMaterials = model;
-    persistInventoryMaterials();
-    renderInventory();
-  };
-
-  const materialDblClickHandler = (e)=>{
-    const cell = e.target.closest("[data-material-editable]");
-    if (!cell || cell.querySelector("input")) return;
-    const kind = cell.getAttribute("data-edit-kind") || "";
-    if ((kind === "material-name" || kind === "column" || kind === "thickness") && !window.inventoryMaterialEditMode) return;
-    const original = (cell.textContent || "").trim();
-    const input = document.createElement("input");
-    input.type = "text";
-    input.value = kind === "column" ? original.replace(/^qty\s*/i, "") : original;
-    input.className = "material-inline-editor";
-    cell.textContent = "";
-    cell.appendChild(input);
-    input.focus();
-    input.select();
-
-    const commit = ()=> updateMaterialCellValue(cell, input.value.trim());
-    const cancel = ()=> renderInventory();
-
-    input.addEventListener("keydown", (evt)=>{
-      if (evt.key === "Enter"){
-        evt.preventDefault();
-        commit();
-      } else if (evt.key === "Escape"){
-        evt.preventDefault();
-        cancel();
-      }
+  const materialDblClickHandler=e=>{
+    const cell=e.target.closest("[data-material-editable]");
+    if (!cell || cell.querySelector("input") || window.inventoryMaterialMutationApi?.isBusy()) return;
+    const kind=cell.getAttribute("data-edit-kind");
+    if (kind!=="cell" && !window.inventoryMaterialEditMode) return;
+    // Display fractions may be rounded; always edit the exact stored evidence.
+    const stored=cell.getAttribute("data-material-value") ?? "";
+    const initial=kind==="column" ? stored.replace(/^qty\s*/i,"") : stored;
+    const input=document.createElement("input");input.type="text";input.value=initial;input.className="material-inline-editor";
+    cell.textContent="";cell.appendChild(input);input.focus();input.select();
+    const settlement=window.OMAXInventoryMaterialMutations.createInlineSettlement(
+      ()=>input.value===initial ? renderInventory() : updateMaterialCellValue(cell,input.value),
+      ()=>renderInventory()
+    );
+    input.addEventListener("keydown",evt=>{
+      if (evt.key==="Enter"){evt.preventDefault();void settlement.commit();}
+      else if (evt.key==="Escape"){evt.preventDefault();settlement.cancel();}
     });
-    input.addEventListener("blur", commit, { once:true });
+    input.addEventListener("blur",()=>{void settlement.commit();},{once:true});
   };
-  if (window.__inventoryMaterialDblClickHandler){
-    content.removeEventListener("dblclick", window.__inventoryMaterialDblClickHandler);
+  if (window.__inventoryMaterialDblClickHandler) content.removeEventListener("dblclick",window.__inventoryMaterialDblClickHandler);
+  window.__inventoryMaterialDblClickHandler=materialDblClickHandler;
+  content.addEventListener("dblclick",materialDblClickHandler);
+  if (window.inventoryMaterialMutationApi?.isBusy()){
+    content.querySelectorAll(".inventory-material-view button, .inventory-material-view select").forEach(element=>{element.disabled=true;});
   }
-  window.__inventoryMaterialDblClickHandler = materialDblClickHandler;
-  content.addEventListener("dblclick", materialDblClickHandler);
 
   if (searchInput){
     searchInput.addEventListener("input", ()=>{
