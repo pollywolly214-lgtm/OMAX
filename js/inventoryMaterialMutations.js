@@ -14,12 +14,55 @@
   const unrelated = state => Object.fromEntries(Object.entries(state || {}).filter(([name]) => !["inventoryMaterials", "syncMeta"].includes(name)));
   const retainedSync = meta => Object.fromEntries(Object.entries(meta || {}).filter(([name]) => !syncWriterFields.has(name)));
   const business = state => Object.fromEntries(Object.entries(state || {}).filter(([name]) => !["syncMeta", "saveMeta", "syncProcessLog"].includes(name)));
+  const propertyPath = (path, name) => /^[A-Za-z_$][\w$]*$/.test(name) ? path + "." + name : path + "[" + JSON.stringify(name) + "]";
+  // Compare the complete JSON data without normalizing, discarding unknown
+  // fields or sorting meaningful arrays. Object insertion order is irrelevant.
+  function firstDifference(expected, actual, path){
+    if (expected === actual) return null;
+    if (!expected || !actual || typeof expected !== "object" || typeof actual !== "object" || Array.isArray(expected) !== Array.isArray(actual))
+      return {path, expected, actual};
+    if (Array.isArray(expected)){
+      if (expected.length !== actual.length) return {path:path + ".length", expected:expected.length, actual:actual.length};
+      for (let i = 0; i < expected.length; i++){
+        const difference = firstDifference(expected[i], actual[i], path + "[" + i + "]");
+        if (difference) return difference;
+      }
+    } else {
+      for (const name of [...new Set([...Object.keys(expected), ...Object.keys(actual)])].sort()){
+        const child = propertyPath(path, name);
+        if (!Object.hasOwn(expected, name) || !Object.hasOwn(actual, name))
+          return {path:child, expected:expected[name], actual:actual[name], missing:!Object.hasOwn(expected, name) ? "expected" : "actual"};
+        const difference = firstDifference(expected[name], actual[name], child);
+        if (difference) return difference;
+      }
+    }
+    return null;
+  }
+  const semanticMaterialEqual = (expected, actual) => !firstDifference(expected, actual, "inventoryMaterials");
+  // Diagnostics retain only one bounded leaf (or a shape summary), never full
+  // source/committed/readback application snapshots or protected business values.
+  function compactValue(value){
+    if (value === undefined) return {missing:true};
+    if (Array.isArray(value)) return {kind:"array", length:value.length};
+    if (value && typeof value === "object") return {kind:"object", keyCount:Object.keys(value).length};
+    return typeof value === "string" && value.length > 256 ? {prefix:value.slice(0, 256), length:value.length, truncated:true} : value;
+  }
+  function compactDifference(difference, comparison, protectedValue = false){
+    if (!difference) return {};
+    const summary = value => ({kind:value === null ? "null" : Array.isArray(value) ? "array" : typeof value});
+    return {comparison, mismatchPath:difference.path,
+      expected:protectedValue ? summary(difference.expected) : compactValue(difference.expected),
+      actual:protectedValue ? summary(difference.actual) : compactValue(difference.actual),
+      ...(difference.missing ? {missing:difference.missing} : {})};
+  }
   function verifyReadback(source, intended, actual, writeResult, writerClientId){
-    if (!actual || key(actual.inventoryMaterials) !== key(intended.inventoryMaterials))
-      throw Error("Server readback material state differs from the intended post-mutation state.");
-    if (key(unrelated(intended)) !== key(unrelated(source)) || key(unrelated(actual)) !== key(unrelated(source)))
-      throw Error("Server readback changed unrelated business data or metadata not written by the material save.");
     const acknowledged = writeResult?.saved === true && writeResult.stateWriteCompleted === true;
+    const committed = writeResult?.committedState;
+    const materialDifference = firstDifference(intended.inventoryMaterials, actual?.inventoryMaterials, "inventoryMaterials");
+    const committedMaterialDifference = acknowledged ? firstDifference(intended.inventoryMaterials, committed?.inventoryMaterials, "inventoryMaterials") : null;
+    const unrelatedDifference = firstDifference(unrelated(source), unrelated(intended), "state")
+      || firstDifference(unrelated(source), unrelated(actual), "state")
+      || (acknowledged && firstDifference(unrelated(source), unrelated(committed), "state"));
     const metadataValid = meta => {
       const timestamp = typeof meta?.updatedAtISO === "string" ? Date.parse(meta.updatedAtISO) : NaN;
       return meta && !Array.isArray(meta) && Number.isSafeInteger(meta.rev) && meta.rev > source.syncMeta.rev
@@ -27,19 +70,38 @@
         && Number.isFinite(timestamp) && new Date(timestamp).toISOString() === meta.updatedAtISO
         && key(retainedSync(meta)) === key(retainedSync(source.syncMeta));
     };
-    if (!metadataValid(actual.syncMeta)) throw Error("Server readback has invalid revision/timestamp or changed retained sync metadata.");
+    const revisionValid = Number.isSafeInteger(actual?.syncMeta?.rev) && actual.syncMeta.rev > source.syncMeta.rev
+      && (!acknowledged || (Number.isSafeInteger(committed?.syncMeta?.rev) && actual.syncMeta.rev === committed.syncMeta.rev));
+    const metadataDifference = acknowledged ? firstDifference(committed?.syncMeta, actual?.syncMeta, "syncMeta") : null;
+    const verification = {readbackAvailable:!!actual, materialsMatch:!!actual && !materialDifference,
+      committedMaterialsMatch:acknowledged ? !!committed && !committedMaterialDifference : null,
+      revisionValid, unrelatedBusinessStateMatch:!unrelatedDifference,
+      metadataValid:!!metadataValid(actual?.syncMeta) && (!acknowledged || (!!metadataValid(committed?.syncMeta) && !metadataDifference))};
+    const fail = (message, difference, comparison, protectedValue) => {
+      const error = Error(message);
+      error.verification = {...verification, ...compactDifference(difference, comparison, protectedValue)};
+      throw error;
+    };
+    if (!verification.materialsMatch)
+      fail("Server readback material state differs from the intended post-mutation state.", materialDifference, "intended/serverReadback");
+    if (unrelatedDifference)
+      fail("Server readback changed unrelated business data or metadata not written by the material save.", unrelatedDifference, "source/businessState", true);
+    if (!metadataValid(actual?.syncMeta)){
+      const difference = !revisionValid ? {path:"syncMeta.rev", expected:acknowledged ? committed?.syncMeta?.rev : {greaterThan:source.syncMeta.rev}, actual:actual?.syncMeta?.rev}
+        : firstDifference(retainedSync(source.syncMeta), retainedSync(actual?.syncMeta), "syncMeta")
+          || {path:"syncMeta.updatedAtISO", expected:"canonical ISO timestamp and nonempty writer", actual:actual?.syncMeta?.updatedAtISO};
+      fail("Server readback has invalid revision/timestamp or changed retained sync metadata.", difference, "source/serverReadback metadata");
+    }
     if (acknowledged){
-      const committed = writeResult.committedState;
-      if (!committed || key(committed.inventoryMaterials) !== key(intended.inventoryMaterials)
-        || key(unrelated(committed)) !== key(unrelated(source)) || !metadataValid(committed.syncMeta))
-        throw Error("The acknowledged writer result does not match the intended material change and save contract.");
+      if (!committed || committedMaterialDifference || !metadataValid(committed.syncMeta))
+        fail("The acknowledged writer result does not match the intended material change and save contract.", committedMaterialDifference || {path:"syncMeta", expected:actual?.syncMeta, actual:committed?.syncMeta}, "intended/committedState");
       // The acknowledgement binds the actual writing client. Querying local
       // storage again can generate another ID when a previous setItem failed.
       for (const field of syncWriterFields){
-        if (actual.syncMeta[field] !== committed.syncMeta[field]) throw Error("Server save metadata differs from the acknowledged transaction.");
+        if (actual.syncMeta[field] !== committed.syncMeta[field]) fail("Server save metadata differs from the acknowledged transaction.", metadataDifference, "committedState/serverReadback metadata");
       }
     } else if (actual.syncMeta.updatedBy !== writerClientId){
-      throw Error("The uncertain material write could not be attributed to its captured writing client.");
+      fail("The uncertain material write could not be attributed to its captured writing client.", {path:"syncMeta.updatedBy", expected:writerClientId, actual:actual.syncMeta.updatedBy}, "captured writer/serverReadback");
     }
     return true;
   }
@@ -181,7 +243,9 @@
         const next = clone(source); next.inventoryMaterials = material;
         if (!env.validate(next)) throw Error("The proposed material change failed identity/content validation.");
         if (key(material) === key(source.inventoryMaterials)) return {saved:true, verified:true, noOp:true, stateWriteAttempted:false, stateWriteCompleted:false};
-        evidence = {action, expectedRevision:revision, source:clone(source), intended:clone(next)};
+        const proofSource = clone(source), proofIntended = clone(next);
+        evidence = {action:Object.fromEntries(["kind", "typeId", "rowIndex", "colIndex", "value"].filter(name => Object.hasOwn(action, name)).map(name => [name, compactValue(action[name])])),
+          expectedRevision:revision, verification:{readbackAvailable:false, materialsMatch:null, committedMaterialsMatch:null, revisionValid:null, unrelatedBusinessStateMatch:null, metadataValid:null}};
         const validateSource = remote => unchanged() && key(remote) === key(source);
         const validatePrepared = pending => unchanged() && key(pending) === key(next);
         if (!env.canWrite() || !unchanged()) throw Error("Local state changed before the material save.");
@@ -189,20 +253,24 @@
         attempted = true;
         try { writeResult = await env.writeState(next, revision, validateSource, validatePrepared); }
         catch (error){ writeResult = {saved:false, indeterminate:true, stateWriteAttempted:true, stateWriteCompleted:false, error:String(error?.message || error)}; }
-        evidence.writeResult = clone(writeResult || {});
+        evidence.writeResult = Object.fromEntries(["saved", "stateWriteAttempted", "stateWriteCompleted", "indeterminate", "definiteFailure", "errorCode", "error"].filter(name => Object.hasOwn(writeResult || {}, name)).map(name => [name, compactValue(writeResult[name])]));
+        evidence.writeResult.committedRevision = writeResult?.committedState?.syncMeta?.rev ?? null;
         const acknowledged = writeResult?.saved === true && writeResult.stateWriteCompleted === true;
         const uncertain = !writeResult || writeResult.indeterminate === true || (!acknowledged && writeResult.stateWriteAttempted === true && writeResult.definiteFailure !== true);
         if (!acknowledged && !uncertain) return {...reject(writeResult.error || "Material Inventory save was rejected."), ...writeResult, saved:false, verified:false};
         // Also read after a lost acknowledgement. Never retry an uncertain write.
         const actual = await env.readState(), actualRevision = actual?.syncMeta?.rev;
-        evidence.serverReadback = clone(actual);
-        verifyReadback(evidence.source, evidence.intended, actual, writeResult, writerClientId);
+        evidence.serverReadback = {revision:actualRevision ?? null};
+        verifyReadback(proofSource, proofIntended, actual, writeResult, writerClientId);
+        evidence.verification = {readbackAvailable:true, materialsMatch:true, committedMaterialsMatch:acknowledged ? true : null,
+          revisionValid:true, unrelatedBusinessStateMatch:true, metadataValid:true};
         if (!unchanged()) throw Error("The material change reached the server, but local edits changed during verification. Preserve them and reload/review.");
         if (await env.adoptVerifiedState(clone(actual), {uncertain, writeResult}) !== true) throw Error("Verified material state could not be safely adopted.");
         if (action.kind === "undo") undo.pop();
         else { undo.push({before:clone(source.inventoryMaterials), after:clone(material)}); if (undo.length > 20) undo.shift(); }
         return {saved:true, verified:true, stateWriteAttempted:true, stateWriteCompleted:true, indeterminate:false, reconciledAfterUncertainWrite:uncertain, revision:actualRevision};
       } catch (error){
+        if (evidence && error.verification) evidence.verification = error.verification;
         const result = {...reject(String(error?.message || error)), stateWriteAttempted:attempted,
           stateWriteCompleted:writeResult?.stateWriteCompleted === true, indeterminate:attempted,
           definiteFailure:!attempted, evidence};
@@ -216,5 +284,5 @@
     let settled = false;
     return {commit(){if (settled) return; settled = true; return commit();}, cancel(){if (settled) return; settled = true; return cancel();}};
   }
-  return Object.freeze({key, business, parseThickness, validateModel, prepare, verifyReadback, createApi, createInlineSettlement});
+  return Object.freeze({key, business, semanticMaterialEqual, parseThickness, validateModel, prepare, verifyReadback, createApi, createInlineSettlement});
 });

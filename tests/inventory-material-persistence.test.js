@@ -11,8 +11,17 @@ function harness(options={}){
   let cloud=identities.repairedState(fixture(),identities.preview(fixture()));
   cloud.inventoryMaterials=model();cloud.syncMeta={rev:7,updatedBy:"fixture-client"};cloud.inventoryTransactions=[{id:"transaction",qty:4}];
   if(options.blankAluminum){cloud.inventoryMaterials.activeType="aluminum";cloud.inventoryMaterials.sheets.aluminum.rows[0].values[0]="";}
+  if(options.secondAluminumCell){
+    cloud.inventoryMaterials.activeType="aluminum";
+    for(const sheet of Object.values(cloud.inventoryMaterials.sheets)){
+      sheet.columns=["QTY 4x8","QTY 4x10","QTY 5x10","QTY 5x12"];
+      sheet.rows.forEach(row=>{row.values.push("","");});
+    }
+    cloud.inventoryMaterials.sheets.aluminum.rows[0].values=["10","","",""];
+  }
   if(options.baselineSyncMeta)cloud.syncMeta=clone(options.baselineSyncMeta);
   cloud.unknownFutureState={retain:[{id:"future-record",payload:"exact"}]};
+  options.initialStateMutation?.(cloud);
   let reads=0,transactions=0,commits=0,diagnostics=0, queued, writeOptions;
   const events={};const window={...clone(cloud),OMAXInventoryMaterialMutations:materials,OMAXAtomicPersistence:atomic,OMAXGlobalIdentityRepair:identities,CuttingFileContentFirewall:firewall,
     __cloudLoadAttemptComplete:true,__initialAdoptComplete:true,__loadedCloudRevisionForSaveGuard:cloud.syncMeta.rev,addEventListener:(name,handler)=>{events[name]=handler;},location:{hostname:"localhost",search:""}};
@@ -86,7 +95,7 @@ test("transaction CAS conflict preserves the newer remote unrelated change",asyn
 test("same-revision unrelated source drift is rejected inside the transaction",async()=>{const h=harness({beforeTransaction:(_w,c)=>{c.unknownFutureState.retain[0].payload="remote edit";}}),r=await h.api.run(action("cell",{value:"42"}));assert.equal(r.errorCode,"mutation_source_changed");assert.equal(h.commits,0);assert.equal(h.cloud.unknownFutureState.retain[0].payload,"remote edit");});
 test("transaction callback retries retain the frozen action and commit once",async()=>{const h=harness({retry:true}),r=await h.api.run(action("cell",{value:"42"}));assert.equal(r.saved,true,r.error);assert.equal(h.commits,1);});
 test("lost acknowledgement after commit is reconciled by exact server proof without retry",async()=>{const h=harness({loseAck:true}),r=await h.api.run(action("cell",{value:"42"}));assert.equal(r.saved,true,r.error);assert.equal(r.reconciledAfterUncertainWrite,true);assert.equal(h.transactions,1);assert.equal(h.commits,1);assert.equal(h.window.__recoveryInspectMode,false);assert.equal(h.window.__lastIndeterminateSave,null);assert.equal(h.api.undoCount(),1);});
-test("unknown outcome without commit is unconfirmed, suspended, retains evidence, never retries",async()=>{const h=harness({unknownWithoutCommit:true}),before=h.local,r=await h.api.run(action("cell",{value:"42"}));assert.equal(r.saved,false);assert.equal(r.indeterminate,true);assert.equal(h.reads,2);assert.equal(h.transactions,1);assert.deepEqual(h.local,before);assert.equal(h.window.__autosaveDisabled,true);assert.equal(h.api.undoCount(),0);assert.equal(r.evidence.intended.inventoryMaterials.sheets.steel.rows[1].values[0],"42");});
+test("unknown outcome without commit is unconfirmed, suspended, retains compact intent, never retries",async()=>{const h=harness({unknownWithoutCommit:true}),before=h.local,r=await h.api.run(action("cell",{value:"42"}));assert.equal(r.saved,false);assert.equal(r.indeterminate,true);assert.equal(h.reads,2);assert.equal(h.transactions,1);assert.deepEqual(h.local,before);assert.equal(h.window.__autosaveDisabled,true);assert.equal(h.api.undoCount(),0);assert.equal(r.evidence.action.value,"42");assert.equal(r.evidence.verification.expected,"42");assert.equal(r.evidence.verification.actual,"4");});
 for(const option of ["mismatch","readFailure"])test(option+": acknowledged write stays unconfirmed until exact SERVER proof",async()=>{const h=harness({[option]:true}),before=h.local,r=await h.api.run(action("cell",{value:"42"}));assert.equal(h.commits,1);assert.equal(r.saved,false);assert.equal(r.indeterminate,true);assert.equal(h.api.undoCount(),0);assert.deepEqual(h.local,before);assert.equal(h.window.__recoveryInspectMode,true);});
 test("concurrent local unrelated edit before queue rejects without undo or broad rollback",async()=>{const h=harness({beforeTransaction:w=>{w.inventory[0].note="local concurrent";}}),r=await h.api.run(action("cell",{value:"42"}));assert.equal(r.saved,false);assert.equal(h.commits,0);assert.equal(h.window.inventory[0].note,"local concurrent");assert.equal(h.window.inventoryMaterials.sheets.steel.rows[1].values[0],"4");});
 test("concurrent local edit after commit blocks adoption and preserves both sources of evidence",async()=>{const h=harness({duringRead:(n,w)=>{if(n===2)w.inventory[0].note="local concurrent";}}),r=await h.api.run(action("cell",{value:"42"}));assert.equal(h.commits,1);assert.equal(r.saved,false);assert.equal(h.window.inventory[0].note,"local concurrent");assert.equal(h.window.inventoryMaterials.sheets.steel.rows[1].values[0],"4");assert.equal(h.cloud.inventoryMaterials.sheets.steel.rows[1].values[0],"42");});
@@ -170,9 +179,9 @@ for(const rotateClientIdAfterCommit of [false,true])test("INV-01C blank Aluminum
 for(const value of ["","20"])test("INV-01C old/wrong authoritative material value "+JSON.stringify(value)+" still suspends verification",async()=>{
   const h=harness({blankAluminum:true,readbackMutation:state=>{state.inventoryMaterials.sheets.aluminum.rows[0].values[0]=value;}}),result=await h.api.run({kind:"cell",typeId:"aluminum",rowIndex:0,colIndex:0,value:"10",baselineMaterials:h.cloud.inventoryMaterials});
   assert.equal(h.commits,1);assert.equal(result.saved,false);assert.equal(result.verified,false);assert.equal(result.indeterminate,true);assert.equal(h.window.__recoveryInspectMode,true);assert.equal(h.transactions,1);assert.equal(h.api.undoCount(),0);
-  assert.equal(result.evidence.source.inventoryMaterials.sheets.aluminum.rows[0].values[0],"");
-  assert.equal(result.evidence.intended.inventoryMaterials.sheets.aluminum.rows[0].values[0],"10");
-  assert.equal(result.evidence.serverReadback.inventoryMaterials.sheets.aluminum.rows[0].values[0],value);
+  assert.equal(result.evidence.verification.mismatchPath,"inventoryMaterials.sheets.aluminum.rows[0].values[0]");
+  assert.equal(result.evidence.verification.expected,"10");
+  assert.equal(result.evidence.verification.actual,value);
   assert.equal(Object.hasOwn(result.evidence.action,"expectedMaterials"),false);
   assert.equal(Object.hasOwn(result.evidence.action,"baselineMaterials"),false);
 });
@@ -191,4 +200,91 @@ test("INV-01C real client-ID helper with localStorage quota failure still verifi
   assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(h.window.__recoveryInspectMode,false);assert.equal(h.transactions,1);assert.equal(h.diagnostics,0);
   assert.notEqual(h.c.getCloudSyncClientId(),h.cloud.syncMeta.updatedBy,"a fresh lookup is not the acknowledged writing client");
   assert.equal(h.local.inventoryMaterials.sheets.aluminum.rows[0].values[0],"10");assert.equal((await h.reload()).recovery,false);assert.equal(h.transactions,1);
+});
+
+// Reorder only object properties. Every array retains its business/UI order.
+function reorderObjects(value){
+  if(Array.isArray(value))return value.map(reorderObjects);
+  if(value&&typeof value==="object")return Object.fromEntries(Object.entries(value).reverse().map(([name,item])=>[name,reorderObjects(item)]));
+  return value;
+}
+test("INV-01D exact second Aluminum cell -> 654 verifies three differently ordered representations",async()=>{
+  const h=harness({secondAluminumCell:true,baselineSyncMeta:{...browserBaselineMeta,rev:1791321518223},readbackMutation:state=>{
+    const reordered=reorderObjects(state.inventoryMaterials),{activeType,...rest}=reordered;
+    state.inventoryMaterials={activeType,...rest};
+  }}),u=ui(h);
+  const writer=h.c.writeAuthoritativeStateSnapshot;let intended,committed;
+  h.c.writeAuthoritativeStateSnapshot=async(...args)=>{
+    intended=clone(args[0].inventoryMaterials);
+    const result=await writer(...args);
+    result.committedState.inventoryMaterials=reorderObjects(result.committedState.inventoryMaterials);
+    committed=clone(result.committedState.inventoryMaterials);return result;
+  };
+  const input=u.edit("cell","",{typeId:"aluminum",rowIndex:0,colIndex:1});input.value="654";
+  input.listeners.keydown({key:"Enter",preventDefault(){}});input.listeners.blur();const result=await u.finish();
+  assert.notEqual(JSON.stringify(intended),JSON.stringify(committed));
+  assert.equal(materials.semanticMaterialEqual(intended,committed),true);
+  assert.equal(materials.semanticMaterialEqual(intended,h.local.inventoryMaterials),true);
+  assert.notEqual(JSON.stringify(committed),JSON.stringify(h.local.inventoryMaterials));
+  assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(result.indeterminate,false);
+  assert.deepEqual(h.local.inventoryMaterials.sheets.aluminum.rows[0].values,["10","654","",""]);
+  assert.equal(h.window.__recoveryInspectMode,false);assert.equal(h.diagnostics,0);assert.equal(h.transactions,1);assert.equal(h.reads,2);
+  assert.equal((await h.reload()).recovery,false);assert.equal(h.local.inventoryMaterials.sheets.aluminum.rows[0].values[1],"654");
+});
+
+for(const [name,change,path] of [
+  ["wrong quantity",m=>{m.sheets.aluminum.rows[0].values[1]="645";},"inventoryMaterials.sheets.aluminum.rows[0].values[1]"],
+  ["missing row",m=>{m.sheets.aluminum.rows.pop();},"inventoryMaterials.sheets.aluminum.rows.length"],
+  ["extra row",m=>{m.sheets.aluminum.rows.push({thickness:"0.25",values:["","","",""]});},"inventoryMaterials.sheets.aluminum.rows.length"],
+  ["thickness representation",m=>{m.sheets.aluminum.rows[0].thickness="1/16";},"inventoryMaterials.sheets.aluminum.rows[0].thickness"],
+  ["column heading",m=>{m.sheets.aluminum.columns[1]="QTY 6x12";},"inventoryMaterials.sheets.aluminum.columns[1]"],
+  ["missing sheet",m=>{delete m.sheets.aluminum;},"inventoryMaterials.sheets.aluminum"],
+  ["extra sheet",m=>{m.sheets.unexpected=clone(m.sheets.aluminum);},"inventoryMaterials.sheets.unexpected"],
+  ["missing type",m=>{m.types.pop();},"inventoryMaterials.types.length"],
+  ["material name",m=>{m.types[1].name="Changed";},"inventoryMaterials.types[1].name"],
+  ["activeType",m=>{m.activeType="steel";},"inventoryMaterials.activeType"],
+  ["values length",m=>{m.sheets.aluminum.rows[0].values.pop();},"inventoryMaterials.sheets.aluminum.rows[0].values.length"],
+  ["values order",m=>{m.sheets.aluminum.rows[0].values.reverse();},"inventoryMaterials.sheets.aluminum.rows[0].values[0]"],
+  ["row order",m=>{m.sheets.aluminum.rows.reverse();},"inventoryMaterials.sheets.aluminum.rows[0].thickness"],
+  ["type order",m=>{m.types.reverse();},"inventoryMaterials.types[0].custom"],
+  ["unknown material evidence",m=>{m.customMaterialEvidence.retain="changed";},"inventoryMaterials.customMaterialEvidence.retain"]
+])test("INV-01D semantic readback still rejects "+name,async()=>{
+  const h=harness({secondAluminumCell:true,readbackMutation:state=>{state.inventoryMaterials=reorderObjects(state.inventoryMaterials);change(state.inventoryMaterials);}}),before=h.local;
+  const result=await h.api.run({kind:"cell",typeId:"aluminum",rowIndex:0,colIndex:1,value:"654"});
+  assert.equal(result.saved,false);assert.equal(result.verified,false);assert.equal(result.indeterminate,true);
+  assert.equal(h.window.__recoveryInspectMode,true);assert.equal(h.transactions,1);assert.equal(h.commits,1);assert.equal(h.reads,2);assert.equal(h.api.undoCount(),0);assert.deepEqual(h.local,before);
+  const v=result.evidence.verification;
+  assert.equal(v.materialsMatch,false);assert.equal(v.committedMaterialsMatch,true);assert.equal(v.revisionValid,true);assert.equal(v.unrelatedBusinessStateMatch,true);assert.equal(v.mismatchPath,path);
+  if(name==="wrong quantity"){assert.equal(v.expected,"654");assert.equal(v.actual,"645");}
+  assert.equal(Object.hasOwn(result.evidence,"source"),false);assert.equal(Object.hasOwn(result.evidence,"intended"),false);assert.equal(Object.hasOwn(result.evidence.writeResult,"committedState"),false);
+});
+for(const [name,change,path] of [
+  ["protected business",state=>{state.inventory[0].qtyNew++;},"state.inventory[0].qtyNew"],
+  ["old revision",state=>{state.syncMeta.rev=7;},"syncMeta.rev"],
+  ["later revision",state=>{state.syncMeta.rev++;},"syncMeta.rev"],
+  ["invalid revision",state=>{state.syncMeta.rev="invalid";},"syncMeta.rev"]
+])test("INV-01D semantic material match does not exempt "+name,async()=>{
+  const h=harness({secondAluminumCell:true,readbackMutation:change}),result=await h.api.run({kind:"cell",typeId:"aluminum",rowIndex:0,colIndex:1,value:"654"}),v=result.evidence.verification;
+  assert.equal(result.saved,false);assert.equal(result.indeterminate,true);assert.equal(h.window.__recoveryInspectMode,true);assert.equal(v.materialsMatch,true);assert.equal(v.mismatchPath,path);
+  assert.equal(v.revisionValid,name==="protected business");assert.equal(v.unrelatedBusinessStateMatch,name!=="protected business");
+});
+for(const request of [action("add-row"),action("delete-row"),action("add-column"),action("delete-column"),{kind:"add-type",value:"Titanium"},action("material-name",{value:"Tool Steel"}),action("thickness",{value:"7/64"}),{kind:"select",value:"__all"},{kind:"undo"}])test("INV-01D reordered readback confirms structural family "+request.kind,async()=>{
+  const h=harness({readbackMutation:state=>{state.inventoryMaterials=reorderObjects(state.inventoryMaterials);}});
+  if(request.kind==="undo")assert.equal((await h.api.run({kind:"add-type",value:"Titanium"})).saved,true);
+  const result=await h.api.run(request);assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(result.indeterminate,false);assert.equal(h.window.__recoveryInspectMode,false);
+  assert.equal(materials.semanticMaterialEqual(h.local.inventoryMaterials,h.cloud.inventoryMaterials),true);
+  assert.equal((await h.reload()).recovery,false);
+});
+test("INV-01D committed writer material mismatch fails even when independent readback matches intent",async()=>{
+  const h=harness({secondAluminumCell:true}),writer=h.c.writeAuthoritativeStateSnapshot;
+  h.c.writeAuthoritativeStateSnapshot=async(...args)=>{const result=await writer(...args);result.committedState.inventoryMaterials.sheets.aluminum.rows[0].values[1]="645";return result;};
+  const result=await h.api.run({kind:"cell",typeId:"aluminum",rowIndex:0,colIndex:1,value:"654"}),v=result.evidence.verification;
+  assert.equal(result.saved,false);assert.equal(result.indeterminate,true);assert.equal(v.materialsMatch,true);assert.equal(v.committedMaterialsMatch,false);assert.equal(v.comparison,"intended/committedState");assert.equal(v.expected,"654");assert.equal(v.actual,"645");
+});
+test("INV-01D diagnostics stay bounded without exposing application snapshots or protected values",async()=>{
+  const h=harness({secondAluminumCell:true,initialStateMutation:state=>{state.unknownFutureState.notes=Array(1000).fill("private business data");},readbackMutation:state=>{state.inventoryMaterials.sheets.aluminum.rows[0].values[1]="x".repeat(100000);}});
+  const result=await h.api.run({kind:"cell",typeId:"aluminum",rowIndex:0,colIndex:1,value:"654"}),serialized=JSON.stringify(result);
+  assert.equal(result.saved,false);assert.ok(serialized.length<2500);assert.doesNotMatch(serialized,/private business data|qtyNew|unknownFutureState|inventoryTransactions/);
+  assert.deepEqual(result.evidence.verification.actual,{prefix:"x".repeat(256),length:100000,truncated:true});
+  assert.equal(h.window.__lastInventoryMaterialMutationEvidence,result);
 });
