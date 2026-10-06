@@ -20,7 +20,7 @@ function constant(name){
 const job = (id, priority = 1) => ({ id, name:`Job ${id}`, priority, estimateHours:3,
   manualLogs:[], files:[{ name:"fixture.dxf", fileId:"metadata-only" }], notes:"preserve", unlinkedCloudFileIds:["unlinked-fixture"] });
 function harness(active = [job("a"), job("b", 2)], completed = [], options = {}){
-  let cloud, commits = 0, reads = 0, diagnostics = 0, confirmations = 0, sequence = 0, backup;
+  let cloud, commits = 0, reads = 0, transactions = 0, diagnostics = 0, confirmations = 0, sequence = 0, backup;
   const bindings = ["totalHistory","tasksInterval","tasksAsReq","inventory","cuttingJobs","completedCuttingJobs","orderRequests","garnetCleanings","dailyCutHours","opportunityRollups","weeklyCostReports","receiptTrackerWeeks","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","deletedItems","appConfig","jobFolders","orderRequestTab"];
   const window = Object.fromEntries(bindings.map(name => [name, []]));
   Object.assign(window, { cuttingJobs:clone(active), completedCuttingJobs:clone(completed),
@@ -31,6 +31,7 @@ function harness(active = [job("a"), job("b", 2)], completed = [], options = {})
     OMAXAtomicPersistence:atomic, CuttingFileContentFirewall:firewall,
     confirm:message => { confirmations++; assert.match(message, /Trash/); return options.confirm !== false; } });
   const db = { async runTransaction(callback){
+    transactions++;
     if (options.beforeTransaction) await options.beforeTransaction(window, cloud);
     let next;
     const transaction = { get:async()=>({exists:!options.missingState,data:()=>clone(cloud)}), set:(_ref, value)=>{ next = clone(value); } };
@@ -67,7 +68,7 @@ function harness(active = [job("a"), job("b", 2)], completed = [], options = {})
     "\nlet lastAppliedCloudRevision=7,lastLocalMutationAt=0,hasPendingLocalChanges=false;let cloudSaveQueue=Promise.resolve();" +
     "\nconst HISTORY_LIMIT=50,undoStack=[],redoStack=[];let currentSnapshotJSON=null,suppressHistory=false,skipNextHistoryCapture=false,historyApplicationInProgress=false;" +
     "\nconst inventoryIdentityRepairAuthorizations=new Map();\n" + constants.map(constant).join("\n") + "\n" + functions.map(fn).join("\n") +
-    "\n" + deletion + "\n" + fn("writeAuthoritativeStateSnapshot") +
+    "\n" + deletion + "\n" + fn("cloudSaveNoWriteFailure") + "\n" + fn("writeAuthoritativeStateSnapshot") +
     "\nconst saveCloudInternal=debounce((options={})=>{const p=cloudSaveQueue.then(()=>performCloudSave(options));cloudSaveQueue=p.catch(()=>{});return p;},1800);" +
     "\nthis.api={authorizeCuttingJobDeletion,consumeCuttingJobDeletionAuthorization,validateCuttingJobDeletionSave,writeAuthoritativeStateSnapshot,performCloudSave,snapshotState,compactStateForStorage,cuttingJobDeletionArray,buildTrashLabel,adoptAuthoritativeRecoveryState,validateProtectedSavePreflight,detectDangerousProtectedFieldReduction,applyHistorySnapshot,undoLastChange,redoLastUndo,captureHistorySnapshot,flush:()=>saveCloudInternal.flushResult(),cancel:()=>saveCloudInternal.cancel(),history:()=>({current:JSON.parse(currentSnapshotJSON),undo:undoStack.map(JSON.parse),redo:redoStack.map(JSON.parse)})};", context);
   cloud = clone(context.api.compactStateForStorage(context.api.snapshotState())); cloud.syncMeta.rev=7;
@@ -76,7 +77,7 @@ function harness(active = [job("a"), job("b", 2)], completed = [], options = {})
   context.resetHistoryToCurrent();
   return { window, context, api:context.api, delete:(collection,id)=>context.deleteCuttingJob(collection,id),
     get cloud(){return clone(cloud);}, get commits(){return commits;}, get diagnostics(){return diagnostics;}, get confirmations(){return confirmations;}, get reads(){return reads;},
-    get backup(){return clone(backup);}, get historyCaptures(){return context.api.history().undo.length;},
+    get backup(){return clone(backup);}, get transactions(){return transactions;}, get historyCaptures(){return context.api.history().undo.length;},
     alterCloud:mutate=>mutate(cloud), reload(){context.api.adoptAuthoritativeRecoveryState(clone(cloud));},
     staged(collection="cuttingJobs",id="a"){
       const before=clone(cloud), payload=before[collection].find(entry=>String(entry.id)===id);
@@ -182,6 +183,8 @@ test("changed rollback ownership preserves replacement state and enters recovery
 });
 test("indeterminate acknowledgement after committed write never blindly rolls back",async()=>{
   const h=harness([job("a")],[],{loseAcknowledgement:true}),r=await h.delete("cuttingJobs","a");
+  assert.equal(r.stateWriteAttempted,true);assert.equal(r.stateWriteCompleted,false);assert.equal(r.definiteFailure,false);
+  assert.equal(h.transactions,1);assert.equal(h.reads,1);
   assert.equal(r.indeterminate,true);assert.equal(h.commits,1);assert.equal(h.window.cuttingJobs.length,0);assert.equal(h.cloud.cuttingJobs.length,0);assert.equal(h.window.deletedItems.length,2);assert.equal(h.window.__recoveryInspectMode,true);
   h.reload();assert.equal(h.window.cuttingJobs.length,0);assert.equal(h.window.deletedItems[0].payload.id,"a");
 });
@@ -373,4 +376,119 @@ test("failed deletion history reconciliation preserves concurrent job order and 
   assert.deepEqual(priorConcurrentFrame.cuttingJobs.map(j=>j.id),["a","c","b"]);
   assert.equal(priorConcurrentFrame.cuttingJobs.find(j=>j.id==="b").priority,44);
   assert.equal(history.current.cuttingJobs.find(j=>j.id==="b").notes,"newer note");
+});
+
+function installNormalHistoryAdoption(h){
+  Object.assign(h.context,{defaultIntervalTasks:[],defaultAsReqTasks:[],normalizeInventoryItem:value=>value,
+    ensureInventoryForAllMaintenanceTasks(){},normalizeOrderRequests:value=>value,normalizeDailyCutHours:value=>value,
+    normalizeDeletedItems:value=>value,purgeExpiredDeletedItems(){},setJobFolders:value=>{h.window.jobFolders=value||[];},
+    ensureTaskCategories(){},ensureJobCategories(){}});
+  h.window.pumpEff={baselineRPM:null,baselineDateISO:null,entries:[],notes:[]};
+  h.alterCloud(cloud=>{cloud.pumpEff=clone(h.window.pumpEff);});
+  h.window.__lastLoadedCloudState=h.cloud;
+  h.context.resetHistoryToCurrent();
+  vm.runInContext(fn("adoptState"),h.context);
+}
+
+for(const collection of ["cuttingJobs","completedCuttingJobs"]) for(const pendingEdit of [false,true])
+test(`${collection}: pending history flush preserves both Undo actions and ordered Redo (edit pending=${pendingEdit})`,async()=>{
+  const h=harness(collection==="cuttingJobs"?[job("a"),job("b",2)]:[],collection==="completedCuttingJobs"?[job("a"),job("b",2)]:[]);
+  installNormalHistoryAdoption(h);
+  const original=h.cloud;
+  assert.equal((await h.delete(collection,"a")).saved,true);
+  const archive=h.cloud.deletedItems[0];
+  h.window[collection].find(job=>job.id==="b").notes="edited B";
+  if(pendingEdit) h.context.saveCloudDebounced();
+  else assert.equal((await h.context.saveCloudNow()).saved,true);
+  assert.equal(h.api.history().undo.length,2,"normal saves must still capture the edit");
+  for(let cycle=0;cycle<2;cycle++){
+    assert.equal(await h.api.undoLastChange(),true);
+    assert.equal(h.window[collection].find(job=>job.id==="b").notes,"preserve");
+    assert.equal(h.api.history().redo.length,1);
+    const beforeFlush=h.commits;
+    assert.equal(await h.api.undoLastChange(),true);
+    assert.equal(h.commits,beforeFlush+2,"pending ordinary save and exact restoration both persist");
+    assert.deepEqual(h.cloud[collection],original[collection]);
+    assert.deepEqual(h.cloud.deletedItems,original.deletedItems);
+    assert.equal(h.api.history().undo.length,0,"the flush must not introduce a metadata frame");
+    assert.equal(h.api.history().redo.length,2);
+    assert.equal(await h.api.redoLastUndo(),true);
+    assert.equal(h.cloud[collection].some(job=>job.id==="a"),false);
+    assert.equal(h.cloud[collection].find(job=>job.id==="b").notes,"preserve");
+    assert.deepEqual(h.cloud.deletedItems[0],archive);
+    assert.equal(h.api.history().undo.length,1);assert.equal(h.api.history().redo.length,1);
+    assert.equal(await h.api.redoLastUndo(),true);
+    assert.equal((await h.api.flush()).saved,true);
+    assert.equal(h.cloud[collection].find(job=>job.id==="b").notes,"edited B");
+    assert.equal(h.api.history().undo.length,2);assert.equal(h.api.history().redo.length,0);
+    assert.equal(h.cloud.deletedItems.length,original.deletedItems.length+1);
+  }
+  h.api.cancel();
+});
+
+for(const collection of ["cuttingJobs","completedCuttingJobs"])
+test(`${collection}: Redo safely flushes pending persistence without replacing its history target`,async()=>{
+  const h=harness(collection==="cuttingJobs"?[job("a")]:[],collection==="completedCuttingJobs"?[job("a")]:[]);
+  assert.equal((await h.delete(collection,"a")).saved,true);const archive=h.cloud.deletedItems[0];
+  assert.equal(await h.api.undoLastChange(),true);
+  const before=h.commits;
+  const pending=h.context.saveCloudNowForHistory();
+  assert.equal(h.api.history().undo.length,0);assert.equal(h.api.history().redo.length,1);
+  const redo=h.api.redoLastUndo();assert.equal((await pending).saved,true);assert.equal(await redo,true);
+  assert.equal(h.commits,before+3,"queued save, required flush and authorized Redo persist");
+  assert.equal(h.api.history().undo.length,1);assert.equal(h.api.history().redo.length,0);
+  assert.equal(h.cloud[collection].length,0);assert.deepEqual(h.cloud.deletedItems[0],archive);
+  assert.equal(await h.api.undoLastChange(),true);assert.equal(h.cloud[collection][0].id,"a");h.api.cancel();
+});
+
+test("history-neutral flushing restores capture immediately while concurrent edits are saved",async()=>{
+  let pendingEdit,once=false;
+  const h=harness(undefined,undefined,{beforeTransaction:()=>{
+    if(once)return;once=true;h.window.cuttingJobs[1].notes="concurrent B";
+    pendingEdit=h.context.saveCloudNow();
+  }});
+  const original=h.api.history();
+  assert.equal((await h.context.saveCloudNowForHistory()).saved,true);
+  assert.equal((await pendingEdit).saved,true);
+  assert.equal(h.api.history().undo.length,original.undo.length+1);
+  assert.equal(h.api.history().current.cuttingJobs[1].notes,"concurrent B");
+  assert.equal(h.cloud.cuttingJobs[1].notes,"concurrent B");h.api.cancel();
+});
+
+const preWriteGates=[
+  ["write gate closed","cloud_write_gate_closed",h=>{h.window.__autosaveDisabled=true;}],
+  ["Firebase not ready","firebase_not_ready",h=>{h.context.FB.ready=false;}],
+  ["missing document reference","authoritative_doc_ref_unavailable",h=>{h.context.FB.docRef=null;}],
+  ["preview read-only","preview_readonly",h=>{h.context.isVercelPreviewRuntime=()=>true;}]
+];
+function assertDefiniteNoWrite(result,code){
+  assert.equal(result.saved,false);assert.equal(result.definiteFailure,true);assert.equal(result.indeterminate,false);
+  assert.equal(result.stateWriteAttempted,false);assert.equal(result.stateWriteCompleted,false);assert.equal(result.errorCode,code);
+}
+for(const [label,code,closeGate]of preWriteGates){
+  test(`${label}: production save gate returns definite no-write without a read or transaction`,async()=>{
+    const h=harness();closeGate(h);assertDefiniteNoWrite(await h.api.performCloudSave(),code);
+    assert.equal(h.reads,0);assert.equal(h.transactions,0);assert.equal(h.commits,0);
+    assert.equal(h.window.__lastIndeterminateSave,undefined);assert.equal(h.diagnostics,0);h.api.cancel();
+  });
+  for(const collection of ["cuttingJobs","completedCuttingJobs"])
+  test(`${collection}: ${label} after staging rolls back only the owned deletion`,async()=>{
+    const h=harness(collection==="cuttingJobs"?[job("a")]:[],collection==="completedCuttingJobs"?[job("a")]:[]),before=h.cloud;
+    const saving=h.delete(collection,"a");
+    queueMicrotask(()=>{assert.equal(h.window[collection].length,0,"gate closes after local staging");closeGate(h);});
+    const result=await saving;assertDefiniteNoWrite(result,code);assert.equal(result.rolledBack,true);
+    assert.equal(h.reads,0);assert.equal(h.transactions,0);assert.equal(h.commits,0);
+    assert.deepEqual(h.window[collection],before[collection]);assert.deepEqual(h.window.deletedItems,before.deletedItems);
+    assert.deepEqual(clone(h.api.history().current[collection]),before[collection]);
+    assert.equal(h.window.__lastIndeterminateSave,undefined);assert.equal(h.window.__recoveryInspectMode,undefined);assert.equal(h.diagnostics,0);
+    assert.equal(Boolean(h.window.__autosaveDisabled),label==="write gate closed","only the preexisting gate remains disabled");
+    h.api.cancel();
+  });
+}
+
+test("immediate and debounced disabled saves return the same definite no-write contract",async()=>{
+  for(const [label,code,closeGate]of preWriteGates.filter(([label])=>label==="write gate closed"||label==="preview read-only")){
+    const h=harness();closeGate(h);assertDefiniteNoWrite(await h.context.saveCloudNow(),code);
+    assertDefiniteNoWrite(h.context.saveCloudDebounced(),code);assert.equal(h.transactions,0);assert.equal(h.reads,0);h.api.cancel();
+  }
 });

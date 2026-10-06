@@ -4274,8 +4274,18 @@ function finishCuttingJobHistoryMutation(mutation, confirmed, replay = false){
 }
 
 function cuttingJobDeletionFailure(error){
-  return { saved:false, blocked:true, definiteFailure:true, stateWriteAttempted:false,
+  return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false,
     stateWriteCompleted:false, errorCode:"cutting_job_deletion_rejected", error };
+}
+
+function saveCloudNowForHistory(saveOptions = {}){
+  const priorSuppression = suppressHistory;
+  try {
+    // Suppress only this flush's synchronous capture, never concurrent edits
+    // captured while the queued persistence is being awaited.
+    suppressHistory = true;
+    return saveCloudNow(saveOptions);
+  } finally { suppressHistory = priorSuppression; }
 }
 
 function cuttingJobDeletionProtectedKey(state){
@@ -4402,7 +4412,7 @@ async function deleteCuttingJob(collection, jobId, historyTarget = null){
   try {
     // Finish earlier saves before binding this operation to one cloud revision.
     if (hasPendingLocalChanges){
-      const settled = await saveCloudNow();
+      const settled = await (historyTarget ? saveCloudNowForHistory() : saveCloudNow());
       if (!settled?.saved || !settled.stateWriteCompleted) return cuttingJobDeletionFailure("Existing changes could not be confirmed; the cutting job was not removed.");
     } else await cloudSaveQueue;
     if (!canWriteCloud("cutting-job deletion")) return cuttingJobDeletionFailure("Cloud writes are blocked; the cutting job was not removed.");
@@ -4492,7 +4502,7 @@ async function restoreCuttingJobHistory(collection, id, target){
   let mutation = null, writeOutcome = null, token = null;
   try {
     if (hasPendingLocalChanges){
-      const settled = await saveCloudNow();
+      const settled = await saveCloudNowForHistory();
       if (!settled?.saved || !settled.stateWriteCompleted) return cuttingJobDeletionFailure("Existing changes could not be confirmed before history restoration.");
     } else await cloudSaveQueue;
     if (!canWriteCloud("cutting-job history restoration")) return cuttingJobDeletionFailure("Cloud writes are blocked.");
@@ -4526,12 +4536,7 @@ async function restoreCuttingJobHistory(collection, id, target){
       trash:window.deletedItems[0], trashArray:window.deletedItems, priorities };
     window[collection] = staged; window.deletedItems.shift(); refreshGlobalCollections();
     beginCuttingJobHistoryMutation(mutation);
-    let saving;
-    const priorSuppression = suppressHistory;
-    try {
-      suppressHistory = true; // Only the synchronous capture for this own save.
-      saving = saveCloudNow({ expectedRevision, cuttingJobHistoryRestoreToken:token });
-    } finally { suppressHistory = priorSuppression; }
+    const saving = saveCloudNowForHistory({ expectedRevision, cuttingJobHistoryRestoreToken:token });
     try { writeOutcome = await saving; }
     catch (error){ writeOutcome = { saved:false, indeterminate:true, error:String(error?.message || error) }; }
     if (writeOutcome?.saved && writeOutcome.stateWriteCompleted) return { ...writeOutcome, ...finishCuttingJobHistoryMutation(mutation, true, true) };
@@ -4578,7 +4583,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
   const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
     &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
-  if (!identityAuthorized && !canWriteCloud("authoritative transaction")) return { saved:false, blocked:true, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
+  if (!identityAuthorized && !canWriteCloud("authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
   const deletionProof = options.cuttingJobDeletionProof;
   if (deletionProof){
     if (!cuttingJobDeletionProofs.has(deletionProof) || cuttingJobDeletionTransactions.has(deletionProof)) return cuttingJobDeletionFailure("Cutting-job deletion transaction authorization is invalid or already used.");
@@ -4591,7 +4596,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   }
   const writer = window.OMAXAtomicPersistence?.save;
   if (typeof writer !== "function" || !window.CuttingFileContentFirewall){
-    return { saved:false, blocked:true, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
+    return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
   }
   const result = await writer({ db:FB.db, docRef:FB.docRef, state, setOptions,
     expectedRevision:options.expectedRevision ?? Number(window.__loadedCloudRevisionForSaveGuard || 0),
@@ -6732,6 +6737,11 @@ const saveCloudInternal = debounce((saveOptions = {})=>{
   return queued;
 }, 1800);
 
+function cloudSaveNoWriteFailure(errorCode, error){
+  return { saved:false, blocked:true, definiteFailure:true, indeterminate:false,
+    stateWriteAttempted:false, stateWriteCompleted:false, errorCode, error };
+}
+
 async function performCloudSave(saveOptions = {}){
   let authoritativeStateWriteAttempted = false;
   let authoritativeStateWriteCompleted = false;
@@ -6752,7 +6762,8 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.saveCloudInternalReturnValue = "firebase_not_ready";
       explicitTrace.saveCloudInternalReturnType = "early_return";
     }
-    return;
+    return cloudSaveNoWriteFailure(!FB.ready ? "firebase_not_ready" : "authoritative_doc_ref_unavailable",
+      !FB.ready ? "Firebase is not ready; no authoritative write was attempted." : "The authoritative document reference is unavailable; no write was attempted.");
   }
   const canWrite = canWriteCloud("saveCloudInternal");
   if (explicitTrace) explicitTrace.canWriteCloudPassed = Boolean(canWrite);
@@ -6762,8 +6773,9 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.saveCloudInternalReturnType = "early_return";
       explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
     }
-    return;
+    return cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked; no authoritative write was attempted.");
   }
+  if (isVercelPreviewRuntime()) return cloudSaveNoWriteFailure("preview_readonly", "Cloud save is disabled in preview read-only mode.");
   try{
     const expectedRevision = Number(saveOptions.expectedRevision ?? window.__loadedCloudRevisionForSaveGuard ?? 0);
     const mutationVersionAtSave = lastLocalMutationAt;
@@ -6772,10 +6784,7 @@ async function performCloudSave(saveOptions = {}){
     if (rawFirewall.contaminated){
       hasPendingLocalChanges = true;
       const blocked = {
-        saved:false, blocked:true,
-        error:"Embedded cutting-file content was blocked from authoritative state.",
-        errorCode:"embedded_cutting_file_content_blocked",
-        stateWriteAttempted:false, stateWriteCompleted:false,
+        ...cloudSaveNoWriteFailure("embedded_cutting_file_content_blocked", "Embedded cutting-file content was blocked from authoritative state."),
         findings:rawFirewall.findings
       };
       if (explicitTrace){
@@ -6821,7 +6830,7 @@ async function performCloudSave(saveOptions = {}){
     const repairAuthorization = consumeMaintenanceV2RepairAuthorization(saveOptions?.maintenanceV2RepairToken, snap);
     const allowScheduledV2Dedupe = repairAuthorization.authorized === true;
     if (saveOptions?.maintenanceV2RepairToken && !allowScheduledV2Dedupe){
-      return { saved:false, error:repairAuthorization.error || "V2 repair authorization was rejected." };
+      return cloudSaveNoWriteFailure("maintenance_repair_authorization_rejected", repairAuthorization.error || "V2 repair authorization was rejected.");
     }
     if (!allowScheduledV2Dedupe && (pendingMetrics.completedDatesCount + pendingMetrics.manualHistoryCount + pendingMetrics.maintenanceOccurrencesV2Count + 10) < (baselineMetrics.completedDatesCount + baselineMetrics.manualHistoryCount + baselineMetrics.maintenanceOccurrencesV2Count)){
       if (explicitTrace){
@@ -6831,7 +6840,7 @@ async function performCloudSave(saveOptions = {}){
         explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
       }
       console.error("Cloud save blocked: maintenance completion history would be reduced unexpectedly.", { pendingMetrics, baselineMetrics });
-      return { saved:false, error:"Maintenance completion history reduction was blocked." };
+      return cloudSaveNoWriteFailure("maintenance_history_reduction_blocked", "Maintenance completion history reduction was blocked.");
     }
     if (pendingCore.inventoryCount + 5 < baselineCore.inventoryCount || pendingCore.orderRequestsCount + 2 < baselineCore.orderRequestsCount || pendingCore.orderLineItemCount + 5 < baselineCore.orderLineItemCount || pendingCore.settingsFoldersCount + 1 < baselineCore.settingsFoldersCount || pendingCore.toleranceFieldCount + 1 < baselineCore.toleranceFieldCount || (!pendingCore.layoutPresent && baselineCore.layoutPresent)){
       if (explicitTrace){
@@ -6841,7 +6850,7 @@ async function performCloudSave(saveOptions = {}){
         explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
       }
       console.error("Cloud save blocked: core business data would be reduced unexpectedly.", { pendingCore, baselineCore });
-      return { saved:false, error:"Core business data reduction was blocked." };
+      return cloudSaveNoWriteFailure("core_business_reduction_blocked", "Core business data reduction was blocked.");
     }
     const sizeBytes = estimatePayloadBytes(snap);
     if (sizeBytes >= FIRESTORE_WARN_BYTES){
@@ -6860,7 +6869,7 @@ async function performCloudSave(saveOptions = {}){
       logStateSizeDiagnostics(snap, "blocked-save");
       hasPendingLocalChanges = true;
       persistLocalStateBackup(snap);
-      return { saved:false, error:"State payload is too large." };
+      return cloudSaveNoWriteFailure("payload_too_large", "State payload is too large.");
     }
     try {
       recordDataFlowEvent("cloud_save", snap);
@@ -6875,7 +6884,7 @@ async function performCloudSave(saveOptions = {}){
     const historyRestoreCheck = validateCuttingJobHistoryRestoreSave(remoteData, snap, historyRestoreProof);
     if (!historyRestoreCheck.valid) return cuttingJobDeletionFailure(historyRestoreCheck.error);
     if (allowScheduledV2Dedupe && !validateMaintenanceV2RepairRemoteBaseline(repairAuthorization.proof, remoteData)){
-      return { saved:false, error:"Latest Firestore V2 state no longer matches the authorized repair baseline." };
+      return cloudSaveNoWriteFailure("maintenance_repair_conflict", "Latest Firestore V2 state no longer matches the authorized repair baseline.");
     }
     const localBackupForPreflight = readLocalStateBackup();
     const revisionConflict = remoteData && typeof remoteData === "object"
@@ -6925,7 +6934,7 @@ async function performCloudSave(saveOptions = {}){
       });
       hasPendingLocalChanges = true;
       await writeBlockedSaveLog(registryPreflight, { reason: "saveCloudInternal" });
-      return { saved:false, error:"Protected-state save preflight blocked the write." };
+      return cloudSaveNoWriteFailure("protected_preflight_blocked", "Protected-state save preflight blocked the write.");
     }
     if (remoteData && typeof remoteData === "object"){
       if (revisionConflict.blocked){
@@ -6936,7 +6945,7 @@ async function performCloudSave(saveOptions = {}){
         }
         blockCloudSave("remote state is newer than this client. Export/reload/merge review before saving.", revisionConflict);
         hasPendingLocalChanges = true;
-        return { saved:false, error:"Remote state is newer than this client." };
+        return cloudSaveNoWriteFailure("revision_conflict", "Remote state is newer than this client.");
       }
       const dangerous = detectDangerousProtectedFieldReduction(safetyRemote, snap);
       if (dangerous.blocked){
@@ -6948,7 +6957,7 @@ async function performCloudSave(saveOptions = {}){
         }
         blockCloudSave("protected field reduction detected.", dangerous.issues);
         hasPendingLocalChanges = true;
-        return { saved:false, error:"Protected field reduction was blocked." };
+        return cloudSaveNoWriteFailure("protected_reduction_blocked", "Protected field reduction was blocked.");
       }
       if (!deletionProof && !historyRestoreProof){
         snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
@@ -7236,11 +7245,11 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
-  if (!canWriteCloud("saveCloudDebounced")) return;
+  if (!canWriteCloud("saveCloudDebounced")) return cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked.");
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
-    return;
+    return cloudSaveNoWriteFailure("preview_readonly", "Cloud save is disabled in preview read-only mode.");
   }
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Math.max(Date.now(), lastLocalMutationAt + 1);
@@ -7257,11 +7266,11 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(saveOptions = {}){
-  if (!canWriteCloud("saveCloudNow")) return Promise.resolve({ saved:false, error:"Cloud writes are currently blocked." });
+  if (!canWriteCloud("saveCloudNow")) return Promise.resolve(cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked."));
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
     console.warn(`Cloud save skipped: previewReadonly=1 on preview host (${host}) for workspace ${WORKSPACE_ID}.`);
-    return Promise.resolve({ saved:false, error:"Cloud save is disabled in preview read-only mode." });
+    return Promise.resolve(cloudSaveNoWriteFailure("preview_readonly", "Cloud save is disabled in preview read-only mode."));
   }
   hasPendingLocalChanges = true;
   lastLocalMutationAt = Math.max(Date.now(), lastLocalMutationAt + 1);
