@@ -39,7 +39,7 @@
   const DIAGNOSTIC_FIELDS=new Set(("syncMeta rev updatedAtISO updatedBy saveMeta lastSavedAt lastSaveStatus lastSaveError lastSaveSizeBytes syncProcessLog cuttingJobs completedCuttingJobs id name startISO dueISO completedAtISO cutNumber cutDateISO cutOrderWithinDay cutChronologyHistory files fileId relativePath source url externalUrl downloadUrl manualLogs dateISO completedHours actualHours estimateHours efficiency material materialCost materialQty chargeRate costRate cat projectNumber priority notes importProvenance import_event_id inventory inventoryFolders inventoryMaterials inventoryTransactions maintenanceTasksV2 maintenanceCalendarInstancesV2 maintenanceOccurrencesV2 tasksInterval tasksAsReq totalHistory dailyCutHours pumpEff entries hours rpm weeklyCostReports receiptTrackerWeeks orderRequests jobFolders appConfig costHistory deletedItems schema length seconds nanoseconds").split(" "));
   function verificationDifferences(committed,readback){
     const paths=[],maxPaths=16,maxNodes=100000;let count=0,nodes=0,truncated=false;
-    const record=path=>{count++;if(paths.length<maxPaths)paths.push(path.slice(0,200));else truncated=true;};
+    const record=path=>{if(++nodes>maxNodes)truncated=true;count++;if(paths.length<maxPaths)paths.push(path.slice(0,200));else truncated=true;};
     const walk=(a,b,path,depth)=>{
       if(++nodes>maxNodes||depth>64){truncated=true;record(path);return;}
       if(Object.is(a,b))return;

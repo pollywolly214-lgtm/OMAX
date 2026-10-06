@@ -96,3 +96,7 @@ test("CJO-04B nonfinite/null cost mismatch remains strict rather than JSON-norma
 test("CJO-04B source changes during copy date selection stop before creation",async()=>{
   const h=harness(fixture()),action=copyUi(h,{changed:true});await action.promise;assert.equal(h.counts.writes,0);assert.equal(h.live.cuttingJobs.some(job=>job.id==="active-copy"),false);assert.ok(action.messages.some(message=>message.includes("completed job changed")));
 });
+
+test("CJO-04B missing-array-element diagnostics stop at the traversal budget",()=>{
+  const result=model.verificationDifferences({cuttingJobs:[]},{cuttingJobs:Array.from({length:120000},()=>null)});assert.equal(result.verificationMismatchPaths.length,16);assert.equal(result.verificationMismatchTruncated,true);assert.ok(result.verificationMismatchCount<120000);
+});
