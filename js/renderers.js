@@ -24138,7 +24138,7 @@ function renderInventory(){
   const persistInventoryMaterials = async action=>{
     const api=window.inventoryMaterialMutationApi;
     if (!api){ toast("Material persistence is unavailable. Reload before editing."); return {saved:false}; }
-    const saving=api.run({...action,expectedMaterials:cloneStructured(window.inventoryMaterials)});
+    const saving=api.run({...action,baselineMaterials:cloneStructured(window.inventoryMaterials)});
     renderInventory();
     const result=await saving;
     if (!result.saved || !result.verified) toast(result.error || "Material change was not confirmed. Reload/review before retrying.");

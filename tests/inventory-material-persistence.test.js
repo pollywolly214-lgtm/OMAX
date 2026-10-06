@@ -10,10 +10,12 @@ function model(){return {activeType:"steel",customMaterialEvidence:{retain:"exac
 function harness(options={}){
   let cloud=identities.repairedState(fixture(),identities.preview(fixture()));
   cloud.inventoryMaterials=model();cloud.syncMeta={rev:7,updatedBy:"fixture-client"};cloud.inventoryTransactions=[{id:"transaction",qty:4}];
+  if(options.blankAluminum){cloud.inventoryMaterials.activeType="aluminum";cloud.inventoryMaterials.sheets.aluminum.rows[0].values[0]="";}
+  if(options.baselineSyncMeta)cloud.syncMeta=clone(options.baselineSyncMeta);
   cloud.unknownFutureState={retain:[{id:"future-record",payload:"exact"}]};
   let reads=0,transactions=0,commits=0,diagnostics=0, queued, writeOptions;
   const events={};const window={...clone(cloud),OMAXInventoryMaterialMutations:materials,OMAXAtomicPersistence:atomic,OMAXGlobalIdentityRepair:identities,CuttingFileContentFirewall:firewall,
-    __cloudLoadAttemptComplete:true,__initialAdoptComplete:true,__loadedCloudRevisionForSaveGuard:7,addEventListener:(name,handler)=>{events[name]=handler;},location:{hostname:"localhost",search:""}};
+    __cloudLoadAttemptComplete:true,__initialAdoptComplete:true,__loadedCloudRevisionForSaveGuard:cloud.syncMeta.rev,addEventListener:(name,handler)=>{events[name]=handler;},location:{hostname:"localhost",search:""}};
   const db={async runTransaction(callback){transactions++;await options.beforeTransaction?.(window,cloud);const transaction={get:async()=>({exists:true,data:()=>clone(cloud)}),set:(_ref,value,setOptions)=>{writeOptions=clone(setOptions);queued=clone(value);}};
     await callback(transaction);if(options.retry)await callback(transaction);
     await options.afterQueue?.(window,cloud);
@@ -28,8 +30,8 @@ function harness(options={}){
   }};
   const c=vm.createContext({window,URLSearchParams,TextEncoder,structuredClone,Blob,Map,WeakSet,setTimeout,clearTimeout,
     console:{warn(){},error(){},info(){}},document:{getElementById:()=>null},WORKSPACE_ID:"fixture",
-    FB:{ready:true,user:{uid:"fixture"},db,docRef:{path:"fixture/app/state",get:async readOptions=>{assert.equal(readOptions.source,"server");reads++;await options.duringRead?.(reads,window,cloud);if(reads>1&&options.readFailure)throw Error("Server unavailable");const data=clone(cloud);if(reads>1&&options.mismatch)data.inventory[0].qtyNew++;return{exists:true,data:()=>data};}}},
-    FIRESTORE_BLOCK_BYTES:950000,getCloudSyncClientId:()=>"fixture-client",readLocalStateBackup:()=>null,
+    FB:{ready:true,user:{uid:"fixture"},db,docRef:{path:"fixture/app/state",get:async readOptions=>{assert.equal(readOptions.source,"server");reads++;await options.duringRead?.(reads,window,cloud);if(reads>1&&options.readFailure)throw Error("Server unavailable");const data=clone(cloud);if(reads>1&&options.mismatch)data.inventory[0].qtyNew++;if(reads>1)options.readbackMutation?.(data);return{exists:true,data:()=>data};}}},
+    FIRESTORE_BLOCK_BYTES:950000,getCloudSyncClientId:()=>options.rotateClientIdAfterCommit&&commits ? "fresh-storage-client" : "fixture-client",readLocalStateBackup:()=>null,
     getSaveSchemaCoverageReport:()=>({cloudExcludedProtectedPaths:[]}),classifyMissingProtectedPathsForSave:()=>({blocking:[],warnings:[]}),
     renderRecoveryDiagnosticsPanel:()=>diagnostics++,showLocalBackupConflictWarning(){},syncRenderTotalsFromHistory(){},resetHistoryToCurrent(){},
     setCloudLoadGate:value=>{window.__cloudLoadAttemptComplete=value.loadComplete;window.__initialAdoptComplete=value.adoptComplete;},
@@ -39,6 +41,11 @@ function harness(options={}){
   const functions=["cloneStructured","stateHasMeaningfulData","stableStringify","estimatePayloadBytes","countObjectKeys","countTaskNestedMapEntries","countTaskNestedArrayEntries","countJobManualLogs","getValueAtPath","getDataSafetyShape","countCollectionValue","countNestedProtectedValues","stableStringifyForIntegrity","hashIntegrityString","fingerprintProtectedValue","countProtectedField","validateProtectedFieldShape","getProtectedFieldRegistryCoverage","buildProtectedFieldIntegritySummary","buildDataIntegritySummary","hasAnyProtectedData","hasAnyProtectedFieldPresence","isDangerousShapeChange","chooseProtectedSaveBaseline","detectDangerousIntegrityReduction","validateProtectedSavePreflight","buildProtectedFieldSummary","compareProtectedFieldSummaries","detectDangerousProtectedFieldReduction","isRecoveryMode","canWriteCloud","blockCloudSave","scanAuthoritativeCutFileContent","reportCloudSaveSecondaryError","validateCuttingJobHistoryRestoreSave","validateCuttingJobDeletionSave","cuttingJobDeletionSafetyBaseline","writeAuthoritativeStateSnapshot","readCurrentCloudStateReadOnly","getInventoryIdentityRepairLocalState","buildWindowProtectedStateForCoverage","inspectInventoryIdentities","adoptAuthoritativeRecoveryState","adoptState","checkAuthoritativeIdentityIntegrity","adoptIdentityCheckedAuthoritativeState","loadFromCloud","cloudSaveNoWriteFailure","saveCloudDebounced","saveCloudNow"];
   vm.runInContext(bindings.map(name=>"let "+name+"=window."+name+";").join("\n")+"\nlet lastAppliedCloudRevision=7,lastLocalMutationAt=0,hasPendingLocalChanges=false,cloudSaveQueue=Promise.resolve();const inventoryIdentityRepairAuthorizations=new Map(),cuttingJobDeletionProofs=new WeakSet(),cuttingJobDeletionTransactions=new WeakSet(),cuttingJobHistoryRestoreProofs=new WeakSet(),cuttingJobHistoryRestoreTransactions=new WeakSet();\n"+constants.map(constant).join("\n")+"\n"+functions.map(name=>fn(core,name)).join("\n"),c);
   assert.equal(c.adoptIdentityCheckedAuthoritativeState(clone(cloud)).recovery,Boolean(options.preview));
+  if(options.quotaClientId){
+    let sequence=0;c.CLOUD_SYNC_CLIENT_KEY="fixture-client-key";c.Math=Object.create(Math);c.Math.random=()=>++sequence/1000;
+    window.localStorage={getItem:()=>"",setItem:()=>{throw Error("QuotaExceededError");}};
+    vm.runInContext(fn(core,"getCloudSyncClientId"),c);
+  }
   vm.runInContext(core.slice(core.indexOf("let inventoryMaterialOwnedSuspension"),core.indexOf("const inventoryIdentityRepairApi=")),c);
   if(options.blockProtected)c.validateProtectedSavePreflight=()=>({blocked:true});
   if(options.recovery)window.__recoveryInspectMode=true;
@@ -63,7 +70,7 @@ for(const [name,request,verify] of [
   ["delete column",action("delete-column"),m=>assert.deepEqual(m.sheets.steel.rows[1].values,["5"])],
   ["all selector",{kind:"select",value:"__all"},m=>assert.equal(m.activeType,"__all")]
 ])test(name+": real guarded transaction, exact readback, adoption and reload preserve all unrelated data",async()=>{
-  const h=harness(),before=h.cloud,result=await h.api.run(request);assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(h.commits,1);assert.equal(h.reads,2);verify(h.cloud.inventoryMaterials);
+  const h=harness(),before=h.cloud,result=await h.api.run({...request,baselineMaterials:before.inventoryMaterials});assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(h.commits,1);assert.equal(h.reads,2);verify(h.cloud.inventoryMaterials);
   assert.deepEqual(unrelated(h.cloud),unrelated(before));assert.deepEqual(h.local.inventoryMaterials,h.cloud.inventoryMaterials);
   assert.equal((await h.reload()).recovery,false);assert.deepEqual(h.local,h.cloud);assert.equal(h.api.undoCount(),1);
 });
@@ -104,11 +111,11 @@ function ui(h){
   h.window.inventorySection="material";h.window.inventoryMaterialEditMode=true;
   vm.runInContext(fn(renderers,"renderInventory"),h.c);h.c.renderInventory();
   const click=(attribute,index=1)=>content.listeners.click({target:{closest:selector=>selector==="["+attribute+"]"?{getAttribute:name=>name===attribute?"steel":name==="data-row-index"||name==="data-col-index"?String(index):null}:null},preventDefault(){},stopPropagation(){}});
-  const edit=(kind,raw)=>{
-    const cell=node();cell.getAttribute=name=>({"data-edit-kind":kind,"data-type-id":"steel","data-row-index":"1","data-col-index":"0","data-material-value":raw})[name]??null;
+  const edit=(kind,raw,{typeId="steel",rowIndex=1,colIndex=0}={})=>{
+    const cell=node();cell.getAttribute=name=>({"data-edit-kind":kind,"data-type-id":typeId,"data-row-index":String(rowIndex),"data-col-index":String(colIndex),"data-material-value":raw})[name]??null;
     content.listeners.dblclick({target:{closest:()=>cell}});return editors.at(-1);
   };
-  return {calls,content,controls,click,edit,finish:async()=>{if(saving)await saving;await new Promise(r=>setImmediate(r));}};
+  return {calls,content,controls,click,edit,finish:async()=>{const result=saving?await saving:null;await new Promise(r=>setImmediate(r));return result;}};
 }
 for(const [attribute,kind]of [["data-material-row-add","add-row"],["data-material-row-add-after","insert-row"],["data-material-row-delete","delete-row"],["data-material-col-add","add-column"],["data-material-col-add-after","insert-column"],["data-material-col-delete-index","delete-column"]])test("actual "+attribute+" callback persists once and renders the confirmed result",async()=>{
   const h=harness(),u=ui(h);u.click(attribute,1);assert.equal(u.calls[0].kind,kind);assert.equal(h.api.isBusy(),true);assert.equal(h.window.inventoryMaterials.sheets.steel.rows[1].values[0],"4");await u.finish();assert.equal(h.commits,1);assert.deepEqual(h.local.inventoryMaterials,h.cloud.inventoryMaterials);
@@ -142,3 +149,46 @@ test("writer validators inspect isolated copies and cannot modify the committed 
   assert.equal(result.saved,true,result.error);assert.deepEqual(h.cloud.inventory,before.inventory);assert.equal(h.cloud.inventoryMaterials.sheets.steel.rows[1].values[0],"42");
 });
 for(const change of [state=>{state.syncMeta.rev++;},state=>{state.syncMeta.updatedBy="other-client";}])test("server revision/actor must match the acknowledged material transaction",async()=>{const h=harness({duringRead:(n,_w,c)=>{if(n===2)change(c);}}),r=await h.api.run(action("cell",{value:"42"}));assert.equal(r.saved,false);assert.equal(r.indeterminate,true);assert.equal(h.transactions,1);assert.equal(h.api.undoCount(),0);});
+
+const browserBaselineMeta={rev:1791313066981,updatedAtISO:"2026-10-06T16:17:46.981Z",updatedBy:"previous-client",retainedEvidence:"exact"};
+for(const rotateClientIdAfterCommit of [false,true])test("INV-01C blank Aluminum 1/16 -> 10 -> Enter -> save -> SERVER readback"+(rotateClientIdAfterCommit?" with changing client lookup":""),async()=>{
+  const h=harness({blankAluminum:true,baselineSyncMeta:browserBaselineMeta,rotateClientIdAfterCommit}),before=h.cloud,u=ui(h),writes=[];
+  const writer=h.c.writeAuthoritativeStateSnapshot;
+  h.c.writeAuthoritativeStateSnapshot=async(...args)=>{assert.equal(args[0].inventoryMaterials.sheets.aluminum.rows[0].values[0],"10");const result=await writer(...args);writes.push(clone(result));return result;};
+  const input=u.edit("cell","",{typeId:"aluminum",rowIndex:0,colIndex:0});input.value="10";
+  input.listeners.keydown({key:"Enter",preventDefault(){}});input.listeners.blur();
+  const result=await u.finish();
+  assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(result.indeterminate,false);
+  assert.equal(writes.length,1);assert.equal(writes[0].saved,true);assert.equal(writes[0].stateWriteCompleted,true);assert.equal(writes[0].indeterminate,false);
+  assert.equal(u.calls[0].baselineMaterials.sheets.aluminum.rows[0].values[0],"","grid baseline remains a pre-write guard only");
+  assert.equal(Object.hasOwn(u.calls[0],"expectedMaterials"),false);
+  assert.equal(h.cloud.inventoryMaterials.sheets.aluminum.rows[0].values[0],"10");assert.equal(h.local.inventoryMaterials.sheets.aluminum.rows[0].values[0],"10");
+  assert.ok(h.cloud.syncMeta.rev>before.syncMeta.rev);assert.notEqual(h.cloud.syncMeta.updatedAtISO,before.syncMeta.updatedAtISO);assert.equal(h.cloud.syncMeta.updatedBy,"fixture-client");assert.equal(h.cloud.syncMeta.retainedEvidence,"exact");
+  assert.deepEqual(unrelated(h.cloud),unrelated(before));assert.equal(h.window.__recoveryInspectMode,false);assert.equal(h.window.__autosaveDisabled,false);assert.equal(h.diagnostics,0);assert.equal(h.transactions,1);
+  assert.equal((await h.reload()).recovery,false);assert.equal(h.local.inventoryMaterials.sheets.aluminum.rows[0].values[0],"10");assert.equal(h.transactions,1,"verified adoption and reload must not save again");
+});
+for(const value of ["","20"])test("INV-01C old/wrong authoritative material value "+JSON.stringify(value)+" still suspends verification",async()=>{
+  const h=harness({blankAluminum:true,readbackMutation:state=>{state.inventoryMaterials.sheets.aluminum.rows[0].values[0]=value;}}),result=await h.api.run({kind:"cell",typeId:"aluminum",rowIndex:0,colIndex:0,value:"10",baselineMaterials:h.cloud.inventoryMaterials});
+  assert.equal(h.commits,1);assert.equal(result.saved,false);assert.equal(result.verified,false);assert.equal(result.indeterminate,true);assert.equal(h.window.__recoveryInspectMode,true);assert.equal(h.transactions,1);assert.equal(h.api.undoCount(),0);
+  assert.equal(result.evidence.source.inventoryMaterials.sheets.aluminum.rows[0].values[0],"");
+  assert.equal(result.evidence.intended.inventoryMaterials.sheets.aluminum.rows[0].values[0],"10");
+  assert.equal(result.evidence.serverReadback.inventoryMaterials.sheets.aluminum.rows[0].values[0],value);
+  assert.equal(Object.hasOwn(result.evidence.action,"expectedMaterials"),false);
+  assert.equal(Object.hasOwn(result.evidence.action,"baselineMaterials"),false);
+});
+for(const [name,change] of [
+  ["unrelated protected business",state=>{state.inventory[0].qtyNew++;}],
+  ["saveMeta (not written by the isolated material writer)",state=>{state.saveMeta={lastSaveStatus:"unexpected"};}],
+  ["unknown sync metadata",state=>{state.syncMeta.retainedEvidence="changed";}],
+  ["invalid writer timestamp",state=>{state.syncMeta.updatedAtISO="invalid";}]
+])test("INV-01C "+name+" mismatch is never exempted",async()=>{
+  const h=harness({blankAluminum:true,baselineSyncMeta:browserBaselineMeta,readbackMutation:change}),result=await h.api.run({kind:"cell",typeId:"aluminum",rowIndex:0,colIndex:0,value:"10",baselineMaterials:h.cloud.inventoryMaterials});
+  assert.equal(result.saved,false);assert.equal(result.verified,false);assert.equal(result.indeterminate,true);assert.equal(h.transactions,1);assert.equal(h.window.__recoveryInspectMode,true);
+});
+test("INV-01C real client-ID helper with localStorage quota failure still verifies an acknowledged save",async()=>{
+  const h=harness({blankAluminum:true,baselineSyncMeta:browserBaselineMeta,quotaClientId:true}),u=ui(h),input=u.edit("cell","",{typeId:"aluminum",rowIndex:0});
+  input.value="10";input.listeners.keydown({key:"Enter",preventDefault(){}});input.listeners.blur();const result=await u.finish();
+  assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(h.window.__recoveryInspectMode,false);assert.equal(h.transactions,1);assert.equal(h.diagnostics,0);
+  assert.notEqual(h.c.getCloudSyncClientId(),h.cloud.syncMeta.updatedBy,"a fresh lookup is not the acknowledged writing client");
+  assert.equal(h.local.inventoryMaterials.sheets.aluminum.rows[0].values[0],"10");assert.equal((await h.reload()).recovery,false);assert.equal(h.transactions,1);
+});

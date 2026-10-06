@@ -8,8 +8,41 @@
   const key = value => value === undefined ? "undefined" : value === null || typeof value !== "object" ? JSON.stringify(value)
     : Array.isArray(value) ? "[" + value.map(key).join(",") + "]"
     : "{" + Object.keys(value).sort().map(name => JSON.stringify(name) + ":" + key(value[name])).join(",") + "}";
-  const withoutSync = state => Object.fromEntries(Object.entries(state || {}).filter(([name]) => name !== "syncMeta"));
+  // Only these three paths are assigned by OMAXAtomicPersistence.save. The
+  // isolated writer does not write saveMeta or syncProcessLog; keep them exact.
+  const syncWriterFields = new Set(["rev", "updatedAtISO", "updatedBy"]);
+  const unrelated = state => Object.fromEntries(Object.entries(state || {}).filter(([name]) => !["inventoryMaterials", "syncMeta"].includes(name)));
+  const retainedSync = meta => Object.fromEntries(Object.entries(meta || {}).filter(([name]) => !syncWriterFields.has(name)));
   const business = state => Object.fromEntries(Object.entries(state || {}).filter(([name]) => !["syncMeta", "saveMeta", "syncProcessLog"].includes(name)));
+  function verifyReadback(source, intended, actual, writeResult, writerClientId){
+    if (!actual || key(actual.inventoryMaterials) !== key(intended.inventoryMaterials))
+      throw Error("Server readback material state differs from the intended post-mutation state.");
+    if (key(unrelated(intended)) !== key(unrelated(source)) || key(unrelated(actual)) !== key(unrelated(source)))
+      throw Error("Server readback changed unrelated business data or metadata not written by the material save.");
+    const acknowledged = writeResult?.saved === true && writeResult.stateWriteCompleted === true;
+    const metadataValid = meta => {
+      const timestamp = typeof meta?.updatedAtISO === "string" ? Date.parse(meta.updatedAtISO) : NaN;
+      return meta && !Array.isArray(meta) && Number.isSafeInteger(meta.rev) && meta.rev > source.syncMeta.rev
+        && typeof meta.updatedBy === "string" && meta.updatedBy.trim().length > 0
+        && Number.isFinite(timestamp) && new Date(timestamp).toISOString() === meta.updatedAtISO
+        && key(retainedSync(meta)) === key(retainedSync(source.syncMeta));
+    };
+    if (!metadataValid(actual.syncMeta)) throw Error("Server readback has invalid revision/timestamp or changed retained sync metadata.");
+    if (acknowledged){
+      const committed = writeResult.committedState;
+      if (!committed || key(committed.inventoryMaterials) !== key(intended.inventoryMaterials)
+        || key(unrelated(committed)) !== key(unrelated(source)) || !metadataValid(committed.syncMeta))
+        throw Error("The acknowledged writer result does not match the intended material change and save contract.");
+      // The acknowledgement binds the actual writing client. Querying local
+      // storage again can generate another ID when a previous setItem failed.
+      for (const field of syncWriterFields){
+        if (actual.syncMeta[field] !== committed.syncMeta[field]) throw Error("Server save metadata differs from the acknowledged transaction.");
+      }
+    } else if (actual.syncMeta.updatedBy !== writerClientId){
+      throw Error("The uncertain material write could not be attributed to its captured writing client.");
+    }
+    return true;
+  }
   function parseThickness(raw){
     const text = String(raw ?? "").replace(/"/g, "").trim();
     const fraction = text.match(/^(?:(\d+)\s+)?(\d+)\/(\d+)$/);
@@ -119,8 +152,14 @@
     return Object.freeze({isBusy:() => busy, undoCount:() => undo.length, async run(request){
       if (busy) return reject("A material change is still being verified. Wait before editing again.");
       if (!env.canWrite()) return reject("Material Inventory is read-only or cloud writes are blocked.");
-      let action;
-      try { action = clone(request); } catch (_error){ return reject("Invalid material action."); }
+      let action, baselineMaterials;
+      try {
+        action = clone(request);
+        // This is a pre-write grid guard, never a post-write expectation. Keep
+        // compatibility with an older renderer, but remove both from intent.
+        baselineMaterials = action.baselineMaterials ?? action.expectedMaterials;
+        delete action.baselineMaterials; delete action.expectedMaterials;
+      } catch (_error){ return reject("Invalid material action."); }
       busy = true;
       let evidence, writeResult, attempted = false;
       try {
@@ -132,7 +171,7 @@
         const unchanged = () => key(env.localVersion()) === localVersion && key(business(env.localState())) === localBefore;
         if (!Number.isSafeInteger(revision) || revision < 0 || revision !== env.loadedRevision() || !env.baselineMatches(source) || !unchanged())
           throw Error("The authoritative baseline changed. Reload and review before editing materials.");
-        if (action.expectedMaterials !== undefined && key(action.expectedMaterials) !== key(source.inventoryMaterials)) throw Error("The material grid changed while this edit was open. Reload and retry.");
+        if (baselineMaterials !== undefined && key(baselineMaterials) !== key(source.inventoryMaterials)) throw Error("The material grid changed while this edit was open. Reload and retry.");
         let material;
         if (action.kind === "undo"){
           const prior = undo.at(-1);
@@ -146,6 +185,7 @@
         const validateSource = remote => unchanged() && key(remote) === key(source);
         const validatePrepared = pending => unchanged() && key(pending) === key(next);
         if (!env.canWrite() || !unchanged()) throw Error("Local state changed before the material save.");
+        const writerClientId = env.clientId();
         attempted = true;
         try { writeResult = await env.writeState(next, revision, validateSource, validatePrepared); }
         catch (error){ writeResult = {saved:false, indeterminate:true, stateWriteAttempted:true, stateWriteCompleted:false, error:String(error?.message || error)}; }
@@ -155,12 +195,8 @@
         if (!acknowledged && !uncertain) return {...reject(writeResult.error || "Material Inventory save was rejected."), ...writeResult, saved:false, verified:false};
         // Also read after a lost acknowledgement. Never retry an uncertain write.
         const actual = await env.readState(), actualRevision = actual?.syncMeta?.rev;
-        const expectedCommitted = writeResult?.committedState;
-        const revisionValid = Number.isSafeInteger(actualRevision) && actualRevision > revision
-          && actual.syncMeta.updatedBy === env.clientId()
-          && (!acknowledged || actualRevision === expectedCommitted?.syncMeta?.rev);
-        if (!revisionValid || key(withoutSync(actual)) !== key(withoutSync(evidence.intended))
-          || (acknowledged && key(actual) !== key(expectedCommitted))) throw Error("Server readback did not prove the exact material change and preserved unrelated data.");
+        evidence.serverReadback = clone(actual);
+        verifyReadback(evidence.source, evidence.intended, actual, writeResult, writerClientId);
         if (!unchanged()) throw Error("The material change reached the server, but local edits changed during verification. Preserve them and reload/review.");
         if (await env.adoptVerifiedState(clone(actual), {uncertain, writeResult}) !== true) throw Error("Verified material state could not be safely adopted.");
         if (action.kind === "undo") undo.pop();
@@ -180,5 +216,5 @@
     let settled = false;
     return {commit(){if (settled) return; settled = true; return commit();}, cancel(){if (settled) return; settled = true; return cancel();}};
   }
-  return Object.freeze({key, business, parseThickness, validateModel, prepare, createApi, createInlineSettlement});
+  return Object.freeze({key, business, parseThickness, validateModel, prepare, verifyReadback, createApi, createInlineSettlement});
 });
