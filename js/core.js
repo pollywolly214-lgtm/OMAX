@@ -423,6 +423,54 @@ function getPredictionHoursSummary(){
   };
 }
 
+function resolveEffectiveDailyCutHours(dailyList, totalList, startKey, endKey){
+  const daily = normalizeDailyCutHours(dailyList);
+  const totalsByDate = new Map();
+  (Array.isArray(totalList) ? totalList : []).forEach(entry => {
+    const key = normalizeDateISO(entry?.dateISO);
+    const hours = Number(entry?.hours);
+    if (key && Number.isFinite(hours) && hours >= 0) totalsByDate.set(key, hours);
+  });
+  const totals = Array.from(totalsByDate).sort(([a], [b])=> a.localeCompare(b));
+  const currentDeltas = new Map();
+  let previousTotal = null;
+  totals.forEach(([key, hours])=>{
+    if (previousTotal != null) currentDeltas.set(key, Math.max(0, hours - previousTotal));
+    previousTotal = hours;
+  });
+  const effective = new Map();
+  if (totals.length >= 2){
+    let runningTotal = null;
+    // Keep the existing compatibility boundary: a reading on the window's
+    // first date is the baseline, not usage carried in from before the window.
+    for (const [key, hours] of totals){
+      if (key > startKey) break;
+      runningTotal = hours;
+    }
+    for (const [key, hours] of totals){
+      if (key < startKey) continue;
+      if (key > endKey) break;
+      if (runningTotal != null) effective.set(key, Math.max(0, hours - runningTotal));
+      runningTotal = hours;
+    }
+  }
+  daily.forEach(entry => {
+    const key = entry.dateISO;
+    if (key < startKey || key > endKey) return;
+    if (entry.source === "manual" || !currentDeltas.has(key)){
+      effective.set(key, entry.hours);
+    } else {
+      // A saved automatic entry is another representation of this delta.
+      // Recompute it, retaining daily-entry clamping; legacy totals without a
+      // daily representation retain the existing unclamped compatibility delta.
+      // Daily entries on the window's first date remain eligible, unlike the
+      // totals-only boundary baseline, when a preceding reading is available.
+      effective.set(key, clampDailyCutHours(currentDeltas.get(key)));
+    }
+  });
+  return effective;
+}
+
 function getAverageDailyCutHours(windowDaysOverride = null){
   const today = new Date();
   today.setHours(0,0,0,0);
@@ -446,66 +494,17 @@ function getAverageDailyCutHours(windowDaysOverride = null){
   const endKey = ymd(today);
   const excludeWeekends = shouldExcludeWeekends();
 
-  const dailyMap = new Map();
-  const dailyList = Array.isArray(window.dailyCutHours) ? window.dailyCutHours : [];
-  dailyList.forEach(entry => {
-    const key = normalizeDateISO(entry?.dateISO);
-    if (!key || key < startKey || key > endKey) return;
-    dailyMap.set(key, clampDailyCutHours(entry.hours));
-  });
-
+  const dailyMap = resolveEffectiveDailyCutHours(window.dailyCutHours, window.totalHistory, startKey, endKey);
   let eligibleDays = 0;
-  if (dailyMap.size){
-    let totalHours = 0;
-    const cursor = new Date(start);
-    while (cursor <= today){
-      const day = cursor.getDay();
-      const key = ymd(cursor);
-      const include = !excludeWeekends || (day !== 0 && day !== 6);
-      if (include){
-        eligibleDays += 1;
-        totalHours += (dailyMap.get(key) || 0);
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    if (!eligibleDays) return null;
-    const dailyRate = totalHours / eligibleDays;
-    return Number.isFinite(dailyRate) && dailyRate > 0 ? dailyRate : null;
-  }
-
-  const totals = (Array.isArray(window.totalHistory) ? window.totalHistory : [])
-    .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
-    .slice()
-    .sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
-  if (totals.length < 2) return null;
-  const totalsByDate = new Map();
-  totals.forEach(entry => {
-    const key = normalizeDateISO(entry.dateISO);
-    if (key) totalsByDate.set(key, Number(entry.hours));
-  });
-
-  let runningTotal = null;
-  for (const item of totals){
-    const key = normalizeDateISO(item?.dateISO);
-    if (!key || key > startKey) break;
-    runningTotal = Number(item.hours);
-  }
-
   let totalHours = 0;
   const cursor = new Date(start);
   while (cursor <= today){
     const day = cursor.getDay();
     const key = ymd(cursor);
     const include = !excludeWeekends || (day !== 0 && day !== 6);
-    if (include) eligibleDays += 1;
-    if (totalsByDate.has(key)){
-      const nextTotal = Number(totalsByDate.get(key));
-      if (runningTotal == null){
-        runningTotal = nextTotal;
-      } else {
-        if (include) totalHours += Math.max(0, nextTotal - Number(runningTotal));
-        runningTotal = nextTotal;
-      }
+    if (include){
+      eligibleDays += 1;
+      totalHours += (dailyMap.get(key) || 0);
     }
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -4598,8 +4597,12 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   if (typeof writer !== "function" || !window.CuttingFileContentFirewall){
     return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
   }
+  const expectedRevision = options.expectedRevision ?? Number(window.__loadedCloudRevisionForSaveGuard || 0);
+  const loadedState = window.__lastLoadedCloudState;
+  const totalHistoryBaseline = loadedState?.syncMeta?.rev === expectedRevision && Array.isArray(loadedState.totalHistory)
+    ? loadedState.totalHistory.map(entry => ({ ...entry })) : null;
   const result = await writer({ db:FB.db, docRef:FB.docRef, state, setOptions,
-    expectedRevision:options.expectedRevision ?? Number(window.__loadedCloudRevisionForSaveGuard || 0),
+    expectedRevision,
     clientId:getCloudSyncClientId(), scan:scanAuthoritativeCutFileContent,
     prepare:(pending, remote)=>{
       if(identityAuthorized){
@@ -4620,7 +4623,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:buildWindowProtectedStateForCoverage(), coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
       if (preflight.blocked || detectDangerousProtectedFieldReduction(safetyRemote, pending).blocked) throw Object.assign(new Error("Protected-state transaction preflight blocked the write."), { definite:true, code:"protected_preflight_blocked" });
       if (!deletionProof && !historyRestoreProof){
-        pending.totalHistory = mergeTotalHistoryForSave(pending.totalHistory, remote.totalHistory);
+        pending.totalHistory = mergeTotalHistoryForSave(pending.totalHistory, remote.totalHistory, totalHistoryBaseline);
         pending.dailyCutHours = mergeDailyCutHoursForSave(pending.dailyCutHours, remote.dailyCutHours);
         pending.pumpEff = mergePumpEffForSave(pending.pumpEff, remote.pumpEff);
       }
@@ -6978,7 +6981,9 @@ async function performCloudSave(saveOptions = {}){
         return cloudSaveNoWriteFailure("protected_reduction_blocked", "Protected field reduction was blocked.");
       }
       if (!deletionProof && !historyRestoreProof){
-        snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
+        const totalHistoryBaseline = window.__lastLoadedCloudState?.syncMeta?.rev === expectedRevision
+          ? window.__lastLoadedCloudState.totalHistory : null;
+        snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory, totalHistoryBaseline);
         snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
         snap.pumpEff = mergePumpEffForSave(snap.pumpEff, remoteData.pumpEff);
       }
@@ -7173,16 +7178,35 @@ function getAreaSignature(areaKey, areaValue){
   return stableStringify(areaValue);
 }
 
-function mergeTotalHistoryForSave(localList, remoteList){
+function mergeTotalHistoryForSave(localList, remoteList, baselineList = null){
   const map = new Map();
+  const uniqueReadings = (list)=>{
+    const readings = new Map();
+    (Array.isArray(list) ? list : []).forEach(entry => {
+      const key = normalizeDateISO(entry?.dateISO);
+      const hours = Number(entry?.hours);
+      if (!key || !Number.isFinite(hours) || hours < 0) return;
+      readings.set(key, readings.has(key) ? null : entry);
+    });
+    return readings;
+  };
+  const baseline = uniqueReadings(baselineList);
+  const local = uniqueReadings(localList);
+  const remote = uniqueReadings(remoteList);
   const ingest = (list)=>{
     (Array.isArray(list) ? list : []).forEach((entry)=>{
       const key = normalizeDateISO(entry?.dateISO);
       const hours = Number(entry?.hours);
       if (!key || !Number.isFinite(hours) || hours < 0) return;
       const prev = map.get(key);
-      if (!prev || hours >= prev.hours){
-        map.set(key, { ...entry, dateISO: key, hours });
+      // Only a unique local edit of the revision-matched loaded reading may
+      // lower a saved value. Unknown baselines keep the prior max safeguard.
+      const prior = baseline.get(key);
+      const current = remote.get(key);
+      const corrected = list === localList && local.get(key) === entry && prior && current
+        && Number(prior.hours) === Number(current.hours) && hours !== Number(prior.hours);
+      if (!prev || hours >= prev.hours || corrected){
+        map.set(key, { ...prev, ...entry, dateISO: key, hours });
       }
     });
   };
