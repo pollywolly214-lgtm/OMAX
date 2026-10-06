@@ -19,6 +19,46 @@
     return "{" + Object.keys(value).sort().map(key => JSON.stringify(key) + ":" + stateKey(value[key])).join(",") + "}";
   }
   const businessKey = state => stateKey(Object.fromEntries(Object.entries(state).filter(([key]) => key !== "syncMeta")));
+  // The atomic writer queues JSON-compatible state. Apply that exact durable
+  // serialization to both committed payload and server readback: object
+  // undefined properties are absent and array undefined positions are null.
+  // No business field, save log, report or revision is excluded here.
+  function durableStateProjection(value){
+    if(value===null||typeof value!=="object")return value;
+    if(value instanceof Date)return new Date(value.getTime());
+    if(Array.isArray(value))return Array.from(value,item=>item===undefined?null:durableStateProjection(item));
+    return Object.fromEntries(Object.entries(value).filter(([,item])=>item!==undefined).map(([key,item])=>[key,durableStateProjection(item)]));
+  }
+  function durableStateKey(value){
+    if(value===null)return "null";
+    if(typeof value!=="object")return typeof value+":"+(typeof value==="number"?String(value):JSON.stringify(value));
+    if(value instanceof Date)return "date:"+value.toISOString();
+    if(Array.isArray(value))return "array:["+value.map(durableStateKey).join(",")+"]";
+    return "object:{"+Object.keys(value).sort().map(key=>JSON.stringify(key)+":"+durableStateKey(value[key])).join(",")+"}";
+  }
+  const DIAGNOSTIC_FIELDS=new Set(("syncMeta rev updatedAtISO updatedBy saveMeta lastSavedAt lastSaveStatus lastSaveError lastSaveSizeBytes syncProcessLog cuttingJobs completedCuttingJobs id name startISO dueISO completedAtISO cutNumber cutDateISO cutOrderWithinDay cutChronologyHistory files fileId relativePath source url externalUrl downloadUrl manualLogs dateISO completedHours actualHours estimateHours efficiency material materialCost materialQty chargeRate costRate cat projectNumber priority notes importProvenance import_event_id inventory inventoryFolders inventoryMaterials inventoryTransactions maintenanceTasksV2 maintenanceCalendarInstancesV2 maintenanceOccurrencesV2 tasksInterval tasksAsReq totalHistory dailyCutHours pumpEff entries hours rpm weeklyCostReports receiptTrackerWeeks orderRequests jobFolders appConfig costHistory deletedItems schema length seconds nanoseconds").split(" "));
+  function verificationDifferences(committed,readback){
+    const paths=[],maxPaths=16,maxNodes=100000;let count=0,nodes=0,truncated=false;
+    const record=path=>{count++;if(paths.length<maxPaths)paths.push(path.slice(0,200));else truncated=true;};
+    const walk=(a,b,path,depth)=>{
+      if(++nodes>maxNodes||depth>64){truncated=true;record(path);return;}
+      if(Object.is(a,b))return;
+      if(a instanceof Date||b instanceof Date){if(!(a instanceof Date&&b instanceof Date&&a.getTime()===b.getTime()))record(path);return;}
+      if(a===null||b===null||typeof a!=="object"||typeof b!=="object"||Array.isArray(a)!==Array.isArray(b)){record(path);return;}
+      if(Array.isArray(a)){
+        if(a.length!==b.length)record(path+".length");
+        for(let i=0;i<Math.max(a.length,b.length)&&nodes<=maxNodes;i++){if(i>=a.length||i>=b.length)record(path+"["+i+"]");else walk(a[i],b[i],path+"["+i+"]",depth+1);}
+      }else{
+        const keys=[...new Set([...Object.keys(a),...Object.keys(b)])].sort();
+        for(let i=0;i<keys.length&&nodes<=maxNodes;i++){
+          const key=keys[i],next=path+(DIAGNOSTIC_FIELDS.has(key)?"."+key:".[field#"+i+"]");
+          if(!own(a,key)||!own(b,key))record(next);else walk(a[key],b[key],next,depth+1);
+        }
+      }
+    };
+    walk(committed,readback,"$",0);
+    return {verificationMismatchPaths:paths,verificationMismatchCount:count,verificationMismatchTruncated:truncated};
+  }
   function validCutDate(value){
     if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
     const [year, month, day] = value.split("-").map(Number);
@@ -145,7 +185,7 @@
   function createMutationApi(env){
     let busy = false;
     async function save(changes, {expectedRevision, expectedSourceKey, expectedPreparedKey, audit, businessOperation} = {}){
-      const result = {saved:false, verified:false, stateWriteAttempted:false, stateWriteCompleted:false, indeterminate:false, error:""};
+      const result = {saved:false, verified:false, stateWriteAttempted:false, stateWriteCompleted:false, indeterminate:false, error:"", verificationMismatchPaths:[], verificationMismatchCount:0, committedRevision:null, readbackRevision:null};
       if (busy) return {...result, blocked:true, error:"A chronology mutation is already in progress."};
       if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || !env.canWrite()) return {...result, blocked:true, error:"Current authoritative revision and write permission are required."};
       busy = true;
@@ -193,13 +233,31 @@
           return result;
         }
         result.authoritativeSaveCompleted = true;
+        // Freeze the actual queued payload before awaiting readback. Neither
+        // the older intent snapshot nor a mutable writer result proves a save.
+        result.verificationPhase="committed_projection";
+        const committed = saved.committedState ? durableStateProjection(saved.committedState) : null;
+        result.committedRevision = Number.isSafeInteger(committed?.syncMeta?.rev) ? committed.syncMeta.rev : null;
+        result.verificationPhase="server_readback";
         const cloud = await env.readState();
-        if (!cloud || !Number.isSafeInteger(cloud.syncMeta?.rev) || cloud.syncMeta.rev <= expectedRevision || businessKey(cloud) !== expected){
+        result.verificationPhase="readback_projection";
+        const readback = cloud ? durableStateProjection(cloud) : null;
+        result.readbackRevision = Number.isSafeInteger(readback?.syncMeta?.rev) ? readback.syncMeta.rev : null;
+        const revisionsMatch = Number.isSafeInteger(result.committedRevision) && result.committedRevision > expectedRevision
+          && result.readbackRevision === result.committedRevision;
+        result.verificationPhase="durable_comparison";
+        if (!committed || !readback || !revisionsMatch || durableStateKey(committed) !== durableStateKey(readback)){
+          Object.assign(result,verificationDifferences(committed,readback));
+          if(!revisionsMatch&&!result.verificationMismatchPaths.includes("$.syncMeta.rev")){
+            result.verificationMismatchCount++;
+            if(result.verificationMismatchPaths.length<16)result.verificationMismatchPaths.push("$.syncMeta.rev");
+          }
           result.indeterminate = true;
-          result.error = "Committed chronology requires exact server read-verification; do not retry.";
+          result.error = "Committed cutting-job save did not match server readback. Reload before trying again.";
           suspend(); return result;
         }
         result.verified = true;
+        result.verificationPhase="adoption";
         if (!current()){
           result.saved = true;
           result.error = "Chronology committed, but concurrent local edits require reload/review.";
@@ -222,6 +280,6 @@
     }
     return Object.freeze({save, isBusy:() => busy});
   }
-  return Object.freeze({FIELDS, validCutDate, validDayOrder, hasExplicitChronology, readCutLabel, chronologyReadiness, stateKey, businessKey,
+  return Object.freeze({FIELDS, validCutDate, validDayOrder, hasExplicitChronology, readCutLabel, chronologyReadiness, stateKey, businessKey, durableStateProjection, durableStateKey, verificationDifferences,
     compareCuttingJobChronology, readChronology, planRenumbering, prepareChronologyMutation, createMutationApi});
 });

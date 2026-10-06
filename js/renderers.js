@@ -23477,12 +23477,8 @@ function renderJobs(){
       if (!id) return;
       const entry = completedCuttingJobs.find(job => String(job?.id) === String(id));
       if (!entry){ toast("Unable to locate completed job."); return; }
-      const chronologyGate = window.CuttingJobHistory?.planDirectResequence(cuttingJobs, window.completedCuttingJobs);
-      if (!chronologyGate || window.CuttingJobHistory.isResequenceBlocked(chronologyGate)){
-        toast(chronologyGate?.error || "Cutting-job chronology is unavailable; review required.");
-        return chronologyGate || { ok:false, blocked:true, unavailable:true };
-      }
-
+      if(typeof createCuttingJob!=="function"){toast("Cutting-job saving is unavailable.");return {saved:false,blocked:true};}
+      const copySourceKey=window.CuttingJobChronology.stateKey(entry);
       const hoursPerDay = typeof getSchedulingDailyHours === "function"
         ? getSchedulingDailyHours()
         : (typeof getConfiguredDailyHours === "function"
@@ -23551,12 +23547,8 @@ function renderJobs(){
         defaultEnd
       });
       if (!selection) return;
-      const postDialogChronologyGate = window.CuttingJobHistory?.planDirectResequence(cuttingJobs, window.completedCuttingJobs);
-      if (!postDialogChronologyGate || window.CuttingJobHistory.isResequenceBlocked(postDialogChronologyGate)){
-        toast(postDialogChronologyGate?.error || "Cutting-job chronology is unavailable; review required.");
-        return postDialogChronologyGate || { ok:false, blocked:true, unavailable:true };
-      }
-
+      const currentSource=completedCuttingJobs.find(job=>String(job?.id)===String(id));
+      if(!currentSource||window.CuttingJobChronology.stateKey(currentSource)!==copySourceKey){toast("The completed job changed while choosing dates. Reopen Make Active Copy.");return {saved:false,blocked:true};}
       const pair = validateManualJobProjectCategory(entry.cat, undefined);
       if (!pair.ok) return;
       if (selection.startISO) startISO = selection.startISO;
@@ -23586,6 +23578,8 @@ function renderJobs(){
         chargeRate: Number.isFinite(Number(entry.chargeRate)) && Number(entry.chargeRate) >= 0
           ? Number(entry.chargeRate)
           : JOB_RATE_PER_HOUR,
+        costRate: Number.isFinite(Number(entry.costRate)) && Number(entry.costRate) >= 0
+          ? Number(entry.costRate) : JOB_BASE_COST_PER_HOUR,
         priority: typeof getJobPriority === "function"
           ? getJobPriority(entry)
           : (Number.isFinite(Number(entry.priority)) && Number(entry.priority) > 0
@@ -23597,15 +23591,11 @@ function renderJobs(){
         cat: pair.cat
       };
 
-      const resequence = window.CuttingJobHistory?.resequence([...cuttingJobs, newJob], window.completedCuttingJobs);
-      if (!resequence || window.CuttingJobHistory.isResequenceBlocked(resequence)){
-        toast(resequence?.error || "Cutting-job chronology is unavailable; review required.");
-        return resequence || { ok:false, blocked:true, unavailable:true };
-      }
-      cuttingJobs.push(newJob);
-      reorderPriorities(newJob.id, newJob.priority);
-      window.cuttingJobs = cuttingJobs;
-      saveCloudDebounced();
+      histActivate.disabled=true;
+      const created=await createCuttingJob(newJob);
+      histActivate.disabled=false;
+      if(!created.saved||!created.verified||created.requiresReload){toast(created.error||"Active copy was not saved.");return created;}
+      cuttingJobs=window.cuttingJobs;completedCuttingJobs=window.completedCuttingJobs;
       renderCalendarPreservingScroll();
       toast("Active cutting job created");
       renderJobs();

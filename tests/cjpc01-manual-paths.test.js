@@ -103,7 +103,7 @@ test("legacy active copy receives projectNumber without altering its historical 
   assert.equal(h.window.cuttingJobs[0].projectNumber,"1254");assert.equal(h.window.cuttingJobs[0].cat,"blanco");assert.deepEqual(original,before);
   const bad=harness([],[legacyJob({cat:"unknown",projectNumber:""})]);await bad.copy();assert.equal(bad.window.cuttingJobs.length,0);assert.equal(bad.calls.save,0);
 });
-test("canonical active copy requires the coordinator and preserves project/category data",async()=>{const original=job(),before=structuredClone(original),h=harness([],[original]);await h.copy();assert.equal(h.window.cuttingJobs.length,0);assert.equal(h.calls.save,0);assert.deepEqual(original,before);assert.match(h.messages.join(" "),/coordinator/);});
+test("canonical active copy uses guarded creation and preserves original project/category data",async()=>{const original=job(),before=structuredClone(original),h=harness([],[original]);await h.copy();assert.equal(h.window.cuttingJobs.length,1);assert.equal(h.calls.save,1);assert.deepEqual(original,before);assert.equal(h.window.cuttingJobs[0].cat,"blanco");assert.equal(h.window.cuttingJobs[0].projectNumber,"1254");});
 test("active copy revalidates category ownership after the awaited dialog",async()=>{
   const h=harness([],[legacyJob()]);h.c.showMakeActiveCopyModal=async()=>{h.window.jobFolders.push({id:"duplicate",name:"Blanco"});return{};};await h.copy();assert.equal(h.window.cuttingJobs.length,0);assert.equal(h.calls.save,0);
 });
