@@ -6,6 +6,66 @@ window.pumpChartRange = window.pumpChartRange || "3m";
 window.pumpChartExpanded = window.pumpChartExpanded || false;
 let pumpEditingDateISO = (typeof window !== "undefined" && window.pumpEditingDateISO != null) ? window.pumpEditingDateISO : null;
 
+/* PRB baseline model: pure helpers; loading never migrates scalar evidence. */
+function pumpValidBaselineDate(value){
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(value + "T00:00:00.000Z");
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0,10) === value;
+}
+function pumpLegacyBaseline(pump){
+  if (typeof pump?.baselineRPM !== "number" || !Number.isFinite(pump.baselineRPM) || pump.baselineRPM <= 0 || !pumpValidBaselineDate(pump.baselineDateISO)) return null;
+  return { id:`pump_baseline_legacy_${pump.baselineDateISO}_${pump.baselineRPM}`, effectiveDateISO:pump.baselineDateISO,
+    rpm:pump.baselineRPM, rebuildRef:null, createdAtISO:null, createdBy:null, corrections:[], legacy:true };
+}
+function pumpBaselineRecords(pump = window.pumpEff){
+  if (pump?.baselineHistory !== undefined && !Array.isArray(pump.baselineHistory)) return [];
+  if (Array.isArray(pump?.baselineHistory) && pump.baselineHistory.length) return pump.baselineHistory.slice();
+  const legacy = pumpLegacyBaseline(pump);
+  return legacy ? [legacy] : [];
+}
+function resolvePumpBaselineForDate(measurementDateISO, pump = window.pumpEff){
+  if (!pumpValidBaselineDate(measurementDateISO)) return null;
+  const records = pumpBaselineRecords(pump).filter(record => pumpValidBaselineDate(record?.effectiveDateISO)
+    && typeof record.rpm === "number" && Number.isFinite(record.rpm) && record.rpm > 0
+    && record.effectiveDateISO <= measurementDateISO);
+  records.sort((a,b)=>b.effectiveDateISO.localeCompare(a.effectiveDateISO));
+  if (!records.length || records.filter(record=>record.effectiveDateISO === records[0].effectiveDateISO).length !== 1) return null;
+  return records[0];
+}
+function preparePumpBaselineChange(pump, action, metadata){
+  if (!pump || typeof pump !== "object" || Array.isArray(pump)) throw Error("Pump history is unavailable; reload before editing.");
+  if (pump.baselineHistory !== undefined && !Array.isArray(pump.baselineHistory)) throw Error("Baseline history needs recovery review.");
+  if (typeof action?.rpm !== "number" || !Number.isFinite(action.rpm) || action.rpm <= 0 || !pumpValidBaselineDate(action.effectiveDateISO)) throw Error("Enter a positive finite RPM and a valid effective date.");
+  const next = JSON.parse(JSON.stringify(pump));
+  next.baselineHistory = pumpBaselineRecords(next).map(record=>JSON.parse(JSON.stringify(record)));
+  const ids = new Set(), dates = new Set();
+  for (const record of next.baselineHistory){
+    if (typeof record.id !== "string" || !record.id.trim() || ids.has(record.id) || !pumpValidBaselineDate(record.effectiveDateISO)
+      || dates.has(record.effectiveDateISO) || typeof record.rpm !== "number" || !Number.isFinite(record.rpm) || record.rpm <= 0 || !Array.isArray(record.corrections)) throw Error("Baseline history is ambiguous or invalid; recovery review is required.");
+    ids.add(record.id); dates.add(record.effectiveDateISO);
+  }
+  const record = action.kind === "edit" ? next.baselineHistory.find(row=>row.id === action.id) : null;
+  if (!["create","edit"].includes(action.kind) || (action.kind === "edit" && !record)) throw Error("The selected baseline no longer exists. Reload and review.");
+  if (next.baselineHistory.some(row=>row !== record && row.effectiveDateISO === action.effectiveDateISO)) throw Error("A baseline already exists for this date. Edit that record instead.");
+  if (record){
+    if (record.rpm === action.rpm && record.effectiveDateISO === action.effectiveDateISO) return null;
+    if (!String(action.reason || "").trim()) throw Error("Enter a reason for the baseline correction.");
+    record.corrections.push({ id:metadata.correctionId, recordedAtISO:metadata.atISO, recordedBy:metadata.actor,
+      reason:String(action.reason).trim(), before:{rpm:record.rpm,effectiveDateISO:record.effectiveDateISO},
+      after:{rpm:action.rpm,effectiveDateISO:action.effectiveDateISO} });
+    record.rpm = action.rpm; record.effectiveDateISO = action.effectiveDateISO;
+  } else {
+    if (ids.has(metadata.id)) throw Error("Baseline identity collision; review and try again.");
+    next.baselineHistory.push({id:metadata.id,effectiveDateISO:action.effectiveDateISO,rpm:action.rpm,rebuildRef:null,
+      createdAtISO:metadata.atISO,createdBy:metadata.actor,corrections:[]});
+  }
+  next.baselineHistory.sort((a,b)=>a.effectiveDateISO.localeCompare(b.effectiveDateISO));
+  return next;
+}
+Object.assign(window,{resolvePumpBaselineForDate,preparePumpBaselineChange});
+/* End PRB baseline model. */
+let pumpBaselineEditingId = null;
+
 const PUMP_BASE_FONT_SCALE = 1.72;
 const PUMP_DEFAULT_MEASUREMENT_TIME = "12:00";
 const pumpViewportState = { bound:false, lastResponsiveScale:1 };
@@ -550,9 +610,10 @@ function upsertPumpEntry(dateISO, rpm, timeValue){
   return true;
 }
 function pumpLatest(){ return pumpEff.entries.length ? pumpEff.entries[pumpEff.entries.length-1] : null; }
-function pumpPercentChange(latestRPM){
-  if (!pumpEff.baselineRPM || !isFinite(latestRPM)) return null;
-  return ((latestRPM - pumpEff.baselineRPM) / pumpEff.baselineRPM) * 100;
+function pumpPercentChange(latestRPM, measurementDateISO){
+  const baseline = resolvePumpBaselineForDate(measurementDateISO);
+  if (!baseline || !Number.isFinite(Number(latestRPM))) return null;
+  return ((Number(latestRPM) - baseline.rpm) / baseline.rpm) * 100;
 }
 const PUMP_DELTA_CLASS_COLORS = {
   "green": "#2e7d32",
@@ -866,9 +927,16 @@ function pumpRoundedRectPath(ctx, x, y, width, height, radius){
 function viewPumpLogWidget(){
   pumpEnsureEntriesArray();
   const latest = pumpLatest();
-  const pct    = latest ? pumpPercentChange(latest.rpm) : null;
+  const pct    = latest ? pumpPercentChange(latest.rpm, latest.dateISO) : null;
   const col    = pumpColorFor(pct);
-  const baselineVal = pumpEff.baselineRPM ?? "";
+  const savedRecords = pumpBaselineRecords();
+  const records = savedRecords.filter(record=>record && typeof record.id === "string" && pumpValidBaselineDate(record.effectiveDateISO)
+    && typeof record.rpm === "number" && Number.isFinite(record.rpm) && record.rpm > 0 && Array.isArray(record.corrections))
+    .sort((a,b)=>a.effectiveDateISO.localeCompare(b.effectiveDateISO));
+  const editing = records.find(record=>record.id === pumpBaselineEditingId);
+  const baselineVal = editing?.rpm ?? "";
+  const applicable = resolvePumpBaselineForDate(latest?.dateISO || new Date().toLocaleDateString("en-CA"));
+  const busy = !!window.__pumpBaselineMutationPending;
   const todayISO    = new Date().toISOString().slice(0,10);
   const nowTime     = pumpFormatTimeForInput(new Date());
   const logDateValue = todayISO;
@@ -887,11 +955,24 @@ function viewPumpLogWidget(){
     <div class="pump-log-panel">
       <div class="pump-log-section">
         <h4>Baseline @ 49 ksi</h4>
-        <form id="pumpBaselineForm" class="mini-form">
-          <input type="number" id="pumpBaselineRPM" min="1" step="1" placeholder="RPM" value="${baselineVal}">
-          <button type="submit">Set baseline (today)</button>
+        <form id="pumpBaselineForm" class="mini-form" aria-busy="${busy}">
+          <label>RPM <input type="number" id="pumpBaselineRPM" min="1" step="any" placeholder="RPM" value="${pumpEscapeTooltipValue(baselineVal)}" required ${busy ? "disabled" : ""}></label>
+          <label>Effective / rebuild date <input type="date" id="pumpBaselineDate" value="${pumpEscapeTooltipValue(editing?.effectiveDateISO || todayISO)}" required ${busy ? "disabled" : ""}></label>
+          ${editing ? `<label>Correction reason <input id="pumpBaselineReason" maxlength="500" required ${busy ? "disabled" : ""}></label>` : ""}
+          <button type="submit" ${busy ? "disabled" : ""}>${busy ? "Verifying save…" : editing ? "Save baseline correction" : "Add baseline"}</button>
+          ${editing ? `<button type="button" id="pumpBaselineCancel" ${busy ? "disabled" : ""}>Cancel edit</button>` : ""}
         </form>
         <div class="small muted">Lower RPM = better. Baseline is recorded after a major/minor rebuild.</div>
+        ${records.length !== savedRecords.length || (pumpEff.baselineHistory !== undefined && !Array.isArray(pumpEff.baselineHistory)) ? `<p class="small muted">Some saved baseline evidence is invalid and needs recovery review. It has been preserved.</p>` : ""}
+        ${pumpEff.baselineRPM && !pumpValidBaselineDate(pumpEff.baselineDateISO) ? `<p class="small muted">Legacy baseline: ${pumpEscapeTooltipValue(pumpEff.baselineRPM)} RPM. Effective date unknown; excluded from dated calculations.</p>` : ""}
+        <details><summary>Baseline history (${records.length})</summary>
+          <table><thead><tr><th>Effective date</th><th>RPM</th><th>Action / corrections</th></tr></thead><tbody>
+          ${records.map(record=>`<tr><td>${pumpEscapeTooltipValue(record.effectiveDateISO)}</td><td>${pumpEscapeTooltipValue(record.rpm)}</td><td>
+            <button type="button" data-pump-baseline-edit="${pumpEscapeTooltipValue(record.id)}" ${busy ? "disabled" : ""}>Edit baseline</button>
+            ${record.corrections?.length ? `<details><summary>${record.corrections.length} correction(s)</summary>${record.corrections.map(correction=>`<p class="small">${pumpEscapeTooltipValue(correction.recordedAtISO)}: ${pumpEscapeTooltipValue(correction.before.rpm)} RPM (${pumpEscapeTooltipValue(correction.before.effectiveDateISO)}) → ${pumpEscapeTooltipValue(correction.after.rpm)} RPM (${pumpEscapeTooltipValue(correction.after.effectiveDateISO)}). ${pumpEscapeTooltipValue(correction.reason)}</p>`).join("")}</details>` : ""}
+          </td></tr>`).join("") || `<tr><td colspan="3">No dated baselines recorded.</td></tr>`}
+          </tbody></table>
+        </details>
       </div>
       <div class="pump-log-section">
         <h4>Daily log</h4>
@@ -914,7 +995,7 @@ function viewPumpLogWidget(){
         </div>
       </div>
       <div class="pump-stats">
-        <div><span class="lbl">Baseline:</span> <span>${pumpEff.baselineRPM ? `${pumpEff.baselineRPM} RPM (${pumpEff.baselineDateISO || "—"})` : "—"}</span></div>
+        <div><span class="lbl">Baseline${latest ? " for latest log" : ""}:</span> <span>${applicable ? `${applicable.rpm} RPM (${applicable.effectiveDateISO})` : "Unavailable for this date"}</span></div>
         <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
       </div>
     </div>
@@ -963,14 +1044,24 @@ function renderPumpWidget(){
   if (chartHost) chartHost.innerHTML = viewPumpChartWidget();
   pumpEnsureNotesArray();
   if (!logHost && !chartHost) return;
-  document.getElementById("pumpBaselineForm")?.addEventListener("submit",(e)=>{
+  document.getElementById("pumpBaselineForm")?.addEventListener("submit",async (e)=>{
     e.preventDefault();
     const rpm = Number(document.getElementById("pumpBaselineRPM").value);
-    if (!isFinite(rpm) || rpm <= 0) { toast("Enter a valid RPM."); return; }
-    pumpEff.baselineRPM     = rpm;
-    pumpEff.baselineDateISO = new Date().toISOString().slice(0,10);
-    saveCloudDebounced(); toast("Baseline set"); renderPumpWidget();
+    const effectiveDateISO = document.getElementById("pumpBaselineDate").value;
+    if (!Number.isFinite(rpm) || rpm <= 0 || !pumpValidBaselineDate(effectiveDateISO)){ toast("Enter a valid date and positive RPM."); return; }
+    const action = {kind:pumpBaselineEditingId ? "edit" : "create",id:pumpBaselineEditingId,rpm,effectiveDateISO,
+      reason:document.getElementById("pumpBaselineReason")?.value || ""};
+    const pending = window.savePumpBaseline(action);
+    renderPumpWidget();
+    const result = await pending;
+    if (result.saved){ pumpBaselineEditingId = null; toast(action.kind === "edit" ? "Baseline correction verified and saved" : "Baseline verified and saved"); }
+    else toast(result.error || "Baseline was not saved.");
+    renderPumpWidget();
   });
+  document.getElementById("pumpBaselineCancel")?.addEventListener("click",()=>{pumpBaselineEditingId=null;renderPumpWidget();});
+  logHost?.querySelectorAll("[data-pump-baseline-edit]").forEach(button=>button.addEventListener("click",()=>{
+    pumpBaselineEditingId=button.getAttribute("data-pump-baseline-edit");renderPumpWidget();
+  }));
   document.getElementById("pumpLogForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const d   = document.getElementById("pumpLogDate").value;
@@ -1889,7 +1980,8 @@ function drawPumpChart(canvas, rangeValue){
     yMax += adjust;
     yMin -= adjust;
   }
-  const baselineRPM = pumpEff.baselineRPM;
+  const chartBaseline = resolvePumpBaselineForDate(data[data.length - 1]?.dateISO);
+  const baselineRPM = chartBaseline?.rpm ?? null;
   const baselineArrow = baselineRPM != null ? (baselineRPM > yMax ? "↑" : baselineRPM < yMin ? "↓" : "") : "";
   const latestDate = dates[dates.length - 1];
   const axisEndDate = new Date(latestDate.getTime());
@@ -2046,6 +2138,10 @@ function drawPumpChart(canvas, rangeValue){
 
     data.forEach(entry => {
       const noteForEntry = pumpFindNote(entry.dateISO, range);
+      const entryBaseline = resolvePumpBaselineForDate(entry.dateISO);
+      const pct = pumpPercentChange(entry.rpm, entry.dateISO);
+      ctx.fillStyle = PUMP_DELTA_CLASS_COLORS[pumpColorFor(pct).cls] || "#6b7280";
+      ctx.strokeStyle = ctx.fillStyle;
       const d = new Date(entry.dateISO+"T00:00:00");
     const x = X(d.getTime());
     const y = Y(entry.rpm);
@@ -2066,7 +2162,6 @@ function drawPumpChart(canvas, rangeValue){
 
       const idxAll = indexByDate.get(entry.dateISO);
       const prevEntry = (idxAll != null && idxAll > 0) ? dataAll[idxAll - 1] : null;
-      const pct = pumpPercentChange(entry.rpm);
       const timeISO = pumpGetEntryTimeISO(entry);
       const timeLabel = pumpFormatTimeLabel(timeISO);
       const tooltipDate = pumpFormatDateWithTimeLabel(entry.dateISO, timeISO);
@@ -2089,9 +2184,9 @@ function drawPumpChart(canvas, rangeValue){
       }
       if (pct != null){
         const pctSign = pct >= 0 ? "+" : "";
-        detailParts.push(`Δ vs baseline: ${pctSign}${pct.toFixed(1)}% (Baseline ${Number(baselineRPM).toLocaleString(undefined, { maximumFractionDigits: 0 })} RPM)`);
-      }else if (baselineRPM == null){
-        detailParts.push("Set a baseline to track % change.");
+        detailParts.push(`Δ vs baseline: ${pctSign}${pct.toFixed(1)}% (Baseline ${Number(entryBaseline.rpm).toLocaleString(undefined, { maximumFractionDigits: 0 })} RPM, effective ${entryBaseline.effectiveDateISO})`);
+      }else{
+        detailParts.push("No applicable dated baseline for this measurement.");
     }
     if (prevEntry && isFinite(prevEntry.rpm)){
       const delta = Number(entry.rpm) - Number(prevEntry.rpm);
@@ -2205,7 +2300,7 @@ function drawPumpChart(canvas, rangeValue){
     const arrow = baselineArrow ? ` ${baselineArrow}` : "";
     ctx.font = fontPx(11);
     const labelOffset = baselineY <= margin.top + scaled(6) ? scaled(6) : -scaled(4);
-    ctx.fillText(`Baseline ${baselineRPM} RPM${arrow}`, axisX0 + scaled(2), baselineY + labelOffset);
+    ctx.fillText(`Latest log baseline ${baselineRPM} RPM${arrow}`, axisX0 + scaled(2), baselineY + labelOffset);
   }
 
   if (summary && pointCoords.length){
@@ -2368,7 +2463,7 @@ function drawPumpChart(canvas, rangeValue){
   ctx.textAlign = "left";
 
   const latest = data[data.length - 1];
-  const pct = pumpPercentChange(latest?.rpm);
+  const pct = pumpPercentChange(latest?.rpm, latest?.dateISO);
   const deltaClass = pumpColorFor(pct).cls;
   const deltaColor = PUMP_DELTA_CLASS_COLORS[deltaClass] || "#1f3a60";
   const latestTimeISO = latest ? pumpGetEntryTimeISO(latest) : "";

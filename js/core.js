@@ -104,6 +104,7 @@ function canWriteCloud(reason = "cloud save"){
   if (typeof window === "undefined") return false;
   if (isRecoveryMode()) return blockCloudSave(`${reason}; Recovery Mode is read-only, cloud saves disabled.`);
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
+  if (window.__pumpBaselineMutationPending && reason !== "pump baseline commit") return blockCloudSave(`${reason}; a pump baseline is being verified.`);
   if (!window.__cloudLoadAttemptComplete || !window.__initialAdoptComplete){
     return blockCloudSave(`${reason}; cloud load/adoption is not complete.`);
   }
@@ -2215,8 +2216,12 @@ function detectDangerousProtectedFieldReduction(remoteState, pendingState){
   const legacyIssues = compareProtectedFieldSummaries(remoteSummary, pendingSummary);
   const registryReduction = detectDangerousIntegrityReduction(remoteSummary.integrity, pendingSummary.integrity, { allowUnknownBaseline: true });
   const issues = legacyIssues.concat(registryReduction.reasons || []);
+  if (remoteState?.pumpEff?.baselineHistory !== undefined || pendingState?.pumpEff?.baselineHistory !== undefined){
+    const retention = validatePumpBaselineRetention(remoteState?.pumpEff, pendingState?.pumpEff);
+    if (!retention.valid) issues.push({type:"pump_baseline_retention",message:retention.error});
+  }
   return {
-    blocked: legacyIssues.length > 0 || registryReduction.blocked,
+    blocked: issues.length > 0 || registryReduction.blocked,
     issues,
     legacyIssues,
     registryReduction,
@@ -2733,7 +2738,7 @@ function startWorkspaceStateListener(){
     if (!snap || !snap.exists){ enterMissingStateRecovery(); return; }
     if (isRecoveryMode()) return;
     // The isolated material writer owns adoption until SERVER verification.
-    if (window.inventoryMaterialMutationApi?.isBusy()) return;
+    if (window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending) return;
     if (snap.metadata && snap.metadata.hasPendingWrites) return;
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
@@ -4584,7 +4589,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
   const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
     &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
-  if (!identityAuthorized && !canWriteCloud("authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
+  if (!identityAuthorized && !canWriteCloud(options.pumpBaselineMutation ? "pump baseline commit" : "authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
   const deletionProof = options.cuttingJobDeletionProof;
   if (deletionProof){
     if (!cuttingJobDeletionProofs.has(deletionProof) || cuttingJobDeletionTransactions.has(deletionProof)) return cuttingJobDeletionFailure("Cutting-job deletion transaction authorization is invalid or already used.");
@@ -4608,7 +4613,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
     clientId:getCloudSyncClientId(), scan:scanAuthoritativeCutFileContent,
     prepare:(pending, remote)=>{
       if (options.validateSourceState && options.validateSourceState(JSON.parse(JSON.stringify(remote))) !== true){
-        throw Object.assign(new Error("Material mutation source or local evidence changed."), { definite:true, code:"mutation_source_changed" });
+        throw Object.assign(new Error("Mutation source or local evidence changed."), { definite:true, code:"mutation_source_changed" });
       }
       if(identityAuthorized){
         if(stableStringify(remote)!==identityProof.sourceKey||stableStringify(pending)!==identityProof.pendingKey)throw Object.assign(new Error("Inventory repair source or exact authorized changes no longer match."),{definite:true,code:"inventory_repair_conflict"});
@@ -4627,6 +4632,10 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       const safetyBackup = cuttingJobDeletionSafetyBaseline(proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup, pending, deletionProof);
       const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:buildWindowProtectedStateForCoverage(), coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
       if (preflight.blocked || detectDangerousProtectedFieldReduction(safetyRemote, pending).blocked) throw Object.assign(new Error("Protected-state transaction preflight blocked the write."), { definite:true, code:"protected_preflight_blocked" });
+      if (remote.pumpEff?.baselineHistory !== undefined || pending.pumpEff?.baselineHistory !== undefined){
+        const retention=validatePumpBaselineRetention(remote.pumpEff,pending.pumpEff);
+        if (!retention.valid) throw Object.assign(new Error(retention.error),{definite:true,code:"pump_baseline_retention"});
+      }
       if (!deletionProof && !historyRestoreProof){
         // An exact isolated mutation must not normalize unrelated evidence.
         // Only fields proven identical to this transaction's remote snapshot
@@ -6662,10 +6671,9 @@ function adoptState(doc, options = {}){
   if (!Array.isArray(pe.notes)) pe.notes = [];
 
   if (data.pumpEff && typeof data.pumpEff === "object"){
-    pe.baselineRPM     = (data.pumpEff.baselineRPM ?? pe.baselineRPM);
-    pe.baselineDateISO = (data.pumpEff.baselineDateISO ?? pe.baselineDateISO);
-    pe.entries         = Array.isArray(data.pumpEff.entries) ? data.pumpEff.entries.slice() : pe.entries;
-    pe.notes           = Array.isArray(data.pumpEff.notes) ? data.pumpEff.notes.slice() : pe.notes;
+    // Adopt the complete authoritative pump object, including null scalars,
+    // baseline audit evidence and unknown future-compatible fields.
+    window.pumpEff = cloneStructured(data.pumpEff);
   }
 
   ensureTaskCategories();
@@ -6850,6 +6858,7 @@ function cloudSaveNoWriteFailure(errorCode, error){
 }
 
 async function performCloudSave(saveOptions = {}){
+  if (window.__pumpBaselineMutationPending) return cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump baseline is being verified; other edits remain pending.");
   if (window.__inventoryMaterialMutationPending) return cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending.");
   let authoritativeStateWriteAttempted = false;
   let authoritativeStateWriteCompleted = false;
@@ -7307,15 +7316,80 @@ function mergeDailyCutHoursForSave(localList, remoteList){
   return Array.isArray(merged) ? merged : [];
 }
 
+/* PRB nested retention: no removed records, rewritten evidence or unaudited corrections. */
+function validatePumpBaselineRetention(beforePump, afterPump){
+  const fail = error=>({valid:false,error});
+  if ((beforePump?.baselineHistory !== undefined && !Array.isArray(beforePump.baselineHistory))
+    || (afterPump?.baselineHistory !== undefined && !Array.isArray(afterPump.baselineHistory))) return fail("Pump baseline history must remain an array.");
+  const before = beforePump?.baselineHistory ?? [], after = afterPump?.baselineHistory ?? [];
+  if (!Array.isArray(before) || !Array.isArray(after)) return fail("Pump baseline history must remain an array.");
+  const dateValid = value=>typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(value+"T00:00:00.000Z")) && new Date(value+"T00:00:00.000Z").toISOString().slice(0,10) === value;
+  const pairValid = value=>value && typeof value.rpm === "number" && Number.isFinite(value.rpm) && value.rpm > 0 && dateValid(value.effectiveDateISO);
+  const equal = (a,b)=>stableStringifyForIntegrity(a) === stableStringifyForIntegrity(b);
+  const ids = new Set(), dates = new Set(), correctionIds = new Set();
+  if (new Set(before.map(record=>record?.id)).size !== before.length) return fail("Existing pump baseline identity is ambiguous; recovery review is required.");
+  for (const record of after){
+    if (!pairValid(record) || typeof record.id !== "string" || !record.id.trim() || ids.has(record.id) || dates.has(record.effectiveDateISO)
+      || !Array.isArray(record.corrections)) return fail("Pump baseline identity, effective date or correction history is invalid/ambiguous.");
+    ids.add(record.id); dates.add(record.effectiveDateISO);
+    for (const correction of record.corrections){
+      if (!correction || typeof correction.id !== "string" || !correction.id.trim() || correctionIds.has(correction.id)
+        || !pairValid(correction.before) || !pairValid(correction.after) || !String(correction.reason || "").trim()
+        || !Number.isFinite(Date.parse(correction.recordedAtISO))) return fail("Pump baseline correction evidence is invalid.");
+      correctionIds.add(correction.id);
+    }
+    for (let index=1;index<record.corrections.length;index++){
+      if (!equal(record.corrections[index-1].after,record.corrections[index].before)) return fail("Pump baseline correction chain is discontinuous.");
+    }
+    if (record.corrections.length && !equal(record.corrections[record.corrections.length-1].after,{rpm:record.rpm,effectiveDateISO:record.effectiveDateISO}))
+      return fail("Pump baseline value differs from its latest correction evidence.");
+  }
+  for (const previous of before){
+    const current = after.find(record=>record.id === previous.id);
+    if (!current) return fail("An existing pump baseline record would be removed.");
+    const oldCorrections = previous.corrections;
+    if (!Array.isArray(oldCorrections) || current.corrections.length < oldCorrections.length
+      || !oldCorrections.every((correction,index)=>equal(correction,current.corrections[index]))) return fail("Existing pump baseline correction evidence would be removed or rewritten.");
+    for (const field of Object.keys(previous).filter(field=>!["rpm","effectiveDateISO","corrections"].includes(field))){
+      if (!Object.hasOwn(current,field) || !equal(previous[field],current[field])) return fail("Pump baseline identity/context/creation evidence would change.");
+    }
+    let pair = {rpm:previous.rpm,effectiveDateISO:previous.effectiveDateISO};
+    for (const correction of current.corrections.slice(oldCorrections.length)){
+      if (!equal(pair,correction.before)) return fail("Pump baseline correction chain does not match the previous value.");
+      pair = correction.after;
+    }
+    if (!equal(pair,{rpm:current.rpm,effectiveDateISO:current.effectiveDateISO})) return fail("Pump baseline values changed without accountable correction evidence.");
+  }
+  return {valid:true};
+}
+/* End PRB nested retention. */
 function mergePumpEffForSave(localPump, remotePump){
   const local = localPump && typeof localPump === "object" ? localPump : {};
   const remote = remotePump && typeof remotePump === "object" ? remotePump : {};
+  const historyPresent = local.baselineHistory !== undefined || remote.baselineHistory !== undefined;
+  let baselineHistory;
+  if (historyPresent){
+    if ((local.baselineHistory !== undefined && !Array.isArray(local.baselineHistory)) || (remote.baselineHistory !== undefined && !Array.isArray(remote.baselineHistory))) throw Error("Invalid pump baseline history shape.");
+    const byId = new Map((remote.baselineHistory || []).map(record=>[record.id,record]));
+    (local.baselineHistory || []).forEach(record=>byId.set(record.id,record));
+    baselineHistory = Array.from(byId.values()).sort((a,b)=>String(a.effectiveDateISO).localeCompare(String(b.effectiveDateISO)));
+    const retention = validatePumpBaselineRetention(remote,{...local,baselineHistory});
+    if (!retention.valid) throw Error(retention.error);
+  }
+  const evidence = pump=>Object.fromEntries(Object.entries(pump).filter(([field])=>field !== "baselineHistory"));
+  // Baseline-only changes must not round, re-date, reorder or trim measurements
+  // and notes. Preserve the complete unchanged evidence verbatim.
+  if (historyPresent && stableStringifyForIntegrity(evidence(local)) === stableStringifyForIntegrity(evidence(remote)))
+    return {...remote,...local,baselineHistory};
   const merged = {
+    ...remote, ...local,
     baselineRPM: Number.isFinite(Number(local.baselineRPM)) && Number(local.baselineRPM) > 0 ? Number(local.baselineRPM) : (Number.isFinite(Number(remote.baselineRPM)) && Number(remote.baselineRPM) > 0 ? Number(remote.baselineRPM) : null),
     baselineDateISO: normalizeDateISO(local.baselineDateISO || remote.baselineDateISO || null),
     entries: [],
     notes: []
   };
+  if (historyPresent) merged.baselineHistory = baselineHistory;
 
   const entryMap = new Map();
   const ingestEntries = (list, preferLocal=false)=>{
@@ -7374,6 +7448,10 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
+  if (window.__pumpBaselineMutationPending){
+    hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
+    return cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump baseline is being verified; other edits remain pending.");
+  }
   if (window.__inventoryMaterialMutationPending){
     hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
     return cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending.");
@@ -7399,6 +7477,10 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(saveOptions = {}){
+  if (window.__pumpBaselineMutationPending){
+    hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
+    return Promise.resolve(cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump baseline is being verified; other edits remain pending."));
+  }
   if (window.__inventoryMaterialMutationPending){
     hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
     return Promise.resolve(cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending."));
@@ -7441,6 +7523,99 @@ function saveCloudNow(saveOptions = {}){
   }
 }
 
+/* PRB verified baseline action; uses the existing queue, writer and backend reader. */
+async function savePumpBaseline(action){
+  const failure = error=>({saved:false,error:String(error?.message || error)});
+  if (window.__pumpBaselineMutationPending || window.__inventoryMaterialMutationPending
+    || !canWriteCloud("pump baseline commit") || !FB.ready || !FB.user || isVercelPreviewRuntime()) return failure("Baseline editing is unavailable while writes are blocked or another verified action is pending.");
+  window.__pumpBaselineMutationPending = true;
+  const targetDoc=FB.docRef,targetDb=FB.db,targetActor=FB.user.uid;
+  const targetMatches=()=>FB.ready && FB.docRef===targetDoc && FB.db===targetDb && FB.user?.uid===targetActor;
+  let writeStarted = false, acknowledged = false;
+  const evidence = {action:cloneStructured(action)};
+  const key = stableStringifyForIntegrity;
+  const business = state=>Object.fromEntries(Object.entries(state || {}).filter(([field])=>!["syncMeta","saveMeta","syncProcessLog"].includes(field)));
+  const read = async()=>{
+    // Reuse main's independent transaction.get backend lookup. It never queues
+    // a write and cannot reuse Firebase v8's active/cached snapshot view.
+    const envelope = await readInventoryMaterialAuthoritativeState();
+    const state = envelope?.state;
+    if (!targetMatches() || envelope?.path !== targetDoc?.path || !state || typeof state !== "object" || Array.isArray(state) || !state.pumpEff || typeof state.pumpEff !== "object"
+      || !Number.isSafeInteger(envelope.revision) || envelope.revision !== state.syncMeta?.rev) throw Error("Independent authoritative pump read is incomplete or has an invalid revision.");
+    return cloneStructured(state);
+  };
+  const suspend = error=>{
+    const result = {...failure(error),indeterminate:true,verificationCompleted:false,stateWriteAttempted:writeStarted,stateWriteCompleted:acknowledged};
+    window.__autosaveDisabled = true; window.__recoveryInspectMode = true;
+    window.__lastPumpBaselineMutationEvidence = {...evidence,result};
+    window.__lastIndeterminateSave = result;
+    try { renderRecoveryDiagnosticsPanel(); } catch (diagnosticError){ console.warn("Pump verification diagnostics unavailable",diagnosticError); }
+    return result;
+  };
+  try {
+    await cloudSaveQueue;
+    if (hasPendingLocalChanges) throw Error("Other changes are still pending. Wait for their save or reload before editing a baseline.");
+    const source = await read(); evidence.source = source;
+    const sourceKey = key(source), version = lastLocalMutationAt, revision = source.syncMeta.rev;
+    // Ordinary saves intentionally compact syncProcessLog out of their cached
+    // snapshot while Firestore merge writes may retain an older server log.
+    // Exclude only that non-business log from loaded-cache agreement. The CAS
+    // source validator and committed/readback verification still compare it.
+    const loadedEvidence = state=>Object.fromEntries(Object.entries(state || {}).filter(([field])=>field !== "syncProcessLog"));
+    const localMatches = ()=>targetMatches() && !hasPendingLocalChanges && lastLocalMutationAt === version
+      && window.__loadedCloudRevisionForSaveGuard === revision && key(loadedEvidence(window.__lastLoadedCloudState)) === key(loadedEvidence(source))
+      && key(business(getInventoryIdentityRepairLocalState())) === key(business(source));
+    if (!localMatches() || !checkAuthoritativeIdentityIntegrity(source).valid) throw Error("The authoritative pump source or local revision changed. Reload and review before saving.");
+    const intendedPump = window.preparePumpBaselineChange(source.pumpEff,action,{id:genId("pump_baseline"),correctionId:genId("pump_baseline_correction"),
+      atISO:new Date().toISOString(),actor:FB.user.uid || getCloudSyncClientId()});
+    if (!intendedPump) return failure("No baseline values changed.");
+    const intended = {...cloneStructured(source),pumpEff:intendedPump};
+    const frozenIntended = cloneStructured(intended); evidence.intended = frozenIntended;
+    const retention = validatePumpBaselineRetention(source.pumpEff,intendedPump);
+    if (!retention.valid) throw Error(retention.error);
+    if (!checkAuthoritativeIdentityIntegrity(intended).valid) throw Error("Baseline identities require recovery review; no write was attempted.");
+    const expected = key(intended), client = getCloudSyncClientId();
+    const queued = cloudSaveQueue.then(()=>{
+      if (!localMatches()) return cloudSaveNoWriteFailure("pump_source_changed","Local state changed before the pump transaction.");
+      writeStarted = true;
+      return writeAuthoritativeStateSnapshot(intended,{mergeFields:["pumpEff","syncMeta"]},{expectedRevision:revision,pumpBaselineMutation:true,
+        validateSourceState:remote=>key(remote) === sourceKey && localMatches(),
+        validatePreparedState:pending=>key(pending) === expected && localMatches()});
+    });
+    cloudSaveQueue = queued.catch(()=>{});
+    const written = await queued; evidence.writeResult = written;
+    acknowledged = written?.saved === true && written.stateWriteCompleted === true;
+    if (!acknowledged){
+      if (written?.indeterminate || (written?.stateWriteAttempted && !written.definiteFailure)) return suspend(written?.error || "Pump write outcome is uncertain. Reload and verify before retrying.");
+      writeStarted = false;
+      return failure(written?.error || "The guarded baseline save was rejected.");
+    }
+    const committed = written.committedState, sync = committed?.syncMeta;
+    const retainedSync = meta=>Object.fromEntries(Object.entries(meta || {}).filter(([field])=>!["rev","updatedAtISO","updatedBy"].includes(field)));
+    if (!committed || !Number.isSafeInteger(sync?.rev) || sync.rev <= revision || sync.updatedBy !== client
+      || typeof sync.updatedAtISO !== "string" || !Number.isFinite(Date.parse(sync.updatedAtISO))
+      || key(retainedSync(sync)) !== key(retainedSync(source.syncMeta))
+      || key(committed) !== key({...frozenIntended,syncMeta:sync})) return suspend("Pump writer acknowledgement differs from the intended protected state.");
+    const verified = await read(); evidence.readback = verified;
+    if (verified.syncMeta.rev !== sync.rev || key(verified) !== key(committed) || !checkAuthoritativeIdentityIntegrity(verified).valid)
+      return suspend("Authoritative pump verification failed: baseline, revision or unrelated data differs. Do not retry before recovery review.");
+    if (!localMatches() || !canWriteCloud("pump baseline commit")) return suspend("Local evidence changed during pump verification; confirmed server evidence was preserved for recovery review.");
+    const adopted = adoptIdentityCheckedAuthoritativeState(verified);
+    if (!adopted?.loaded || adopted.recovery) return suspend("Verified pump state could not pass authoritative adoption checks.");
+    persistLocalStateBackup(verified);
+    return {saved:true,verificationCompleted:true,stateWriteAttempted:true,stateWriteCompleted:true,revision:verified.syncMeta.rev};
+  } catch (error){
+    return writeStarted || acknowledged ? suspend(error) : failure(error);
+  } finally {
+    window.__pumpBaselineMutationPending = false;
+  }
+}
+window.savePumpBaseline = savePumpBaseline;
+window.addEventListener?.("beforeunload",event=>{
+  if (!window.__pumpBaselineMutationPending) return;
+  event.preventDefault(); event.returnValue = "";
+});
+/* End PRB verified baseline action. */
 async function persistMaintenanceV2CollectionsNow(){
   if (typeof saveCloudNow !== "function") return { saved:false, error:"Authoritative cloud save helper is unavailable." };
   return await saveCloudNow();

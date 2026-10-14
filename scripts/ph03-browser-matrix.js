@@ -4,19 +4,65 @@ const {chromium}=require(process.env.OMAX_PLAYWRIGHT_PATH||"playwright");
 const output=path.resolve(__dirname,"../artifacts/ph03");fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,".gitignore"),"*\n");
 const url="http://localhost:8000/?devsafe=1";
 async function main(){
+  const prbOnly=process.env.OMAX_PRB_ONLY==="1";
   const browser=await chromium.launch({channel:"msedge",headless:true}),context=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true});
   const errors=[],expectedErrors=[],requests=[],checks=[],overflows=[],controls=[];let expectedFailure=false;
   function observe(page){page.on("pageerror",error=>errors.push(String(error)));page.on("console",message=>{if(message.type()==="error")(expectedFailure?expectedErrors:errors).push(message.text());});page.on("request",request=>requests.push(request.url()));page.on("dialog",dialog=>dialog.accept(dialog.type()==="prompt"?"PH03 UI Folder":undefined));}
   await context.route(/https?:\/\/[^/]*(googleapis\.com|firebasestorage\.app|firebaseio\.com|graph\.microsoft\.com|api\.onedrive\.com)/,route=>{errors.push("Forbidden business request: "+route.request().url());return route.abort();});
   const page=await context.newPage();page.setDefaultTimeout(8000);observe(page);
-  const check=async(name,fn)=>{try{await fn();checks.push({name,passed:true});console.log("PASS",name);}catch(error){checks.push({name,passed:false,error:String(error?.stack||error)});console.error("FAIL",name,error.message);}};
+  const check=async(name,fn)=>{if(prbOnly&&!name.startsWith("PRB ")&&!name.startsWith("No unexpected"))return;try{await fn();checks.push({name,passed:true});console.log("PASS",name);}catch(error){checks.push({name,passed:false,error:String(error?.stack||error)});console.error("FAIL",name,error.message);}};
   const navigate=async hash=>{await page.evaluate(hash=>{location.hash=hash;route();},hash);await page.waitForTimeout(80);};
   const save=async()=>{const result=await page.evaluate(()=>saveCloudNow());if(!result?.saved)console.log("SAVE DIAGNOSTIC",await page.evaluate(()=>({blocked:window.__lastCloudSaveBlock,recovery:window.__recoveryInspectMode,disabled:window.__autosaveDisabled,identity:window.__inventoryIdentityIssues,missing:window.__missingAuthoritativeState,indeterminate:window.__lastIndeterminateSave,uid:FB.user?.uid})));assert.equal(result?.saved,true,JSON.stringify(result));return result;};
   const load=async()=>{await page.goto(url,{waitUntil:"load"});await page.waitForFunction(()=>window.OMAXDevSafe?.active&&window.__initialAdoptComplete);};
   await load();
+  if(prbOnly){
+    // Provision a complete disposable snapshot before testing this feature.
+    // The older broad harness's bootstrap omits optional runtime collections;
+    // keep that unrelated fixture issue out of the PRB browser scenario.
+    await page.evaluate(async()=>{for(let pass=0;pass<2;pass++){await FB.docRef.set(snapshotState({skipLocalFileCacheSync:true}));await loadFromCloud();route();}});
+    await page.waitForTimeout(2200);await save();await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete&&!hasPendingLocalChanges);
+  }
   await check("Disposable bootstrap and initial atomic save",async()=>{assert.equal(await page.evaluate(()=>DEVSAFE_MODE&&OMAXDevSafe.active&&FB.ready),true);await save();});
   await check("Dashboard hours UI create/save/rerender",async()=>{await page.locator("#totalInput").fill("100");await page.locator("#logBtn").click();await save();assert.equal(await page.evaluate(()=>totalHistory.length),1);await navigate("#/inventory");await navigate("#/");assert.equal(await page.evaluate(()=>totalHistory[0].hours),100);});
   await check("Pump RPM UI create/edit and merge",async()=>{await page.locator("#pumpLogDate").fill("2026-09-30");await page.locator("#pumpLogRPM").fill("3500");await page.getByRole("button",{name:"Add / Update",exact:true}).click();await save();await page.locator("#pumpLogRPM").fill("3450");await page.getByRole("button",{name:"Add / Update",exact:true}).click();await save();assert.equal(await page.evaluate(()=>pumpEff.entries.find(entry=>entry.dateISO==="2026-09-30").rpm),3450);});
+  await check("PRB baseline UI create/edit/independent verification/reload and historical chart",async()=>{
+    await page.evaluate(()=>{window.__prbResults=[];const original=window.savePumpBaseline;window.savePumpBaseline=async action=>{const result=await original(action);window.__prbResults.push(result);return result;};});
+    const before=await page.evaluate(()=>structuredClone(window.__lastLoadedCloudState));
+    for(const [date,rpm]of [["2026-06-01","3480"],["2026-09-20","3515"]]){
+      await page.locator("#pumpBaselineRPM").fill(rpm);await page.locator("#pumpBaselineDate").fill(date);
+      await page.locator('#pumpBaselineForm button[type="submit"]').click();
+      try{await page.waitForFunction(date=>!window.__pumpBaselineMutationPending&&window.pumpEff.baselineHistory?.some(row=>row.effectiveDateISO===date),date);}
+      catch(error){throw Error(JSON.stringify(await page.evaluate(()=>({results:window.__prbResults,recovery:window.__recoveryReason,blocked:window.__lastCloudSaveBlock,pending:hasPendingLocalChanges,loadedRevision:window.__loadedCloudRevisionForSaveGuard,
+        difference:window.CuttingJobImporter.firstDifferencePath(window.__lastLoadedCloudState,getInventoryIdentityRepairLocalState())})))+" "+error.message);}
+    }
+    const created=await page.evaluate(()=>structuredClone(window.__lastLoadedCloudState));
+    for(const key of Object.keys(before).filter(key=>!["pumpEff","syncMeta"].includes(key)))assert.deepEqual(created[key],before[key],key);
+    for(const key of Object.keys(before.pumpEff))assert.deepEqual(created.pumpEff[key],before.pumpEff[key],key);
+    const id=created.pumpEff.baselineHistory[0].id;
+    assert.equal(await page.evaluate(()=>resolvePumpBaselineForDate("2026-07-15").rpm),3480);
+    await page.locator("#pumpLogDate").fill("2026-07-15");await page.locator("#pumpLogRPM").fill("3600");
+    await page.getByRole("button",{name:"Add / Update",exact:true}).click();await save();
+    assert.match(await page.evaluate(()=>document.getElementById("pumpChart").__pumpChartTargets.find(row=>row.dateISO==="2026-07-15").detailLines.join(" ")),/Baseline 3,480 RPM/);
+    await page.getByText("Baseline history (2)",{exact:true}).click();
+    await page.locator(`[data-pump-baseline-edit="${id}"]`).click();await page.locator("#pumpBaselineRPM").fill("3490");
+    await page.locator("#pumpBaselineDate").fill("2026-06-02");await page.locator("#pumpBaselineReason").fill("Disposable correction verification");
+    await page.locator('#pumpBaselineForm button[type="submit"]').click();
+    try{await page.waitForFunction(id=>!window.__pumpBaselineMutationPending&&pumpEff.baselineHistory.find(row=>row.id===id)?.corrections.length===1,id);}
+    catch(error){throw Error(JSON.stringify(await page.evaluate(async()=>{const source=(await FB.db.runTransaction(tx=>tx.get(FB.docRef))).data(),business=state=>Object.fromEntries(Object.entries(state).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));return {results:window.__prbResults,recovery:window.__recoveryReason,pending:hasPendingLocalChanges,
+      loadedDifference:window.CuttingJobImporter.firstDifferencePath(source,window.__lastLoadedCloudState),businessDifference:window.CuttingJobImporter.firstDifferencePath(business(source),business(getInventoryIdentityRepairLocalState()))};}))+" "+error.message);}
+    await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete);
+    const record=await page.evaluate(id=>pumpEff.baselineHistory.find(row=>row.id===id),id);
+    assert.equal(record.rpm,3490);assert.equal(record.effectiveDateISO,"2026-06-02");assert.equal(record.corrections[0].before.rpm,3480);
+    assert.equal(await page.evaluate(()=>resolvePumpBaselineForDate("2026-07-15").rpm),3490);
+    assert.match(await page.evaluate(()=>document.getElementById("pumpChart").__pumpChartTargets.find(row=>row.dateISO==="2026-07-15").detailLines.join(" ")),/Baseline 3,490 RPM/);
+    assert.equal(await page.evaluate(()=>isRecoveryMode()),false);
+    await page.getByText("Baseline history (2)",{exact:true}).click();
+    await page.screenshot({path:path.join(output,"prb-baseline-history.png"),fullPage:true});
+    const fresh=await browser.newContext({storageState:await context.storageState({indexedDB:true})}),tab=await fresh.newPage();observe(tab);
+    await tab.goto(url,{waitUntil:"load"});await tab.waitForFunction(()=>window.__initialAdoptComplete);
+    assert.equal(await tab.evaluate(id=>pumpEff.baselineHistory.find(row=>row.id===id)?.rpm,id),3490);
+    assert.equal(await tab.evaluate(()=>resolvePumpBaselineForDate("2026-07-15").effectiveDateISO),"2026-06-02");await fresh.close();
+  });
   await check("Create/edit/save fixtures across protected areas",async()=>{
     await page.evaluate(()=>{
       tasksInterval.push({...tasksInterval[0],id:"ph03_task",name:"PH03 Task Edited",manualHistory:[],completedDates:[],interval:40});
