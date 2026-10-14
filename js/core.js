@@ -423,6 +423,54 @@ function getPredictionHoursSummary(){
   };
 }
 
+function resolveEffectiveDailyCutHours(dailyList, totalList, startKey, endKey){
+  const daily = normalizeDailyCutHours(dailyList);
+  const totalsByDate = new Map();
+  (Array.isArray(totalList) ? totalList : []).forEach(entry => {
+    const key = normalizeDateISO(entry?.dateISO);
+    const hours = Number(entry?.hours);
+    if (key && Number.isFinite(hours) && hours >= 0) totalsByDate.set(key, hours);
+  });
+  const totals = Array.from(totalsByDate).sort(([a], [b])=> a.localeCompare(b));
+  const currentDeltas = new Map();
+  let previousTotal = null;
+  totals.forEach(([key, hours])=>{
+    if (previousTotal != null) currentDeltas.set(key, Math.max(0, hours - previousTotal));
+    previousTotal = hours;
+  });
+  const effective = new Map();
+  if (totals.length >= 2){
+    let runningTotal = null;
+    // Keep the existing compatibility boundary: a reading on the window's
+    // first date is the baseline, not usage carried in from before the window.
+    for (const [key, hours] of totals){
+      if (key > startKey) break;
+      runningTotal = hours;
+    }
+    for (const [key, hours] of totals){
+      if (key < startKey) continue;
+      if (key > endKey) break;
+      if (runningTotal != null) effective.set(key, Math.max(0, hours - runningTotal));
+      runningTotal = hours;
+    }
+  }
+  daily.forEach(entry => {
+    const key = entry.dateISO;
+    if (key < startKey || key > endKey) return;
+    if (entry.source === "manual" || !currentDeltas.has(key)){
+      effective.set(key, entry.hours);
+    } else {
+      // A saved automatic entry is another representation of this delta.
+      // Recompute it, retaining daily-entry clamping; legacy totals without a
+      // daily representation retain the existing unclamped compatibility delta.
+      // Daily entries on the window's first date remain eligible, unlike the
+      // totals-only boundary baseline, when a preceding reading is available.
+      effective.set(key, clampDailyCutHours(currentDeltas.get(key)));
+    }
+  });
+  return effective;
+}
+
 function getAverageDailyCutHours(windowDaysOverride = null){
   const today = new Date();
   today.setHours(0,0,0,0);
@@ -446,66 +494,17 @@ function getAverageDailyCutHours(windowDaysOverride = null){
   const endKey = ymd(today);
   const excludeWeekends = shouldExcludeWeekends();
 
-  const dailyMap = new Map();
-  const dailyList = Array.isArray(window.dailyCutHours) ? window.dailyCutHours : [];
-  dailyList.forEach(entry => {
-    const key = normalizeDateISO(entry?.dateISO);
-    if (!key || key < startKey || key > endKey) return;
-    dailyMap.set(key, clampDailyCutHours(entry.hours));
-  });
-
+  const dailyMap = resolveEffectiveDailyCutHours(window.dailyCutHours, window.totalHistory, startKey, endKey);
   let eligibleDays = 0;
-  if (dailyMap.size){
-    let totalHours = 0;
-    const cursor = new Date(start);
-    while (cursor <= today){
-      const day = cursor.getDay();
-      const key = ymd(cursor);
-      const include = !excludeWeekends || (day !== 0 && day !== 6);
-      if (include){
-        eligibleDays += 1;
-        totalHours += (dailyMap.get(key) || 0);
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    if (!eligibleDays) return null;
-    const dailyRate = totalHours / eligibleDays;
-    return Number.isFinite(dailyRate) && dailyRate > 0 ? dailyRate : null;
-  }
-
-  const totals = (Array.isArray(window.totalHistory) ? window.totalHistory : [])
-    .filter(entry => entry && entry.dateISO && Number.isFinite(Number(entry.hours)))
-    .slice()
-    .sort((a,b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
-  if (totals.length < 2) return null;
-  const totalsByDate = new Map();
-  totals.forEach(entry => {
-    const key = normalizeDateISO(entry.dateISO);
-    if (key) totalsByDate.set(key, Number(entry.hours));
-  });
-
-  let runningTotal = null;
-  for (const item of totals){
-    const key = normalizeDateISO(item?.dateISO);
-    if (!key || key > startKey) break;
-    runningTotal = Number(item.hours);
-  }
-
   let totalHours = 0;
   const cursor = new Date(start);
   while (cursor <= today){
     const day = cursor.getDay();
     const key = ymd(cursor);
     const include = !excludeWeekends || (day !== 0 && day !== 6);
-    if (include) eligibleDays += 1;
-    if (totalsByDate.has(key)){
-      const nextTotal = Number(totalsByDate.get(key));
-      if (runningTotal == null){
-        runningTotal = nextTotal;
-      } else {
-        if (include) totalHours += Math.max(0, nextTotal - Number(runningTotal));
-        runningTotal = nextTotal;
-      }
+    if (include){
+      eligibleDays += 1;
+      totalHours += (dailyMap.get(key) || 0);
     }
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -2733,6 +2732,8 @@ function startWorkspaceStateListener(){
   workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
     if (!snap || !snap.exists){ enterMissingStateRecovery(); return; }
     if (isRecoveryMode()) return;
+    // The isolated material writer owns adoption until SERVER verification.
+    if (window.inventoryMaterialMutationApi?.isBusy()) return;
     if (snap.metadata && snap.metadata.hasPendingWrites) return;
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
@@ -4577,11 +4578,18 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   if (typeof writer !== "function" || !window.CuttingFileContentFirewall){
     return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
   }
+  const expectedRevision = options.expectedRevision ?? Number(window.__loadedCloudRevisionForSaveGuard || 0);
+  const loadedState = window.__lastLoadedCloudState;
+  const totalHistoryBaseline = loadedState?.syncMeta?.rev === expectedRevision && Array.isArray(loadedState.totalHistory)
+    ? loadedState.totalHistory.map(entry => ({ ...entry })) : null;
   const result = await writer({ db:target?.db||FB.db, docRef:target?.docRef||FB.docRef, state, setOptions,
-    expectedRevision:options.expectedRevision ?? Number(window.__loadedCloudRevisionForSaveGuard || 0),
+    expectedRevision,
     clientId:getCloudSyncClientId(), scan:scanAuthoritativeCutFileContent,
     prepare:(pending, remote)=>{
       if(target&&!cuttingJobSaveTargetIsCurrent(target))throw Object.assign(Error("Cutting-job workspace/backend changed during the transaction."),{definite:true,code:"chronology_target_changed"});
+      if (options.validateSourceState && options.validateSourceState(JSON.parse(JSON.stringify(remote))) !== true){
+        throw Object.assign(new Error("Material mutation source or local evidence changed."), { definite:true, code:"mutation_source_changed" });
+      }
       if(identityAuthorized){
         if(stableStringify(remote)!==identityProof.sourceKey||stableStringify(pending)!==identityProof.pendingKey)throw Object.assign(new Error("Inventory repair source or exact authorized changes no longer match."),{definite:true,code:"inventory_repair_conflict"});
         if(estimatePayloadBytes(pending)>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
@@ -4621,20 +4629,25 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:completionSafetyBaseline(buildWindowProtectedStateForCoverage()), coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
       if (preflight.blocked || detectDangerousProtectedFieldReduction(safetyRemote, pending).blocked) throw Object.assign(new Error("Protected-state transaction preflight blocked the write."), { definite:true, code:"protected_preflight_blocked" });
       if (!deletionProof && !historyRestoreProof){
-        pending.totalHistory = mergeTotalHistoryForSave(pending.totalHistory, remote.totalHistory);
-        pending.dailyCutHours = mergeDailyCutHoursForSave(pending.dailyCutHours, remote.dailyCutHours);
-        pending.pumpEff = mergePumpEffForSave(pending.pumpEff, remote.pumpEff);
+        // An exact isolated mutation must not normalize unrelated evidence.
+        // Only fields proven identical to this transaction's remote snapshot
+        // are retained verbatim; differences still use the existing merges.
+        const mergeUnlessIdentical=(field,merge,baseline)=>options.validateSourceState && options.validatePreparedState
+          && stableStringifyForIntegrity(pending[field])===stableStringifyForIntegrity(remote[field])
+          ? pending[field] : merge(pending[field],remote[field],baseline);
+        pending.totalHistory = mergeUnlessIdentical("totalHistory",mergeTotalHistoryForSave,totalHistoryBaseline);
+        pending.dailyCutHours = mergeUnlessIdentical("dailyCutHours",mergeDailyCutHoursForSave);
+        pending.pumpEff = mergeUnlessIdentical("pumpEff",mergePumpEffForSave);
       }
       if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
-      // Additional chronology restriction, after all existing protected merges.
-      // It cannot bypass CAS, identity, content, size or protected-state gates.
+      // Additional restriction after all existing protected merges. Validation
+      // receives an isolated copy and cannot alter the guarded save or bypass
+      // CAS, identity, content, size or protected-state gates.
       if (options.validatePreparedState){
-        // The atomic writer has already made this a JSON snapshot. Validation
-        // may inspect or mutate its own copy, but cannot alter the guarded save.
         try {
-          if (options.validatePreparedState(JSON.parse(JSON.stringify(pending))) !== true) throw new Error("Prepared chronology state changed; review again.");
+          if (options.validatePreparedState(JSON.parse(JSON.stringify(pending))) !== true) throw Error(options.validateSourceState ? "Prepared mutation changed; review again." : "Prepared chronology state changed; review again.");
         } catch (error){
-          throw Object.assign(new Error(String(error?.message || "Prepared chronology validation failed.")), { definite:true, code:"chronology_state_changed" });
+          throw Object.assign(new Error(String(error?.message || error)), { definite:true, code:options.validateSourceState ? "mutation_state_changed" : "chronology_state_changed" });
         }
       }
       return pending;
@@ -4750,6 +4763,72 @@ function getInventoryIdentityRepairLocalState(){
   Object.keys(bindings).forEach(name=>{if(Object.prototype.hasOwnProperty.call(source,name))live[name]=bindings[name];});
   return live;
 }
+
+// Firebase v8 document.get({source:"server"}) uses a SnapshotListener and can
+// reuse an active view that has not observed a just-committed transaction yet.
+// Transaction.get performs a backend lookup independent of that view. This
+// transaction is read-only: never queue set/update/delete during verification.
+async function readInventoryMaterialAuthoritativeState(){
+  const db = FB.db, docRef = FB.docRef;
+  if (!FB.ready || !docRef || typeof db?.runTransaction !== "function")
+    throw Error("A backend transaction read is unavailable; material verification cannot use a cached view.");
+  return db.runTransaction(async transaction=>{
+    const snapshot = await transaction.get(docRef);
+    const state = snapshot?.exists ? (typeof snapshot.data === "function" ? snapshot.data() : snapshot.data) : null;
+    return {revision:state?.syncMeta?.rev ?? null, state, path:docRef.path, readSource:"backend_transaction"};
+  });
+}
+
+let inventoryMaterialOwnedSuspension = null;
+const inventoryMaterialMutationApi = window.OMAXInventoryMaterialMutations?.createApi({
+  canWrite:()=>canWriteCloud("Material Inventory") && FB.ready && Boolean(FB.user) && !isVercelPreviewRuntime() && !window.__lastIndeterminateSave,
+  settle:async()=>{
+    await cloudSaveQueue;
+    // Do not initiate a normalizing whole-app save from a material action.
+    if (hasPendingLocalChanges) throw Error("Other changes are still pending. Wait for their save, or reload/review before editing materials.");
+  },
+  lock:value=>{window.__inventoryMaterialMutationPending=value;},
+  localState:getInventoryIdentityRepairLocalState,
+  localVersion:()=>({revision:window.__loadedCloudRevisionForSaveGuard, mutation:lastLocalMutationAt}),
+  loadedRevision:()=>window.__loadedCloudRevisionForSaveGuard,
+  baselineMatches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)
+    && window.OMAXInventoryMaterialMutations.key(window.OMAXInventoryMaterialMutations.business(source))===window.OMAXInventoryMaterialMutations.key(window.OMAXInventoryMaterialMutations.business(getInventoryIdentityRepairLocalState())),
+  readAuthoritativeState:readInventoryMaterialAuthoritativeState,
+  clientId:getCloudSyncClientId,
+  validate:state=>window.OMAXGlobalIdentityRepair?.integrity(state).valid===true && !scanAuthoritativeCutFileContent(state).contaminated,
+  writeState:(next,expectedRevision,validateSourceState,validatePreparedState)=>{
+    const queued=cloudSaveQueue.then(async()=>{
+      // Replace the complete owned map (including an undone newly added type),
+      // while leaving every unrelated top-level field physically untouched.
+      const result=await writeAuthoritativeStateSnapshot(next,{mergeFields:["inventoryMaterials","syncMeta"]},{expectedRevision,validateSourceState,validatePreparedState});
+      inventoryMaterialOwnedSuspension=result.indeterminate ? window.__lastIndeterminateSave : null;
+      return result;
+    });
+    cloudSaveQueue=queued.catch(()=>{});
+    return queued;
+  },
+  adoptVerifiedState:(cloud,{uncertain})=>{
+    if (uncertain && window.__lastIndeterminateSave){
+      if (!inventoryMaterialOwnedSuspension || window.__lastIndeterminateSave!==inventoryMaterialOwnedSuspension) return false;
+      // Clear only this write's uncertainty after exact server proof. The
+      // central adoption gate still checks every other recovery blocker.
+      window.__lastIndeterminateSave=null;
+    }
+    inventoryMaterialOwnedSuspension=null;
+    return adoptIdentityCheckedAuthoritativeState(cloud)?.recovery===false;
+  },
+  suspend:result=>{
+    window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
+    window.__lastInventoryMaterialMutationEvidence=result;
+    window.__lastIndeterminateSave=result;
+    try { renderRecoveryDiagnosticsPanel(); } catch (error){ console.warn("Material verification diagnostics failed",error); }
+  }
+});
+window.inventoryMaterialMutationApi=inventoryMaterialMutationApi;
+window.addEventListener?.("beforeunload",event=>{
+  if (!inventoryMaterialMutationApi?.isBusy()) return;
+  event.preventDefault();event.returnValue="";
+});
 const inventoryIdentityRepairApi=window.OMAXInventoryIdentityRepair?.createApi({
   localState:getInventoryIdentityRepairLocalState,
   loadedRevision:()=>window.__loadedCloudRevisionForSaveGuard,
@@ -6862,6 +6941,7 @@ function cloudSaveNoWriteFailure(errorCode, error){
 }
 
 async function performCloudSave(saveOptions = {}){
+  if (window.__inventoryMaterialMutationPending) return cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending.");
   let authoritativeStateWriteAttempted = false;
   let authoritativeStateWriteCompleted = false;
   const explicitTrace = (typeof window !== "undefined" && window.__activeExplicitMaintenanceAddSaveTrace && typeof window.__activeExplicitMaintenanceAddSaveTrace === "object")
@@ -7079,7 +7159,9 @@ async function performCloudSave(saveOptions = {}){
         return cloudSaveNoWriteFailure("protected_reduction_blocked", "Protected field reduction was blocked.");
       }
       if (!deletionProof && !historyRestoreProof){
-        snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory);
+        const totalHistoryBaseline = window.__lastLoadedCloudState?.syncMeta?.rev === expectedRevision
+          ? window.__lastLoadedCloudState.totalHistory : null;
+        snap.totalHistory = mergeTotalHistoryForSave(snap.totalHistory, remoteData.totalHistory, totalHistoryBaseline);
         snap.dailyCutHours = mergeDailyCutHoursForSave(snap.dailyCutHours, remoteData.dailyCutHours);
         snap.pumpEff = mergePumpEffForSave(snap.pumpEff, remoteData.pumpEff);
       }
@@ -7274,16 +7356,35 @@ function getAreaSignature(areaKey, areaValue){
   return stableStringify(areaValue);
 }
 
-function mergeTotalHistoryForSave(localList, remoteList){
+function mergeTotalHistoryForSave(localList, remoteList, baselineList = null){
   const map = new Map();
+  const uniqueReadings = (list)=>{
+    const readings = new Map();
+    (Array.isArray(list) ? list : []).forEach(entry => {
+      const key = normalizeDateISO(entry?.dateISO);
+      const hours = Number(entry?.hours);
+      if (!key || !Number.isFinite(hours) || hours < 0) return;
+      readings.set(key, readings.has(key) ? null : entry);
+    });
+    return readings;
+  };
+  const baseline = uniqueReadings(baselineList);
+  const local = uniqueReadings(localList);
+  const remote = uniqueReadings(remoteList);
   const ingest = (list)=>{
     (Array.isArray(list) ? list : []).forEach((entry)=>{
       const key = normalizeDateISO(entry?.dateISO);
       const hours = Number(entry?.hours);
       if (!key || !Number.isFinite(hours) || hours < 0) return;
       const prev = map.get(key);
-      if (!prev || hours >= prev.hours){
-        map.set(key, { ...entry, dateISO: key, hours });
+      // Only a unique local edit of the revision-matched loaded reading may
+      // lower a saved value. Unknown baselines keep the prior max safeguard.
+      const prior = baseline.get(key);
+      const current = remote.get(key);
+      const corrected = list === localList && local.get(key) === entry && prior && current
+        && Number(prior.hours) === Number(current.hours) && hours !== Number(prior.hours);
+      if (!prev || hours >= prev.hours || corrected){
+        map.set(key, { ...prev, ...entry, dateISO: key, hours });
       }
     });
   };
@@ -7364,6 +7465,10 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
+  if (window.__inventoryMaterialMutationPending){
+    hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
+    return cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending.");
+  }
   if (!canWriteCloud("saveCloudDebounced")) return cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked.");
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
@@ -7385,6 +7490,10 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(saveOptions = {}){
+  if (window.__inventoryMaterialMutationPending){
+    hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
+    return Promise.resolve(cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending."));
+  }
   if (!canWriteCloud("saveCloudNow")) return Promise.resolve(cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked."));
   if (isVercelPreviewRuntime()){
     const host = (typeof window !== "undefined" && window.location) ? String(window.location.hostname || "") : "";
@@ -7865,10 +7974,17 @@ function isEditableTarget(el){
 }
 
 window.addEventListener("keydown", (e)=>{
+  if (e.defaultPrevented) return;
   if (!(e.ctrlKey || e.metaKey)) return;
   const key = (e.key || "").toLowerCase();
   if (key !== "z" && key !== "y") return;
   if (isEditableTarget(e.target)) return;
+
+  if (["#/inventory","#inventory"].includes(String(location.hash || "").split("?")[0]) && window.inventorySection==="material"){
+    e.preventDefault();
+    if (key==="z" && !e.shiftKey && !e.altKey) void window.__runInventoryMaterialAction?.({kind:"undo"});
+    return;
+  }
 
   if (key === "z" && !e.shiftKey){
     e.preventDefault();
