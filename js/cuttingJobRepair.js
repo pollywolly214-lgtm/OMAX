@@ -13,6 +13,8 @@
   const fingerprints=(state,folders,baseline)=>({jobFolders:fingerprint(folders||[]),cuttingJobs:fingerprint(state?.cuttingJobs||[]),completedCuttingJobs:fingerprint(state?.completedCuttingJobs||[]),authoritativeBaseline:fingerprint(baseline),protectedBusinessCollections:fingerprint(Object.fromEntries(PROTECTED_KEYS.map(name=>[name,state?.[name]])))});
 
   function plan(state,folders){
+    const gate=history.planDirectResequence(state?.cuttingJobs,state?.completedCuttingJobs);
+    if(history.isResequenceBlocked(gate))return{...gate,ok:false};
     const nextFolders=clone(folders||[]),created=[],renamed=[],reused=[];
     if(!nextFolders.some(folder=>String(folder?.id)===history.ROOT_ID))nextFolders.unshift({id:history.ROOT_ID,name:"All Jobs",parent:null,order:1});
     for(const[project,name]of history.PROJECT_CATEGORIES){
@@ -25,13 +27,14 @@
     const nextActive=clone(state?.cuttingJobs||[]),nextCompleted=clone(state?.completedCuttingJobs||[]),assignments=[];
     for(const job of [...nextActive,...nextCompleted]){const resolution=history.resolveProjectCategory(job.projectNumber,nextFolders,undefined,[...nextActive,...nextCompleted]);if(resolution.status!=="matched")return{ok:false,error:resolution.reason};const from=job.cat??null,to=String(resolution.folder.id);job.cat=to;assignments.push({id:String(job.id),projectNumber:String(job.projectNumber),from,to});}
     const resequence=history.resequence(nextActive,nextCompleted);
+    if(history.isResequenceBlocked(resequence))return{...resequence,ok:false};
     return{ok:true,nextFolders,nextActive,nextCompleted,created,renamed,reused,assignments,resequence};
   }
 
   function audit(state,folders,{baseline}={}){
     const before=fingerprints(state,folders,baseline),snapshot=stateSnapshot(state),folderSnapshot=clone(folders||[]),baselineSnapshot=clone(baseline);
     const proposed=plan(snapshot,folderSnapshot),historyAudit=history.audit(snapshot,folderSnapshot),after=fingerprints(state,folders,baseline);
-    return{...historyAudit,readOnly:true,stateMutationDetected:!same(before,after),saveAttempted:false,FirestoreWriteAttempted:false,localStorageWriteAttempted:false,fingerprints:{before,after,proposedBaseline:fingerprint(baselineSnapshot)},repairPlan:proposed.ok?{created:proposed.created,renamed:proposed.renamed,reused:proposed.reused,folders:proposed.nextFolders,assignments:proposed.assignments,cutNumbers:proposed.resequence.sequence,resequence:proposed.resequence}:null,blockingError:proposed.ok?"":proposed.error};
+    return{...historyAudit,readOnly:true,stateMutationDetected:!same(before,after),saveAttempted:false,FirestoreWriteAttempted:false,localStorageWriteAttempted:false,fingerprints:{before,after,proposedBaseline:fingerprint(baselineSnapshot)},repairPlan:proposed.ok?{created:proposed.created,renamed:proposed.renamed,reused:proposed.reused,folders:proposed.nextFolders,assignments:proposed.assignments,cutNumbers:proposed.resequence.sequence,resequence:proposed.resequence}:null,blocked:!proposed.ok,requiresReview:proposed.requiresReview===true,requiresCoordinator:proposed.requiresCoordinator===true,blockingError:proposed.ok?"":proposed.error};
   }
 
   function createReadOnlyAuditRunner(env){return()=>audit(env.state(),env.categories(),{baseline:env.baseline?.()});}
@@ -40,12 +43,12 @@
     const result={backupCreated:false,saveAttempted:false,saveCompleted:false,saveIndeterminate:false,rollbackAttempted:false,rollbackVerified:false,error:"",auditBefore:null,createdCategoryIds:[],renamedCategories:[],assignments:[],resequence:null};
     if(!confirmed){result.error="Explicit repair confirmation required.";return result;}
     const runAudit=createReadOnlyAuditRunner(env);result.auditBefore=runAudit();
-    if(result.auditBefore.blockingError||result.auditBefore.stateMutationDetected){result.error=result.auditBefore.blockingError||"Read-only audit fingerprint mismatch.";return result;}
+    if(result.auditBefore.blockingError||result.auditBefore.stateMutationDetected){Object.assign(result,{blocked:true,requiresReview:result.auditBefore.requiresReview===true,requiresCoordinator:result.auditBefore.requiresCoordinator===true,error:result.auditBefore.blockingError||"Read-only audit fingerprint mismatch."});return result;}
     if(await env.revalidateBaseline()!==true){result.error="Latest authoritative cloud baseline revalidation failed.";return result;}
     const state=env.state(),before={active:clone(state.cuttingJobs||[]),completed:clone(state.completedCuttingJobs||[]),folders:clone(env.categories())};
     try{
       await env.backup();result.backupCreated=true;
-      const proposed=plan(state,env.categories());if(!proposed.ok)throw new Error(`Post-backup plan revalidation failed: ${proposed.error}`);
+      const proposed=plan(state,env.categories());if(!proposed.ok){Object.assign(result,{blocked:true,requiresReview:proposed.requiresReview===true,requiresCoordinator:proposed.requiresCoordinator===true,error:proposed.error});return result;}
       env.setCategories(proposed.nextFolders);state.cuttingJobs=proposed.nextActive;state.completedCuttingJobs=proposed.nextCompleted;
       result.createdCategoryIds=proposed.created;result.renamedCategories=proposed.renamed;result.assignments=proposed.assignments;result.resequence=proposed.resequence;result.saveAttempted=true;
       const saved=await env.saveCloudNow();result.saveCompleted=saved?.saved===true&&saved?.stateWriteCompleted===true;result.saveIndeterminate=!result.saveCompleted&&(saved?.indeterminate===true||(saved?.stateWriteAttempted===true&&saved?.stateWriteCompleted!==true));

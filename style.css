@@ -6516,3 +6516,11 @@ button.job-cloud-preview-button { display: block; width: min(100%, 340px); margi
 
 .deleted-container { min-width:0; overflow-x:auto; }
 .past-jobs-category, .past-jobs-category-control { min-width:0; max-width:100%; flex-wrap:wrap; }
+/* Reviewed chronology uses the existing modal/button vocabulary. */
+.cut-chronology-dialog { width: min(680px, 92vw); max-height: 88vh; overflow: auto; border: 1px solid #d5dbe3; border-radius: 12px; padding: 24px; }
+.cut-chronology-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.cut-chronology-dialog label { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.cut-chronology-dialog input, .cut-chronology-dialog select { max-width: 100%; padding: 8px; }
+.cut-chronology-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.cut-chronology-dialog [data-cjo-preview] { border-top: 1px solid #d5dbe3; padding-top: 12px; }
+.cut-chronology-dialog [role="alert"] { color: #a12622; }
