@@ -58,6 +58,31 @@
       }
     }
     const list=name=>byNamespace.get(name)||[],lookup=(name,id)=>list(name).filter(record=>record.id===id);
+    // Trash chronology owns a historical self-reference, not a live-job
+    // foreign key. Do not add archives to the general jobs namespace.
+    const archivedJobs=(Array.isArray(state.deletedItems)?state.deletedItems:[])
+      .map((entry,index)=>({entry,index})).filter(({entry})=>["job","completed-job"].includes(entry?.type));
+    const archivedChronologyOwners=new Map();
+    for(const {entry,index}of archivedJobs){
+      const payload=entry.payload;
+      if(!payload||typeof payload!=="object"||!Object.hasOwn(payload,"cutChronologyHistory"))continue;
+      const ownerPath=["deletedItems",index,"payload"],history=payload.cutChronologyHistory;
+      const owner=byPath.get(pathText(ownerPath));
+      const unambiguous=valid(entry.id)&&lookup("deletedItems",entry.id).length===1
+        && !Array.isArray(payload)&&valid(payload.id)&&owner?.id===payload.id
+        && archivedJobs.filter(other=>other.entry.payload?.id===payload.id).length===1
+        && lookup("jobs",payload.id).length===0
+        && typeof entry.deletedAt==="string"&&Number.isFinite(Date.parse(entry.deletedAt))
+        && (entry.meta===undefined||(entry.meta&&typeof entry.meta==="object"&&!Array.isArray(entry.meta)))
+        && (entry.meta?.originalId===undefined||entry.meta.originalId===payload.id);
+      if(!unambiguous)block(`Archived cutting-job chronology at ${pathText(ownerPath)} has no valid unambiguous owning job.`);
+      if(!Array.isArray(history)){block(`Archived cutChronologyHistory at ${pathText(ownerPath)} must be an array.`);continue;}
+      if(unambiguous)archivedChronologyOwners.set(index,owner);
+      history.forEach((entry,historyIndex)=>{
+        if(!entry||typeof entry!=="object"||Array.isArray(entry)||!valid(entry.jobId)||entry.jobId!==payload.id)
+          block(`Archived chronology self-reference ${pathText([...ownerPath,"cutChronologyHistory",historyIndex,"jobId"])} must match its exact owning job ID.`);
+      });
+    }
     const patch=(path,before,after)=>{if(before===after)return;const existing=plan.changes.find(change=>pathText(change.path)===pathText(path));if(existing){if(existing.after!==after)block(`Conflicting identity changes at ${pathText(path)}.`);return;}plan.changes.push({path,fieldPath:pathText(path),before,after});};
     const inv=inventoryRepair.preview({inventory:[],tasksInterval:[],tasksAsReq:[],maintenanceTasksV2:[],...state});plan.inventoryPlan=inv;inv.blockers.forEach(block);
     for(const row of inv.affectedRows){if(!row.proposedInventoryId||!row.legacyTask)continue;patch(["inventory",row.inventoryIndex,"id"],row.oldInventoryId,row.proposedInventoryId);patch([row.legacyTask.collection,row.legacyTask.index,"inventoryId"],row.oldInventoryId,row.proposedInventoryId);byPath.get(`$.inventory[${row.inventoryIndex}]`).proposedId=row.proposedInventoryId;}
@@ -126,6 +151,18 @@
     const supported=new Set(plan.changes.map(change=>change.fieldPath));
     function ref(record,field,name,required=false){
       const value=record.row[field],path=[...record.path,field];
+      if(field==="jobId"&&name==="jobs"&&record.path.length===5
+        &&record.path[0]==="deletedItems"&&Number.isInteger(record.path[1])
+        &&record.path[2]==="payload"&&record.path[3]==="cutChronologyHistory"&&Number.isInteger(record.path[4])){
+        const owner=archivedChronologyOwners.get(record.path[1]);
+        if(!owner||!valid(value)||value!==owner.id){
+          block(`Archived chronology self-reference ${pathText(path)} has no exact unambiguous owning job.`);return;
+        }
+        // Keep the exact reference as evidence. No ID/history rewrite or
+        // repair patch is authorized by this owning-archive resolution.
+        plan.references.push({path:pathText(path),target:pathText(owner.path),value,proposedId:owner.id,resolution:"archived_job_self"});
+        supported.add(pathText(path));return;
+      }
       if(value==null||value===""){if(required)block(`Required ${field} is absent at ${pathText(record.path)}.`);return;}
       let options=lookup(name,value);
       if([taskCollection,instanceCollection,eventCollection].includes(name))options=options.filter(other=>other.logicalTask===record.logicalTask);
