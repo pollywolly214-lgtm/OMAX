@@ -5057,19 +5057,23 @@ function materialSheetTableHTML(model, typeId){
   const sheet = model?.sheets?.[typeId] || { columns:["qty"], rows:[{ thickness:"", values:[""] }] };
   const columns = Array.isArray(sheet.columns) && sheet.columns.length ? sheet.columns : ["qty"];
   const rows = Array.isArray(sheet.rows) && sheet.rows.length ? sheet.rows : [{ thickness:"", values: columns.map(()=>"") }];
+  const requiredRow=row=>{
+    try { return Math.abs((window.OMAXInventoryMaterialMutations?.parseThickness(row.thickness) ?? Number(row.thickness))-0.0625)<1e-6; }
+    catch (_error){ return false; }
+  };
   return `
     <div class="material-sheet-wrap">
       <table class="inventory-table material-grid-table">
         <thead>
           <tr>
-            <th class="material-header material-editable" data-material-editable="1" data-edit-kind="material-name" data-type-id="${esc(typeId)}">${esc(type.name || "Material")}</th>
-            ${columns.map((col, idx)=>`<th class="material-header material-editable" data-material-editable="1" data-edit-kind="column" data-type-id="${esc(typeId)}" data-col-index="${idx}">${esc(col || "")}</th>`).join("")}
-            <th class="material-col-actions material-edit-controls ${window.inventoryMaterialEditMode ? "" : "is-hidden"}"><button type="button" class="small" data-material-col-add="${esc(typeId)}">+C</button></th>
+            <th class="material-header material-editable" data-material-editable="1" data-edit-kind="material-name" data-type-id="${esc(typeId)}" data-material-value="${esc(type.name)}">${esc(type.name || "Material")}</th>
+            ${columns.map((col, idx)=>`<th class="material-header material-editable" data-material-editable="1" data-edit-kind="column" data-type-id="${esc(typeId)}" data-col-index="${idx}" data-material-value="${esc(col)}">${esc(col || "")}</th>`).join("")}
+            <th class="material-col-actions material-edit-controls ${window.inventoryMaterialEditMode ? "" : "is-hidden"}"><button type="button" class="small" data-material-col-add="${esc(typeId)}" ${columns.length>=24 ? 'disabled title="Maximum 24 shared columns"' : ""}>+C</button></th>
           </tr>
           <tr class="material-col-control-row material-edit-controls ${window.inventoryMaterialEditMode ? "" : "is-hidden"}">
             <th>Actions</th>
             ${columns.map((_, idx)=>`<th>
-              <button type="button" class="tiny" data-material-col-add-after="${esc(typeId)}" data-col-index="${idx}" title="Insert column after this">+C</button>
+              <button type="button" class="tiny" data-material-col-add-after="${esc(typeId)}" data-col-index="${idx}" title="${columns.length>=24 ? "Maximum 24 shared columns" : "Insert column after this"}" ${columns.length>=24 ? "disabled" : ""}>+C</button>
               <button type="button" class="tiny danger" data-material-col-delete-index="${esc(typeId)}" data-col-index="${idx}" title="Delete this column">−C</button>
             </th>`).join("")}
             <th></th>
@@ -5078,11 +5082,11 @@ function materialSheetTableHTML(model, typeId){
         <tbody>
           ${rows.map((row, rowIdx)=>`
             <tr>
-              <td class="material-editable" data-material-editable="1" data-edit-kind="thickness" data-type-id="${esc(typeId)}" data-row-index="${rowIdx}">${esc(formatMaterialThicknessDisplay(row.thickness || ""))}</td>
-              ${columns.map((_, colIdx)=>`<td class="material-editable" data-material-editable="1" data-edit-kind="cell" data-type-id="${esc(typeId)}" data-row-index="${rowIdx}" data-col-index="${colIdx}">${esc((row.values && row.values[colIdx]) || "")}</td>`).join("")}
+              <td class="material-editable" data-material-editable="1" data-edit-kind="thickness" data-type-id="${esc(typeId)}" data-row-index="${rowIdx}" data-material-value="${esc(row.thickness)}">${esc(formatMaterialThicknessDisplay(row.thickness || ""))}</td>
+              ${columns.map((_, colIdx)=>`<td class="material-editable" data-material-editable="1" data-edit-kind="cell" data-type-id="${esc(typeId)}" data-row-index="${rowIdx}" data-col-index="${colIdx}" data-material-value="${esc(row.values?.[colIdx] ?? "")}">${esc((row.values && row.values[colIdx]) || "")}</td>`).join("")}
               <td class="material-row-actions material-edit-controls ${window.inventoryMaterialEditMode ? "" : "is-hidden"}">
                 <button type="button" class="tiny" data-material-row-add-after="${esc(typeId)}" data-row-index="${rowIdx}" title="Insert row below">+R</button>
-                <button type="button" class="tiny danger" data-material-row-delete="${esc(typeId)}" data-row-index="${rowIdx}" title="Delete this row">−R</button>
+                <button type="button" class="tiny danger" data-material-row-delete="${esc(typeId)}" data-row-index="${rowIdx}" title="${requiredRow(row) ? "The 1/16 row is required" : "Delete this row"}" ${requiredRow(row) ? "disabled" : ""}>−R</button>
               </td>
             </tr>
           `).join("")}
@@ -5091,7 +5095,7 @@ function materialSheetTableHTML(model, typeId){
       <div class="material-grid-actions material-edit-controls ${window.inventoryMaterialEditMode ? "" : "is-hidden"}">
         <button type="button" class="small" data-material-row-add="${esc(typeId)}">+ Row</button>
       </div>
-      <div class="small muted">Double-click any table cell/header to edit.</div>
+      <div class="small muted">Double-click any table cell/header to edit. The 1/16 row is required. Columns are shared across materials (maximum 24).</div>
     </div>
     <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
       <div class="cost-receipt-backdrop" data-order-repair-close></div>
@@ -5126,6 +5130,7 @@ function viewInventoryMaterial(model){
           </select>
         </label>
       </div>
+      ${window.inventoryMaterialMutationApi?.isBusy() ? `<p role="status">Saving material change — waiting for confirmation…</p>` : ""}
       <div class="material-table-wrap">${body}</div>
     </div>
     <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>

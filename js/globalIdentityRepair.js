@@ -187,7 +187,7 @@
     };referenceWalk(state);
     if(state.inventoryMaterials&&!Array.isArray(state.inventoryMaterials)){
       const types=list("$.inventoryMaterials.types"),model=state.inventoryMaterials;
-      if(model.activeType&&!types.some(record=>record.id===model.activeType))block("Inventory material activeType has no exact type identity.");
+      if(model.activeType&&model.activeType!=="__all"&&!types.some(record=>record.id===model.activeType))block("Inventory material activeType has no exact type identity.");
       for(const field of ["sheets","rows"])for(const id of Object.keys(model[field]||{}))if(!types.some(record=>record.id===id))block(`Inventory material ${field} key ${id} has no exact type identity.`);
     }
     // A supersedes chain must remain a directed, acyclic chain after exact
