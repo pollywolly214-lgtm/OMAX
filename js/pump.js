@@ -47,16 +47,21 @@ function preparePumpBaselineChange(pump, action, metadata){
   const record = action.kind === "edit" ? next.baselineHistory.find(row=>row.id === action.id) : null;
   if (!["create","edit"].includes(action.kind) || (action.kind === "edit" && !record)) throw Error("The selected baseline no longer exists. Reload and review.");
   if (next.baselineHistory.some(row=>row !== record && row.effectiveDateISO === action.effectiveDateISO)) throw Error("A baseline already exists for this date. Edit that record instead.");
+  const hasNote = Object.hasOwn(action,"note");
+  if (hasNote && (typeof action.note !== "string" || action.note.length > 4000)) throw Error("Baseline note must be text of at most 4,000 characters.");
+  const values = row=>({rpm:row.rpm,effectiveDateISO:row.effectiveDateISO,...(Object.hasOwn(row,"note") ? {note:row.note} : {})});
   if (record){
-    if (record.rpm === action.rpm && record.effectiveDateISO === action.effectiveDateISO) return null;
+    if (record.rpm === action.rpm && record.effectiveDateISO === action.effectiveDateISO && (!hasNote || (record.note ?? "") === action.note)) return null;
     if (!String(action.reason || "").trim()) throw Error("Enter a reason for the baseline correction.");
+    const before = values(record);
+    const after = {...before,rpm:action.rpm,effectiveDateISO:action.effectiveDateISO,...(hasNote ? {note:action.note} : {})};
     record.corrections.push({ id:metadata.correctionId, recordedAtISO:metadata.atISO, recordedBy:metadata.actor,
-      reason:String(action.reason).trim(), before:{rpm:record.rpm,effectiveDateISO:record.effectiveDateISO},
-      after:{rpm:action.rpm,effectiveDateISO:action.effectiveDateISO} });
+      reason:String(action.reason).trim(), before, after });
     record.rpm = action.rpm; record.effectiveDateISO = action.effectiveDateISO;
+    if (hasNote) record.note = action.note;
   } else {
     if (ids.has(metadata.id)) throw Error("Baseline identity collision; review and try again.");
-    next.baselineHistory.push({id:metadata.id,effectiveDateISO:action.effectiveDateISO,rpm:action.rpm,rebuildRef:null,
+    next.baselineHistory.push({id:metadata.id,effectiveDateISO:action.effectiveDateISO,rpm:action.rpm,note:hasNote ? action.note : "",rebuildRef:null,
       createdAtISO:metadata.atISO,createdBy:metadata.actor,corrections:[]});
   }
   next.baselineHistory.sort((a,b)=>a.effectiveDateISO.localeCompare(b.effectiveDateISO));
@@ -65,6 +70,9 @@ function preparePumpBaselineChange(pump, action, metadata){
 Object.assign(window,{resolvePumpBaselineForDate,preparePumpBaselineChange});
 /* End PRB baseline model. */
 let pumpBaselineEditingId = null;
+let pumpBaselineModalNode = null;
+let pumpBaselineModalDialog = null;
+let pumpBaselineEscHandler = null;
 
 const PUMP_BASE_FONT_SCALE = 1.72;
 const PUMP_DEFAULT_MEASUREMENT_TIME = "12:00";
@@ -929,12 +937,6 @@ function viewPumpLogWidget(){
   const latest = pumpLatest();
   const pct    = latest ? pumpPercentChange(latest.rpm, latest.dateISO) : null;
   const col    = pumpColorFor(pct);
-  const savedRecords = pumpBaselineRecords();
-  const records = savedRecords.filter(record=>record && typeof record.id === "string" && pumpValidBaselineDate(record.effectiveDateISO)
-    && typeof record.rpm === "number" && Number.isFinite(record.rpm) && record.rpm > 0 && Array.isArray(record.corrections))
-    .sort((a,b)=>a.effectiveDateISO.localeCompare(b.effectiveDateISO));
-  const editing = records.find(record=>record.id === pumpBaselineEditingId);
-  const baselineVal = editing?.rpm ?? "";
   const applicable = resolvePumpBaselineForDate(latest?.dateISO || new Date().toLocaleDateString("en-CA"));
   const busy = !!window.__pumpBaselineMutationPending;
   const todayISO    = new Date().toISOString().slice(0,10);
@@ -950,29 +952,12 @@ function viewPumpLogWidget(){
     ? "Open the table to review past logs and correct any RPMs."
     : "Add a log to enable editing past entries.";
   return `
-  <details class="pump-card" open>
-    <summary><b>Pump Efficiency</b> <span class="chip ${col.cls}">${col.label}</span></summary>
+  <section class="pump-card" aria-labelledby="pumpEfficiencyHeading">
+    <header class="pump-card-header"><h3 id="pumpEfficiencyHeading">Pump Efficiency</h3> <span class="chip ${col.cls}">${col.label}</span></header>
     <div class="pump-log-panel">
       <div class="pump-log-section">
         <h4>Baseline @ 49 ksi</h4>
-        <form id="pumpBaselineForm" class="mini-form" aria-busy="${busy}">
-          <label>RPM <input type="number" id="pumpBaselineRPM" min="1" step="any" placeholder="RPM" value="${pumpEscapeTooltipValue(baselineVal)}" required ${busy ? "disabled" : ""}></label>
-          <label>Effective / rebuild date <input type="date" id="pumpBaselineDate" value="${pumpEscapeTooltipValue(editing?.effectiveDateISO || todayISO)}" required ${busy ? "disabled" : ""}></label>
-          ${editing ? `<label>Correction reason <input id="pumpBaselineReason" maxlength="500" required ${busy ? "disabled" : ""}></label>` : ""}
-          <button type="submit" ${busy ? "disabled" : ""}>${busy ? "Verifying save…" : editing ? "Save baseline correction" : "Add baseline"}</button>
-          ${editing ? `<button type="button" id="pumpBaselineCancel" ${busy ? "disabled" : ""}>Cancel edit</button>` : ""}
-        </form>
-        <div class="small muted">Lower RPM = better. Baseline is recorded after a major/minor rebuild.</div>
-        ${records.length !== savedRecords.length || (pumpEff.baselineHistory !== undefined && !Array.isArray(pumpEff.baselineHistory)) ? `<p class="small muted">Some saved baseline evidence is invalid and needs recovery review. It has been preserved.</p>` : ""}
-        ${pumpEff.baselineRPM && !pumpValidBaselineDate(pumpEff.baselineDateISO) ? `<p class="small muted">Legacy baseline: ${pumpEscapeTooltipValue(pumpEff.baselineRPM)} RPM. Effective date unknown; excluded from dated calculations.</p>` : ""}
-        <details><summary>Baseline history (${records.length})</summary>
-          <table><thead><tr><th>Effective date</th><th>RPM</th><th>Action / corrections</th></tr></thead><tbody>
-          ${records.map(record=>`<tr><td>${pumpEscapeTooltipValue(record.effectiveDateISO)}</td><td>${pumpEscapeTooltipValue(record.rpm)}</td><td>
-            <button type="button" data-pump-baseline-edit="${pumpEscapeTooltipValue(record.id)}" ${busy ? "disabled" : ""}>Edit baseline</button>
-            ${record.corrections?.length ? `<details><summary>${record.corrections.length} correction(s)</summary>${record.corrections.map(correction=>`<p class="small">${pumpEscapeTooltipValue(correction.recordedAtISO)}: ${pumpEscapeTooltipValue(correction.before.rpm)} RPM (${pumpEscapeTooltipValue(correction.before.effectiveDateISO)}) → ${pumpEscapeTooltipValue(correction.after.rpm)} RPM (${pumpEscapeTooltipValue(correction.after.effectiveDateISO)}). ${pumpEscapeTooltipValue(correction.reason)}</p>`).join("")}</details>` : ""}
-          </td></tr>`).join("") || `<tr><td colspan="3">No dated baselines recorded.</td></tr>`}
-          </tbody></table>
-        </details>
+        <button type="button" id="pumpChangeBaselineBtn" aria-haspopup="dialog" ${busy ? "disabled" : ""}>Change Baseline</button>
       </div>
       <div class="pump-log-section">
         <h4>Daily log</h4>
@@ -999,7 +984,125 @@ function viewPumpLogWidget(){
         <div><span class="lbl">Latest:</span> <span>${latestTxt}</span></div>
       </div>
     </div>
-  </details>`;
+  </section>`;
+}
+function viewPumpBaselineModal(){
+  const saved = pumpBaselineRecords();
+  const records = saved.filter(record=>record && typeof record.id === "string" && pumpValidBaselineDate(record.effectiveDateISO)
+    && typeof record.rpm === "number" && Number.isFinite(record.rpm) && record.rpm > 0 && Array.isArray(record.corrections))
+    .sort((a,b)=>b.effectiveDateISO.localeCompare(a.effectiveDateISO));
+  const editing = records.find(record=>record.id === pumpBaselineEditingId);
+  const today = new Date().toLocaleDateString("en-CA");
+  const active = resolvePumpBaselineForDate(today);
+  const esc = pumpEscapeTooltipValue;
+  const values = value=>`${esc(value?.rpm)} RPM (${esc(value?.effectiveDateISO)})${Object.hasOwn(value || {},"note") ? `; note: ${esc(value.note) || "(empty)"}` : ""}`;
+  return `<header class="pump-notes-header">
+    <h3 id="pumpBaselineHeading">Change Baseline</h3>
+    <button type="button" class="pump-notes-close" data-pump-baseline-close aria-label="Close Change Baseline">×</button>
+  </header>
+  <form id="pumpBaselineForm" class="pump-notes-form" aria-labelledby="pumpBaselineFormHeading">
+    <h4 id="pumpBaselineFormHeading">${editing ? "Edit baseline" : "Add new baseline"}</h4>
+    <div class="pump-baseline-fields">
+      <label class="pump-notes-label">Baseline RPM <input type="number" id="pumpBaselineRPM" min="1" step="any" required value="${esc(editing?.rpm ?? "")}"></label>
+      <label class="pump-notes-label">Effective / rebuild date <input type="date" id="pumpBaselineDate" required value="${esc(editing?.effectiveDateISO || today)}"></label>
+    </div>
+    <label class="pump-notes-label" for="pumpBaselineNote">Note / reason</label>
+    <p id="pumpBaselineNoteHelp" class="small muted">Describe why the baseline changed. For example: pump rebuild, nozzle body change, other maintenance, or another change that affected the normal operating RPM.</p>
+    <textarea id="pumpBaselineNote" class="pump-baseline-note" maxlength="4000" rows="3" aria-describedby="pumpBaselineNoteHelp">${esc(editing?.note ?? "")}</textarea>
+    ${editing ? `<label class="pump-notes-label">Correction reason <input id="pumpBaselineReason" maxlength="500" required placeholder="Explain this correction to the saved record"></label>` : ""}
+    <div class="pump-notes-actions modal-actions">
+      <button type="submit" class="primary">${editing ? "Save baseline correction" : "Add baseline"}</button>
+      ${editing ? `<button type="button" class="secondary" id="pumpBaselineCancel">Cancel edit</button>` : ""}
+    </div>
+  </form>
+  <p data-pump-baseline-status role="status" aria-live="polite"></p>
+  <section aria-labelledby="pumpBaselineHistoryHeading">
+    <h4 id="pumpBaselineHistoryHeading">Baseline history (${records.length})</h4>
+    ${records.length !== saved.length || (pumpEff.baselineHistory !== undefined && !Array.isArray(pumpEff.baselineHistory)) ? `<p class="small muted">Some saved baseline evidence is invalid and needs recovery review. It has been preserved.</p>` : ""}
+    ${pumpEff.baselineRPM && !pumpValidBaselineDate(pumpEff.baselineDateISO) ? `<p class="small muted">Legacy baseline: ${esc(pumpEff.baselineRPM)} RPM. Effective date unknown; excluded from dated calculations.</p>` : ""}
+    <div class="pump-baseline-history"><table>
+      <thead><tr><th>Effective date</th><th>Baseline RPM</th><th>Note / reason</th><th>Action / corrections</th></tr></thead>
+      <tbody>${records.map((record,index)=>`<tr data-pump-baseline-row="${esc(record.id)}">
+        <td>${esc(record.effectiveDateISO)}${active?.id === record.id ? `<div class="small muted">Applicable today</div>` : index === 0 ? `<div class="small muted">Newest</div>` : ""}</td>
+        <td>${esc(record.rpm)}</td><td class="pump-baseline-history-note">${esc(record.note ?? "—")}</td>
+        <td><button type="button" class="pump-note-edit-btn" data-pump-baseline-edit="${esc(record.id)}">Edit baseline</button>
+          ${record.corrections.length ? `<details><summary>${record.corrections.length} correction(s)</summary>${record.corrections.map(correction=>`<p class="small pump-baseline-history-note">${esc(correction.recordedAtISO)}: ${values(correction.before)} → ${values(correction.after)}. ${esc(correction.reason)}</p>`).join("")}</details>` : ""}
+        </td></tr>`).join("") || `<tr><td colspan="4">No dated baselines recorded.</td></tr>`}</tbody>
+    </table></div>
+  </section>`;
+}
+function pumpOpenBaselineModal(){
+  if (pumpBaselineModalNode) return;
+  pumpBaselineEditingId = null;
+  const overlay = document.createElement("div");
+  overlay.className = "pump-notes-overlay pump-baseline-overlay";
+  const backdrop = document.createElement("button");
+  backdrop.type = "button"; backdrop.className = "pump-notes-backdrop";
+  backdrop.setAttribute("aria-label","Close Change Baseline backdrop");
+  backdrop.addEventListener("click",pumpCloseBaselineModal);
+  const dialog = document.createElement("div");
+  dialog.className = "pump-notes-dialog pump-baseline-dialog";
+  dialog.setAttribute("role","dialog");dialog.setAttribute("aria-modal","true");
+  dialog.setAttribute("aria-labelledby","pumpBaselineHeading");dialog.setAttribute("tabindex","-1");
+  overlay.appendChild(backdrop);overlay.appendChild(dialog);document.body.appendChild(overlay);
+  pumpBaselineModalNode = overlay; pumpBaselineModalDialog = dialog;
+  document.body.classList.add("pump-baseline-open");
+  pumpBaselineEscHandler = event=>{
+    if (event.key === "Escape"){event.preventDefault();pumpCloseBaselineModal();}
+    if (event.key === "Tab"){
+      const controls=Array.from(dialog.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),summary'));
+      const first=controls[0],last=controls[controls.length-1];
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))){event.preventDefault();last?.focus();}
+      else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))){event.preventDefault();first?.focus();}
+    }
+  };
+  document.addEventListener("keydown",pumpBaselineEscHandler);
+  pumpRenderBaselineModal();
+  requestAnimationFrame(()=>pumpBaselineModalDialog?.querySelector("#pumpBaselineRPM")?.focus({preventScroll:true}));
+}
+function pumpCloseBaselineModal(){
+  if (window.__pumpBaselineMutationPending) return;
+  pumpBaselineModalNode?.remove();pumpBaselineModalNode=null;pumpBaselineModalDialog=null;pumpBaselineEditingId=null;
+  if (pumpBaselineEscHandler) document.removeEventListener("keydown",pumpBaselineEscHandler);
+  pumpBaselineEscHandler=null;document.body.classList.remove("pump-baseline-open");
+  document.getElementById("pumpChangeBaselineBtn")?.focus({preventScroll:true});
+}
+function pumpRenderBaselineModal(){
+  if (!pumpBaselineModalDialog) return;
+  pumpBaselineModalDialog.innerHTML = viewPumpBaselineModal();
+  pumpBaselineModalDialog.querySelector("[data-pump-baseline-close]")?.addEventListener("click",pumpCloseBaselineModal);
+  pumpBaselineModalDialog.querySelector("#pumpBaselineForm")?.addEventListener("submit",pumpSubmitBaselineForm);
+  pumpBaselineModalDialog.querySelector("#pumpBaselineCancel")?.addEventListener("click",()=>{pumpBaselineEditingId=null;pumpRenderBaselineModal();});
+  pumpBaselineModalDialog.querySelectorAll("[data-pump-baseline-edit]").forEach(button=>button.addEventListener("click",()=>{
+    pumpBaselineEditingId=button.getAttribute("data-pump-baseline-edit");pumpRenderBaselineModal();
+    pumpBaselineModalDialog.scrollTop=0;
+    pumpBaselineModalDialog.querySelector("#pumpBaselineRPM")?.focus({preventScroll:true});
+  }));
+}
+async function pumpSubmitBaselineForm(event){
+  event.preventDefault();
+  if (window.__pumpBaselineMutationPending || !pumpBaselineModalDialog) return;
+  const form = pumpBaselineModalDialog.querySelector("#pumpBaselineForm");
+  const rpm = Number(form.querySelector("#pumpBaselineRPM").value);
+  const effectiveDateISO = form.querySelector("#pumpBaselineDate").value;
+  const status = message=>{pumpBaselineModalDialog.querySelector("[data-pump-baseline-status]").textContent=message;};
+  if (!Number.isFinite(rpm) || rpm <= 0 || !pumpValidBaselineDate(effectiveDateISO)){status("Enter a valid date and positive RPM.");return;}
+  const action = {kind:pumpBaselineEditingId ? "edit" : "create",id:pumpBaselineEditingId,rpm,effectiveDateISO,
+    note:form.querySelector("#pumpBaselineNote").value,reason:form.querySelector("#pumpBaselineReason")?.value || ""};
+  const pending = window.savePumpBaseline(action);
+  const controls = Array.from(pumpBaselineModalDialog.querySelectorAll("button,input,textarea"));
+  controls.forEach(control=>control.disabled=true);form.setAttribute("aria-busy","true");status("Verifying baseline save…");
+  let result;
+  try { result=await pending; }
+  catch(error){result={saved:false,error:String(error?.message || error)};}
+  controls.forEach(control=>control.disabled=false);form.setAttribute("aria-busy","false");
+  if (result.saved){
+    pumpBaselineEditingId=null;pumpRenderBaselineModal();
+    const message=action.kind === "edit" ? "Baseline correction verified and saved" : "Baseline verified and saved";
+    status(message);toast(message);
+  }else status(result.error || "Baseline was not saved.");
+  renderPumpWidget();
+  return result;
 }
 function viewPumpChartWidget(){
   const rangeValue  = window.pumpChartRange || "3m";
@@ -1044,24 +1147,7 @@ function renderPumpWidget(){
   if (chartHost) chartHost.innerHTML = viewPumpChartWidget();
   pumpEnsureNotesArray();
   if (!logHost && !chartHost) return;
-  document.getElementById("pumpBaselineForm")?.addEventListener("submit",async (e)=>{
-    e.preventDefault();
-    const rpm = Number(document.getElementById("pumpBaselineRPM").value);
-    const effectiveDateISO = document.getElementById("pumpBaselineDate").value;
-    if (!Number.isFinite(rpm) || rpm <= 0 || !pumpValidBaselineDate(effectiveDateISO)){ toast("Enter a valid date and positive RPM."); return; }
-    const action = {kind:pumpBaselineEditingId ? "edit" : "create",id:pumpBaselineEditingId,rpm,effectiveDateISO,
-      reason:document.getElementById("pumpBaselineReason")?.value || ""};
-    const pending = window.savePumpBaseline(action);
-    renderPumpWidget();
-    const result = await pending;
-    if (result.saved){ pumpBaselineEditingId = null; toast(action.kind === "edit" ? "Baseline correction verified and saved" : "Baseline verified and saved"); }
-    else toast(result.error || "Baseline was not saved.");
-    renderPumpWidget();
-  });
-  document.getElementById("pumpBaselineCancel")?.addEventListener("click",()=>{pumpBaselineEditingId=null;renderPumpWidget();});
-  logHost?.querySelectorAll("[data-pump-baseline-edit]").forEach(button=>button.addEventListener("click",()=>{
-    pumpBaselineEditingId=button.getAttribute("data-pump-baseline-edit");renderPumpWidget();
-  }));
+  document.getElementById("pumpChangeBaselineBtn")?.addEventListener("click",pumpOpenBaselineModal);
   document.getElementById("pumpLogForm")?.addEventListener("submit",(e)=>{
     e.preventDefault();
     const d   = document.getElementById("pumpLogDate").value;

@@ -25,11 +25,22 @@ async function main(){
   await check("Disposable bootstrap and initial atomic save",async()=>{assert.equal(await page.evaluate(()=>DEVSAFE_MODE&&OMAXDevSafe.active&&FB.ready),true);await save();});
   await check("Dashboard hours UI create/save/rerender",async()=>{await page.locator("#totalInput").fill("100");await page.locator("#logBtn").click();await save();assert.equal(await page.evaluate(()=>totalHistory.length),1);await navigate("#/inventory");await navigate("#/");assert.equal(await page.evaluate(()=>totalHistory[0].hours),100);});
   await check("Pump RPM UI create/edit and merge",async()=>{await page.locator("#pumpLogDate").fill("2026-09-30");await page.locator("#pumpLogRPM").fill("3500");await page.getByRole("button",{name:"Add / Update",exact:true}).click();await save();await page.locator("#pumpLogRPM").fill("3450");await page.getByRole("button",{name:"Add / Update",exact:true}).click();await save();assert.equal(await page.evaluate(()=>pumpEff.entries.find(entry=>entry.dateISO==="2026-09-30").rpm),3450);});
-  await check("PRB baseline UI create/edit/independent verification/reload and historical chart",async()=>{
+  await check("PRB widget header never collapses and Change Baseline opens dedicated management popup",async()=>{
+    const widget=page.locator("#pump-log-widget");assert.equal(await widget.locator("#pumpBaselineForm").count(),0);
+    for(let click=0;click<2;click++){await widget.locator("#pumpEfficiencyHeading").click();assert.equal(await widget.locator("#pumpLogForm").isVisible(),true);}
+    assert.equal(await widget.locator("details,summary").count(),0);assert.ok(await page.locator("#totalInput").isVisible());
+    await page.locator("#pumpChangeBaselineBtn").click();const modal=page.getByRole("dialog",{name:"Change Baseline",exact:true});
+    for(const id of ["pumpBaselineRPM","pumpBaselineDate","pumpBaselineNote"])assert.ok(await modal.locator("#"+id).isVisible());
+    assert.ok(await modal.getByText("Baseline history (0)",{exact:true}).isVisible());
+    await modal.getByRole("button",{name:"Close Change Baseline",exact:true}).click();assert.ok(await page.locator("#pumpLogForm").isVisible());
+  });
+  await check("PRB popup create/note/history/edit/verification/reload and historical chart",async()=>{
     await page.evaluate(()=>{window.__prbResults=[];const original=window.savePumpBaseline;window.savePumpBaseline=async action=>{const result=await original(action);window.__prbResults.push(result);return result;};});
     const before=await page.evaluate(()=>structuredClone(window.__lastLoadedCloudState));
+    await page.locator("#pumpChangeBaselineBtn").click();
     for(const [date,rpm]of [["2026-06-01","3480"],["2026-09-20","3515"]]){
       await page.locator("#pumpBaselineRPM").fill(rpm);await page.locator("#pumpBaselineDate").fill(date);
+      await page.locator("#pumpBaselineNote").fill(date==="2026-06-01"?"Pump rebuild\nVerified at 49 ksi":"Nozzle body change");
       await page.locator('#pumpBaselineForm button[type="submit"]').click();
       try{await page.waitForFunction(date=>!window.__pumpBaselineMutationPending&&window.pumpEff.baselineHistory?.some(row=>row.effectiveDateISO===date),date);}
       catch(error){throw Error(JSON.stringify(await page.evaluate(()=>({results:window.__prbResults,recovery:window.__recoveryReason,blocked:window.__lastCloudSaveBlock,pending:hasPendingLocalChanges,loadedRevision:window.__loadedCloudRevisionForSaveGuard,
@@ -39,29 +50,78 @@ async function main(){
     for(const key of Object.keys(before).filter(key=>!["pumpEff","syncMeta"].includes(key)))assert.deepEqual(created[key],before[key],key);
     for(const key of Object.keys(before.pumpEff))assert.deepEqual(created.pumpEff[key],before.pumpEff[key],key);
     const id=created.pumpEff.baselineHistory[0].id;
+    assert.equal(created.pumpEff.baselineHistory[0].note,"Pump rebuild\nVerified at 49 ksi");
+    const rows=page.locator("[data-pump-baseline-row]");assert.equal(await rows.count(),2);
+    assert.equal(await rows.first().getAttribute("data-pump-baseline-row"),created.pumpEff.baselineHistory[1].id);
+    await page.getByRole("button",{name:"Close Change Baseline",exact:true}).click();
+    await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete);
+    await page.locator("#pumpChangeBaselineBtn").click();assert.ok(await page.locator(`[data-pump-baseline-row="${id}"]`).innerText().then(text=>text.includes("Pump rebuild")));
+    assert.equal(await page.evaluate(id=>pumpEff.baselineHistory.find(row=>row.id===id).note,id),"Pump rebuild\nVerified at 49 ksi");
+    // Duplicate creation remains a rejected action and keeps the operator's draft.
+    await page.locator("#pumpBaselineRPM").fill("3520");await page.locator("#pumpBaselineDate").fill("2026-09-20");await page.locator("#pumpBaselineNote").fill("Duplicate draft");
+    await page.locator('#pumpBaselineForm button[type="submit"]').click();
+    await page.getByText("A baseline already exists for this date. Edit that record instead.",{exact:true}).waitFor();
+    assert.equal(await page.locator("#pumpBaselineNote").inputValue(),"Duplicate draft");assert.equal(await rows.count(),2);
+    await page.getByRole("button",{name:"Close Change Baseline",exact:true}).click();
     assert.equal(await page.evaluate(()=>resolvePumpBaselineForDate("2026-07-15").rpm),3480);
     await page.locator("#pumpLogDate").fill("2026-07-15");await page.locator("#pumpLogRPM").fill("3600");
     await page.getByRole("button",{name:"Add / Update",exact:true}).click();await save();
     assert.match(await page.evaluate(()=>document.getElementById("pumpChart").__pumpChartTargets.find(row=>row.dateISO==="2026-07-15").detailLines.join(" ")),/Baseline 3,480 RPM/);
-    await page.getByText("Baseline history (2)",{exact:true}).click();
+    await page.locator("#pumpChangeBaselineBtn").click();
     await page.locator(`[data-pump-baseline-edit="${id}"]`).click();await page.locator("#pumpBaselineRPM").fill("3490");
-    await page.locator("#pumpBaselineDate").fill("2026-06-02");await page.locator("#pumpBaselineReason").fill("Disposable correction verification");
+    await page.locator("#pumpBaselineDate").fill("2026-09-20");await page.locator("#pumpBaselineNote").fill("Corrected rebuild explanation");await page.locator("#pumpBaselineReason").fill("Disposable correction verification");
+    await page.locator('#pumpBaselineForm button[type="submit"]').click();
+    await page.getByText("A baseline already exists for this date. Edit that record instead.",{exact:true}).waitFor();
+    assert.equal(await rows.count(),2);await page.locator("#pumpBaselineDate").fill("2026-06-02");
     await page.locator('#pumpBaselineForm button[type="submit"]').click();
     try{await page.waitForFunction(id=>!window.__pumpBaselineMutationPending&&pumpEff.baselineHistory.find(row=>row.id===id)?.corrections.length===1,id);}
     catch(error){throw Error(JSON.stringify(await page.evaluate(async()=>{const source=(await FB.db.runTransaction(tx=>tx.get(FB.docRef))).data(),business=state=>Object.fromEntries(Object.entries(state).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));return {results:window.__prbResults,recovery:window.__recoveryReason,pending:hasPendingLocalChanges,
       loadedDifference:window.CuttingJobImporter.firstDifferencePath(source,window.__lastLoadedCloudState),businessDifference:window.CuttingJobImporter.firstDifferencePath(business(source),business(getInventoryIdentityRepairLocalState()))};}))+" "+error.message);}
     await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete);
     const record=await page.evaluate(id=>pumpEff.baselineHistory.find(row=>row.id===id),id);
-    assert.equal(record.rpm,3490);assert.equal(record.effectiveDateISO,"2026-06-02");assert.equal(record.corrections[0].before.rpm,3480);
+    assert.equal(record.rpm,3490);assert.equal(record.effectiveDateISO,"2026-06-02");assert.equal(record.note,"Corrected rebuild explanation");
+    assert.deepEqual(record.corrections[0].before,{rpm:3480,effectiveDateISO:"2026-06-01",note:"Pump rebuild\nVerified at 49 ksi"});
+    assert.deepEqual(record.corrections[0].after,{rpm:3490,effectiveDateISO:"2026-06-02",note:"Corrected rebuild explanation"});
     assert.equal(await page.evaluate(()=>resolvePumpBaselineForDate("2026-07-15").rpm),3490);
     assert.match(await page.evaluate(()=>document.getElementById("pumpChart").__pumpChartTargets.find(row=>row.dateISO==="2026-07-15").detailLines.join(" ")),/Baseline 3,490 RPM/);
     assert.equal(await page.evaluate(()=>isRecoveryMode()),false);
-    await page.getByText("Baseline history (2)",{exact:true}).click();
-    await page.screenshot({path:path.join(output,"prb-baseline-history.png"),fullPage:true});
+    await page.locator("#pumpChangeBaselineBtn").click();
+    await page.screenshot({path:path.join(output,"prb-change-baseline-desktop.png"),fullPage:false});
+    await page.setViewportSize({width:390,height:850});const box=await page.locator(".pump-baseline-dialog").boundingBox();assert.ok(box.x>=0&&box.x+box.width<=392);
+    await page.screenshot({path:path.join(output,"prb-change-baseline-mobile.png"),fullPage:false});
+    await page.getByRole("button",{name:"Close Change Baseline",exact:true}).click();await page.setViewportSize({width:1440,height:1000});
     const fresh=await browser.newContext({storageState:await context.storageState({indexedDB:true})}),tab=await fresh.newPage();observe(tab);
     await tab.goto(url,{waitUntil:"load"});await tab.waitForFunction(()=>window.__initialAdoptComplete);
     assert.equal(await tab.evaluate(id=>pumpEff.baselineHistory.find(row=>row.id===id)?.rpm,id),3490);
+    assert.equal(await tab.evaluate(id=>pumpEff.baselineHistory.find(row=>row.id===id)?.note,id),"Corrected rebuild explanation");
     assert.equal(await tab.evaluate(()=>resolvePumpBaselineForDate("2026-07-15").effectiveDateISO),"2026-06-02");await fresh.close();
+  });
+  await check("PRB Daily Log, Edit Logs and separate Pump Notes remain functional",async()=>{
+    await page.locator("#pumpEditAllBtn").click();assert.ok(await page.locator(".pump-log-dialog").isVisible());
+    assert.equal(await page.locator("[data-pump-log-rpm]").first().inputValue(),"3600");await page.locator(".pump-log-edit-cancel").click();
+    const baselineBefore=await page.evaluate(()=>structuredClone(pumpEff.baselineHistory));
+    await page.locator("#pumpNotesBtn").click();assert.ok(await page.getByRole("heading",{name:"Pump notes",exact:true}).isVisible());
+    assert.ok(await page.getByText("No notes yet. Click a chart point to add a note for that day and range.",{exact:true}).isVisible());
+    await page.locator("[data-pump-notes-close]").click();
+    await page.evaluate(()=>pumpOpenNotesModal({view:"edit",dateISO:"2026-07-15",range:"3m",rpm:3600}));
+    await page.locator("#pumpNoteText").fill("Independent Pump Note; not a baseline explanation");await page.locator('#pumpNoteForm button[type="submit"]').click();await save();
+    await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete);
+    await page.locator("#pumpNotesBtn").click();assert.ok(await page.getByText("Independent Pump Note; not a baseline explanation",{exact:true}).isVisible());
+    await page.locator("[data-pump-notes-close]").click();assert.deepEqual(await page.evaluate(()=>pumpEff.baselineHistory),baselineBefore);
+    assert.equal(await page.evaluate(()=>pumpEff.entries.find(row=>row.dateISO==="2026-07-15").rpm),3600);assert.equal(await page.evaluate(()=>isRecoveryMode()),false);
+  });
+  await check("PRB pump-specific header fix preserves dashboard drag, resize and saved layout",async()=>{
+    await page.evaluate(()=>toggleDashboardEditing());const win=page.locator('[data-dashboard-window="pumpLog"]');
+    await win.scrollIntoViewIfNeeded();
+    const original=await win.boundingBox(),drag=await win.locator(".dashboard-drag-handle").boundingBox();
+    await page.mouse.move(drag.x+drag.width/2,drag.y+drag.height/2);await page.mouse.down();await page.mouse.move(drag.x+drag.width/2-45,drag.y+drag.height/2+25,{steps:5});await page.mouse.up();
+    const moved=await win.boundingBox();assert.ok(moved.x<original.x||moved.y>original.y);
+    const resize=await win.locator(".dashboard-resize-se").boundingBox();await page.mouse.move(resize.x+resize.width/2,resize.y+resize.height/2);
+    await page.mouse.down();await page.mouse.move(resize.x+resize.width/2+25,resize.y+resize.height/2+25,{steps:5});await page.mouse.up();
+    const resized=await win.boundingBox();assert.ok(resized.width>moved.width||resized.height>moved.height);
+    await page.evaluate(()=>finishDashboardLayoutEditing());await save();const saved=await page.evaluate(()=>structuredClone(window.cloudDashboardLayout.pumpLog));
+    await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete);assert.deepEqual(await page.evaluate(()=>window.cloudDashboardLayout.pumpLog),saved);
+    await page.locator("#pumpEfficiencyHeading").click();assert.ok(await page.locator("#pumpLogForm").isVisible());assert.ok(await page.locator("#totalInput").isVisible());
   });
   await check("Create/edit/save fixtures across protected areas",async()=>{
     await page.evaluate(()=>{

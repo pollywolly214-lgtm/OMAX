@@ -174,13 +174,65 @@ test("ordinary adoption replaces the complete pump object including nulls and un
   c.data=data;c.cloneStructured=clone;vm.runInContext(section(core,"  // Pump efficiency (guard", "  ensureTaskCategories();"),c);
   assert.deepEqual(clone(c.window.pumpEff),data.pumpEff);assert.notEqual(c.window.pumpEff,data.pumpEff);
 });
-test("UI submit awaits verification and never uses the debounced scalar mutation",async()=>{
-  const c=pure();let handler,finish;const messages=[];
-  c.document={getElementById:id=>id==="pumpBaselineForm"?{addEventListener:(event,fn)=>handler=fn}:id==="pumpBaselineRPM"?{value:"3515"}:id==="pumpBaselineDate"?{value:"2026-09-20"}:null};
-  c.toast=value=>messages.push(value);c.renderPumpWidget=()=>{};c.window.savePumpBaseline=()=>new Promise(resolve=>finish=resolve);
-  vm.runInContext("let pumpBaselineEditingId=null;"+section(pump,'  document.getElementById("pumpBaselineForm")?.addEventListener','  document.getElementById("pumpBaselineCancel")'),c);
-  const running=handler({preventDefault(){}});assert.deepEqual(messages,[]);finish({saved:false,error:"CAS rejected"});await running;assert.deepEqual(messages,["CAS rejected"]);
-  const accepted=handler({preventDefault(){}});assert.equal(messages.length,1);finish({saved:true});await accepted;assert.equal(messages.at(-1),"Baseline verified and saved");
+test("popup submit awaits verification, retains rejected input and never reports optimistic success",async()=>{
+  const globals={pumpEff:initial().pumpEff,Date,console};globals.window=globals;const c=vm.createContext(globals);vm.runInContext(pump,c);
+  let finish,action;const messages=[],status={textContent:""},controls=[{disabled:false}];
+  const fields={"#pumpBaselineRPM":{value:"3515"},"#pumpBaselineDate":{value:"2026-09-20"},"#pumpBaselineNote":{value:"  Rebuild\n49 ksi  "}};
+  const form={querySelector:id=>fields[id],setAttribute(){}};
+  c.dialog={querySelector:id=>id==="#pumpBaselineForm"?form:status,querySelectorAll:()=>controls};
+  c.toast=value=>messages.push(value);c.renderPumpWidget=()=>{};c.pumpRenderBaselineModal=()=>{};
+  c.savePumpBaseline=value=>{action=value;return new Promise(resolve=>finish=resolve);};
+  vm.runInContext("pumpBaselineModalDialog=dialog;",c);
+  const running=c.pumpSubmitBaselineForm({preventDefault(){}});assert.deepEqual(messages,[]);assert.equal(controls[0].disabled,true);
+  assert.equal(action.note,fields["#pumpBaselineNote"].value);finish({saved:false,error:"CAS rejected"});await running;
+  assert.deepEqual(messages,[]);assert.equal(status.textContent,"CAS rejected");assert.equal(fields["#pumpBaselineNote"].value,"  Rebuild\n49 ksi  ");assert.equal(controls[0].disabled,false);
+  const accepted=c.pumpSubmitBaselineForm({preventDefault(){}});assert.equal(messages.length,0);finish({saved:true});await accepted;assert.equal(messages.at(-1),"Baseline verified and saved");
+});
+
+test("create and edit durably retain note text and audited RPM/date/note under one stable identity",async()=>{
+  const h=harness(),before=h.cloud,note="  Major pump rebuild\nChecked at 49 ksi.  ";
+  assert.equal((await h.save({...create(),note})).saved,true);h.reload();let record=h.local.pumpEff.baselineHistory[1];const id=record.id;
+  assert.equal(record.note,note);assert.deepEqual(h.cloud.pumpEff.notes,before.pumpEff.notes);
+  assert.equal((await h.save({...edit(id,3520,"2026-09-21"),note:"Nozzle body change\nCorrected date"})).saved,true);h.reload();
+  record=h.local.pumpEff.baselineHistory.find(row=>row.id===id);assert.equal(record.id,id);assert.equal(record.rpm,3520);assert.equal(record.effectiveDateISO,"2026-09-21");
+  assert.deepEqual(record.corrections[0].before,{rpm:3515,effectiveDateISO:"2026-09-20",note});
+  assert.deepEqual(record.corrections[0].after,{rpm:3520,effectiveDateISO:"2026-09-21",note:"Nozzle body change\nCorrected date"});
+  assert.equal((await h.save({...edit(id,3520,"2026-09-21"),note:"Explanation only"})).saved,true);h.reload();
+  assert.equal(h.local.pumpEff.baselineHistory.find(row=>row.id===id).corrections.length,2);
+  for(const field of ["entries","notes"])assert.deepEqual(h.cloud.pumpEff[field],before.pumpEff[field]);
+});
+test("note-less PRB-01B records/corrections remain valid and retain original absence without migration",async()=>{
+  const source=initial(),record=baseline("old","2026-06-02",3490),oldCorrection={id:"old-correction",recordedAtISO:"2026-06-02T12:00:00Z",recordedBy:"fixture",reason:"Correct date",
+    before:{rpm:3480,effectiveDateISO:"2026-06-01"},after:{rpm:3490,effectiveDateISO:"2026-06-02"}};
+  record.corrections=[oldCorrection];source.pumpEff.baselineHistory=[record];const h=harness({initial:source});
+  assert.equal((await h.save({...edit("old",3490,"2026-06-02"),note:"Recorded explanation"})).saved,true);h.reload();const edited=h.local.pumpEff.baselineHistory[0];
+  assert.deepEqual(edited.corrections[0],oldCorrection);assert.equal(Object.hasOwn(edited.corrections[1].before,"note"),false);assert.equal(edited.corrections[1].after.note,"Recorded explanation");
+  assert.equal(edited.createdAtISO,record.createdAtISO);assert.deepEqual(edited.unknown,record.unknown);
+});
+test("note changes cannot bypass append-only retention or silently disappear during merge/adoption",async()=>{
+  const source=initial();source.pumpEff.baselineHistory=[{...baseline("a","2026-06-01",3480),note:"Rebuild"}];const c=pure(source.pumpEff);
+  for(const mutate of [after=>after.baselineHistory[0].note="Unaudited",after=>delete after.baselineHistory[0].note]){
+    const after=clone(source.pumpEff);mutate(after);assert.equal(c.validatePumpBaselineRetention(source.pumpEff,after).valid,false);
+    assert.throws(()=>c.mergePumpEffForSave(after,source.pumpEff),/correction|baseline/i);
+  }
+  const h=harness({initial:source});await h.save({...edit("a",3490,"2026-06-02"),note:"Corrected explanation"});
+  const confirmed=h.cloud.pumpEff;assert.equal(c.validatePumpBaselineRetention(confirmed,confirmed).valid,true);
+  const merged=c.mergePumpEffForSave(confirmed,confirmed);assert.deepEqual(clone(merged),confirmed);
+  c.data={pumpEff:confirmed};c.cloneStructured=clone;vm.runInContext(section(core,"  // Pump efficiency (guard", "  ensureTaskCategories();"),c);
+  assert.deepEqual(clone(c.window.pumpEff),confirmed);
+});
+test("main widget is static and keeps Change Baseline, Daily Log and Edit Logs outside the management popup",()=>{
+  const globals={pumpEff:initial().pumpEff,Date,console};globals.window=globals;const c=vm.createContext(globals);vm.runInContext(pump,c);
+  const html=c.viewPumpLogWidget();assert.match(html,/<section class="pump-card"/);assert.match(html,/pump-card-header/);assert.doesNotMatch(html,/<details|<summary/);
+  for(const text of ["Change Baseline","Daily log","Edit logs"])assert.ok(html.includes(text));
+  assert.doesNotMatch(html,/pumpBaselineForm|pumpBaselineRPM|pumpBaselineDate|Baseline history/);
+});
+test("popup shows newest-first history, editable fields and safely escaped baseline notes",()=>{
+  const value=initial().pumpEff;value.baselineHistory=[{...baseline("old","2026-06-01",3480),note:"<script>unsafe</script>"},baseline("new","2026-09-20",3515)];
+  const globals={pumpEff:value,Date,console};globals.window=globals;const c=vm.createContext(globals);vm.runInContext(pump,c);const html=c.viewPumpBaselineModal();
+  for(const text of ["Change Baseline","Baseline RPM","Effective / rebuild date","Note / reason","Baseline history (2)","Describe why the baseline changed"])assert.ok(html.includes(text));
+  assert.ok(html.indexOf('data-pump-baseline-row="new"')<html.indexOf('data-pump-baseline-row="old"'));
+  assert.ok(html.includes("&lt;script&gt;unsafe&lt;/script&gt;"));assert.doesNotMatch(html,/<script>/);assert.equal(Object.hasOwn(value.baselineHistory[1],"note"),false);
 });
 test("badge, historical chart points, tooltip/header and reference use the shared dated resolver",()=>{
   assert.match(pump,/pumpPercentChange\(latest\.rpm, latest\.dateISO\)/);assert.match(pump,/pumpPercentChange\(entry\.rpm, entry\.dateISO\)/);

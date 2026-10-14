@@ -7325,7 +7325,9 @@ function validatePumpBaselineRetention(beforePump, afterPump){
   if (!Array.isArray(before) || !Array.isArray(after)) return fail("Pump baseline history must remain an array.");
   const dateValid = value=>typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
     && Number.isFinite(Date.parse(value+"T00:00:00.000Z")) && new Date(value+"T00:00:00.000Z").toISOString().slice(0,10) === value;
-  const pairValid = value=>value && typeof value.rpm === "number" && Number.isFinite(value.rpm) && value.rpm > 0 && dateValid(value.effectiveDateISO);
+  const pairValid = value=>value && typeof value.rpm === "number" && Number.isFinite(value.rpm) && value.rpm > 0 && dateValid(value.effectiveDateISO)
+    && (!Object.hasOwn(value,"note") || typeof value.note === "string");
+  const values = row=>({rpm:row.rpm,effectiveDateISO:row.effectiveDateISO,...(Object.hasOwn(row,"note") ? {note:row.note} : {})});
   const equal = (a,b)=>stableStringifyForIntegrity(a) === stableStringifyForIntegrity(b);
   const ids = new Set(), dates = new Set(), correctionIds = new Set();
   if (new Set(before.map(record=>record?.id)).size !== before.length) return fail("Existing pump baseline identity is ambiguous; recovery review is required.");
@@ -7342,7 +7344,7 @@ function validatePumpBaselineRetention(beforePump, afterPump){
     for (let index=1;index<record.corrections.length;index++){
       if (!equal(record.corrections[index-1].after,record.corrections[index].before)) return fail("Pump baseline correction chain is discontinuous.");
     }
-    if (record.corrections.length && !equal(record.corrections[record.corrections.length-1].after,{rpm:record.rpm,effectiveDateISO:record.effectiveDateISO}))
+    if (record.corrections.length && !equal(record.corrections[record.corrections.length-1].after,values(record)))
       return fail("Pump baseline value differs from its latest correction evidence.");
   }
   for (const previous of before){
@@ -7351,15 +7353,15 @@ function validatePumpBaselineRetention(beforePump, afterPump){
     const oldCorrections = previous.corrections;
     if (!Array.isArray(oldCorrections) || current.corrections.length < oldCorrections.length
       || !oldCorrections.every((correction,index)=>equal(correction,current.corrections[index]))) return fail("Existing pump baseline correction evidence would be removed or rewritten.");
-    for (const field of Object.keys(previous).filter(field=>!["rpm","effectiveDateISO","corrections"].includes(field))){
+    for (const field of Object.keys(previous).filter(field=>!["rpm","effectiveDateISO","note","corrections"].includes(field))){
       if (!Object.hasOwn(current,field) || !equal(previous[field],current[field])) return fail("Pump baseline identity/context/creation evidence would change.");
     }
-    let pair = {rpm:previous.rpm,effectiveDateISO:previous.effectiveDateISO};
+    let pair = values(previous);
     for (const correction of current.corrections.slice(oldCorrections.length)){
       if (!equal(pair,correction.before)) return fail("Pump baseline correction chain does not match the previous value.");
       pair = correction.after;
     }
-    if (!equal(pair,{rpm:current.rpm,effectiveDateISO:current.effectiveDateISO})) return fail("Pump baseline values changed without accountable correction evidence.");
+    if (!equal(pair,values(current))) return fail("Pump baseline values changed without accountable correction evidence.");
   }
   return {valid:true};
 }
