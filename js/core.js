@@ -4557,6 +4557,8 @@ async function writeReviewedInventoryIdentityRepair(next,{source,expectedRevisio
 }
 
 async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true }, options = {}){
+  const target=options.authoritativeTarget;
+  if(target&&!cuttingJobSaveTargetIsCurrent(target))return {saved:false,blocked:true,definiteFailure:true,stateWriteAttempted:false,stateWriteCompleted:false,error:"Cutting-job workspace/backend changed before the transaction."};
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
   const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
     &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
@@ -4575,10 +4577,11 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   if (typeof writer !== "function" || !window.CuttingFileContentFirewall){
     return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
   }
-  const result = await writer({ db:FB.db, docRef:FB.docRef, state, setOptions,
+  const result = await writer({ db:target?.db||FB.db, docRef:target?.docRef||FB.docRef, state, setOptions,
     expectedRevision:options.expectedRevision ?? Number(window.__loadedCloudRevisionForSaveGuard || 0),
     clientId:getCloudSyncClientId(), scan:scanAuthoritativeCutFileContent,
     prepare:(pending, remote)=>{
+      if(target&&!cuttingJobSaveTargetIsCurrent(target))throw Object.assign(Error("Cutting-job workspace/backend changed during the transaction."),{definite:true,code:"chronology_target_changed"});
       if(identityAuthorized){
         if(stableStringify(remote)!==identityProof.sourceKey||stableStringify(pending)!==identityProof.pendingKey)throw Object.assign(new Error("Inventory repair source or exact authorized changes no longer match."),{definite:true,code:"inventory_repair_conflict"});
         if(estimatePayloadBytes(pending)>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
@@ -4650,6 +4653,27 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   return result;
 }
 
+function captureCuttingJobSaveTarget(){
+  const target={db:FB.db,docRef:FB.docRef,path:String(FB.docRef?.path||""),projectId:String(FB.app?.options?.projectId||""),actorUid:String(FB.user?.uid||""),backend:window.OMAXDevSafe?.active?"disposable":"firestore"};
+  if(!target.db||!target.docRef||!target.path||!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend is unavailable or changed.");
+  return Object.freeze(target);
+}
+function cuttingJobSaveTargetIsCurrent(target){
+  if(!target || target.db!==FB.db || target.docRef!==FB.docRef || target.path!==FB.docRef?.path || target.projectId!==String(FB.app?.options?.projectId||"") || target.actorUid!==String(FB.user?.uid||"") || target.backend!==(window.OMAXDevSafe?.active?"disposable":"firestore"))return false;
+  const aliases=[FB.workspaceRef,window.workspaceRef].filter(Boolean);
+  return (!target.docRef.firestore||target.docRef.firestore===target.db)&&aliases.every(ref=>ref.path===target.path&&(!ref.firestore||ref.firestore===target.db));
+}
+async function readCuttingJobAuthoritativeSnapshot(target){
+  if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend changed before server verification.");
+  const snapshot=await target.docRef.get({source:"server"});
+  return {state:snapshot?.exists?snapshot.data():null,fromCache:snapshot?.metadata?.fromCache,hasPendingWrites:snapshot?.metadata?.hasPendingWrites,path:snapshot?.ref?.path||target.path,backendMatches:!snapshot?.ref?.firestore||snapshot.ref.firestore===target.db};
+}
+function refreshCuttingJobVerificationNotice(){
+  if(typeof document==="undefined"||typeof document.querySelectorAll!=="function")return;
+  document.querySelectorAll("[data-cutting-job-verification-notice]").forEach(node=>{node.hidden=!window.__cuttingJobDisplayUnconfirmed;});
+}
+window.refreshCuttingJobVerificationNotice=refreshCuttingJobVerificationNotice;
+
 // Foundation adapter only. The reviewed UI supplies an exact preview binding.
 const cuttingJobChronologyMutationApi = window.CuttingJobChronology?.createMutationApi({
   canWrite:()=>canWriteCloud("cutting-job chronology") && !hasPendingLocalChanges
@@ -4658,11 +4682,22 @@ const cuttingJobChronologyMutationApi = window.CuttingJobChronology?.createMutat
     revision:window.__loadedCloudRevisionForSaveGuard, mutation:lastLocalMutationAt,
     actorUid:String(FB.user?.uid||""),state:getCuttingJobChronologyLocalState()
   }),
-  readState:readCurrentCloudStateReadOnly,
+  captureTarget:captureCuttingJobSaveTarget,
+  targetIsCurrent:cuttingJobSaveTargetIsCurrent,
+  readState:async target=>{
+    const snapshot=await readCuttingJobAuthoritativeSnapshot(target);
+    if(snapshot.fromCache!==false||snapshot.hasPendingWrites!==false||snapshot.path!==target.path||snapshot.backendMatches===false)throw Error("Cutting-job baseline requires a confirmed server snapshot.");
+    return snapshot.state;
+  },
+  readVerificationState:readCuttingJobAuthoritativeSnapshot,
   baselineMatches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)
     && stableStringify(source)===stableStringify(getCuttingJobChronologyLocalState()),
-  writeState:(next,expectedRevision,validatePreparedState,operation)=>writeAuthoritativeStateSnapshot(next,{merge:true},{expectedRevision,validatePreparedState,cuttingJobCompletionId:operation?.type==="complete"?operation.id:null}),
-  adoptVerifiedState:cloud=>adoptIdentityCheckedAuthoritativeState(cloud)?.recovery===false,
+  writeState:(next,expectedRevision,validatePreparedState,operation,target)=>writeAuthoritativeStateSnapshot(next,{merge:true},{expectedRevision,validatePreparedState,authoritativeTarget:target,cuttingJobCompletionId:operation?.type==="complete"?operation.id:null}),
+  adoptVerifiedState:cloud=>{
+    const adopted=adoptIdentityCheckedAuthoritativeState(cloud)?.recovery===false;
+    if(adopted){window.__cuttingJobDisplayUnconfirmed=false;refreshCuttingJobVerificationNotice();}
+    return adopted;
+  },
   prepareBusinessMutation:(source,operation,options)=>window.CuttingJobDateEditing.prepareMutation(source,operation,{
     ...options,buildCompletedJob,
     normalizePriorities:(list,targetId)=>{
@@ -4679,6 +4714,7 @@ const cuttingJobChronologyMutationApi = window.CuttingJobChronology?.createMutat
     window.__autosaveDisabled=true;
     window.__recoveryInspectMode=true;
     window.__lastIndeterminateSave=result;
+    window.__cuttingJobDisplayUnconfirmed=true;refreshCuttingJobVerificationNotice();
     renderRecoveryDiagnosticsPanel();
   }
 });

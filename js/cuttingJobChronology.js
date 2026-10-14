@@ -185,25 +185,26 @@
   function createMutationApi(env){
     let busy = false;
     async function save(changes, {expectedRevision, expectedSourceKey, expectedPreparedKey, audit, businessOperation} = {}){
-      const result = {saved:false, verified:false, stateWriteAttempted:false, stateWriteCompleted:false, indeterminate:false, error:"", verificationMismatchPaths:[], verificationMismatchCount:0, committedRevision:null, readbackRevision:null};
+      const result = {saved:false, verified:false, stateWriteAttempted:false, stateWriteCompleted:false, indeterminate:false, error:"", verificationMismatchPaths:[], verificationMismatchCount:0, committedRevision:null, readbackRevision:null, verificationReadAttempts:0, verificationReadHistory:[]};
       if (busy) return {...result, blocked:true, error:"A chronology mutation is already in progress."};
       if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || !env.canWrite()) return {...result, blocked:true, error:"Current authoritative revision and write permission are required."};
       busy = true;
       let writeInvoked = false;
-      let localVersion;
-      const current = () => env.canWrite() && stateKey(env.localVersion()) === localVersion;
+      let localVersion, target;
+      const current = () => env.canWrite() && (!env.targetIsCurrent || env.targetIsCurrent(target)) && stateKey(env.localVersion()) === localVersion;
       const suspend = () => {
         result.requiresReload = true;
         try { env.suspend(result); }
         catch (error) { result.suspensionError = String(error?.message || error); }
       };
       try {
+        target = env.captureTarget ? env.captureTarget() : undefined;
         localVersion = stateKey(env.localVersion());
         // Freeze the caller's request before any asynchronous baseline read.
         const requestedChanges = clone(changes);
         const requestedOperation = businessOperation ? clone(businessOperation) : null;
         const requestedAudit = audit ? clone(audit) : env.audit ? clone(env.audit()) : undefined;
-        const source = await env.readState();
+        const source = await env.readState(target);
         if (!current() || !source || source.syncMeta?.rev !== expectedRevision || !env.baselineMatches(source)) return {...result, blocked:true, error:"Authoritative or local baseline changed; review again."};
         if (expectedSourceKey !== undefined && stateKey(source) !== expectedSourceKey) return {...result, blocked:true, error:"Data changed after preview; reload and review again."};
         if(requestedOperation && !env.prepareBusinessMutation)return {...result,blocked:true,error:"Business-date saving is unavailable."};
@@ -221,7 +222,7 @@
         const validatePreparedState = pending => current() && businessKey(pending) === expected;
         if (!current()) return {...result, blocked:true, error:"Local state changed before saving."};
         writeInvoked = true;
-        const saved = await env.writeState(prepared.nextState, expectedRevision, validatePreparedState, requestedOperation);
+        const saved = await env.writeState(prepared.nextState, expectedRevision, validatePreparedState, requestedOperation, target);
         result.stateWriteAttempted = saved?.stateWriteAttempted === true;
         result.stateWriteCompleted = saved?.stateWriteCompleted === true;
         if (saved?.saved !== true || !result.stateWriteCompleted){
@@ -238,22 +239,51 @@
         result.verificationPhase="committed_projection";
         const committed = saved.committedState ? durableStateProjection(saved.committedState) : null;
         result.committedRevision = Number.isSafeInteger(committed?.syncMeta?.rev) ? committed.syncMeta.rev : null;
-        result.verificationPhase="server_readback";
-        const cloud = await env.readState();
-        result.verificationPhase="readback_projection";
-        const readback = cloud ? durableStateProjection(cloud) : null;
-        result.readbackRevision = Number.isSafeInteger(readback?.syncMeta?.rev) ? readback.syncMeta.rev : null;
-        const revisionsMatch = Number.isSafeInteger(result.committedRevision) && result.committedRevision > expectedRevision
-          && result.readbackRevision === result.committedRevision;
-        result.verificationPhase="durable_comparison";
-        if (!committed || !readback || !revisionsMatch || durableStateKey(committed) !== durableStateKey(readback)){
+        let cloud=null, readback=null, matched=false;
+        // Only older, server-proven revisions qualify for a bounded read-only
+        // window. There is exactly one write above this loop, never a mutation
+        // replay. Each attempt has its own deadline; late reads cannot adopt.
+        const delays=[0,250,750], readTimeoutMs=3000;
+        if(target?.path){result.verificationDocumentPath=String(target.path).slice(0,200);result.verificationProjectId=String(target.projectId||"").slice(0,80);result.verificationBackend=target.backend;}
+        for(let attempt=0;attempt<delays.length;attempt++){
+          if(!committed || !Number.isSafeInteger(result.committedRevision) || result.committedRevision<=expectedRevision)break;
+          if(attempt){
+            result.verificationPhase="stale_read_wait";
+            await (env.waitForReadback ? env.waitForReadback(delays[attempt]) : new Promise(resolve=>setTimeout(resolve,delays[attempt])));
+          }
+          if((env.targetIsCurrent&&!env.targetIsCurrent(target))||(attempt>0&&!current())){result.error="State or workspace changed during read-only verification. Reload before trying again.";break;}
+          result.verificationPhase="server_readback";
+          result.verificationReadAttempts++;
+          let timer;
+          const snapshot=await Promise.race([
+            Promise.resolve().then(()=>env.readVerificationState ? env.readVerificationState(target) : Promise.resolve(env.readState(target)).then(state=>({state,fromCache:false,hasPendingWrites:false}))),
+            new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error("Committed cutting-job verification read timed out; no write was retried.")),readTimeoutMs);})
+          ]).finally(()=>clearTimeout(timer));
+          cloud=snapshot?.state ?? null;
+          result.verificationPhase="readback_projection";
+          readback=cloud ? durableStateProjection(cloud) : null;
+          result.readbackRevision=Number.isSafeInteger(readback?.syncMeta?.rev)?readback.syncMeta.rev:null;
+          const serverProof=snapshot?.fromCache===false && snapshot?.hasPendingWrites===false;
+          const documentMatches=snapshot?.backendMatches!==false && (!target?.path || (saved.path===target.path && snapshot.path===target.path));
+          result.verificationReadHistory.push({attempt:attempt+1,revision:result.readbackRevision,fromCache:typeof snapshot?.fromCache==="boolean"?snapshot.fromCache:null,hasPendingWrites:typeof snapshot?.hasPendingWrites==="boolean"?snapshot.hasPendingWrites:null,serverProof,documentMatches});
+          result.verificationPhase="durable_comparison";
+          if(!serverProof || !documentMatches){result.error="Verification requires a server snapshot from the committed document with no pending writes.";break;}
+          if(result.readbackRevision===result.committedRevision){
+            matched=durableStateKey(committed)===durableStateKey(readback);
+            break; // Matching revision with changed data must not be retried.
+          }
+          if(!Number.isSafeInteger(result.readbackRevision) || result.readbackRevision>=result.committedRevision)break;
+          // Older authoritative snapshots may be re-read; no other mismatch is
+          // eligible, and neither stale nor cached content is ever adopted.
+        }
+        if(!matched){
           Object.assign(result,verificationDifferences(committed,readback));
-          if(!revisionsMatch&&!result.verificationMismatchPaths.includes("$.syncMeta.rev")){
+          if(result.readbackRevision!==result.committedRevision&&!result.verificationMismatchPaths.includes("$.syncMeta.rev")){
             result.verificationMismatchCount++;
             if(result.verificationMismatchPaths.length<16)result.verificationMismatchPaths.push("$.syncMeta.rev");
           }
           result.indeterminate = true;
-          result.error = "Committed cutting-job save did not match server readback. Reload before trying again.";
+          result.error ||= "Committed cutting-job save could not be verified within the bounded read-only window. Reload before trying again.";
           suspend(); return result;
         }
         result.verified = true;

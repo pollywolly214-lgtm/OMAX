@@ -59,6 +59,7 @@ function harness(flags={}){
   const start=core.indexOf("async function writeAuthoritativeStateSnapshot"),end=core.indexOf("// Foundation adapter only.",start);
   assert.ok(start>=0&&end>start);
   for(const name of ["validateCuttingJobDeletionSave","validateCuttingJobHistoryRestoreSave","cuttingJobDeletionSafetyBaseline","reportCloudSaveSecondaryError"]){const a=core.indexOf("function "+name+"("),b=core.indexOf("\n}",a);assert.ok(a>=0&&b>a,name);vm.runInContext(core.slice(a,b+2),context);}
+  vm.runInContext(core.slice(core.indexOf("function captureCuttingJobSaveTarget"),core.indexOf("// Foundation adapter only.")),context);
   vm.runInContext(core.slice(start,end)+";this.write=writeAuthoritativeStateSnapshot",context);
   const env={
     canWrite:()=>allowed,localVersion:()=>({version:localVersion,jobs:live.cuttingJobs}),
@@ -204,7 +205,7 @@ test("production adapter is used by explicit business operations, never by hydra
   const index=fs.readFileSync("index.html","utf8");
   assert.ok(index.indexOf('src="js/cuttingJobChronology.js"')<index.indexOf('src="js/cuttingJobHistory.js"'));
   assert.match(core,/const cuttingJobChronologyMutationApi = window\.CuttingJobChronology\?\.createMutationApi/);
-  assert.match(core,/writeState:\(next,expectedRevision,validatePreparedState,operation\)=>writeAuthoritativeStateSnapshot/);
+  assert.match(core,/writeState:\(next,expectedRevision,validatePreparedState,operation,target\)=>writeAuthoritativeStateSnapshot/);
   assert.match(core,/cuttingJobChronologyMutationApi\.save\(\[\], \{expectedRevision:window\.__loadedCloudRevisionForSaveGuard,businessOperation:operation\}\)/);
   assert.equal(fs.readFileSync("js/renderers.js","utf8").includes("cuttingJobChronologyMutationApi"),false);
 });
@@ -229,6 +230,7 @@ test("production adapter checks the complete live baseline, including unsaved un
     adoptIdentityCheckedAuthoritativeState:()=>({recovery:false}),renderRecoveryDiagnosticsPanel(){}
   });
   const start=core.indexOf("const cuttingJobChronologyMutationApi"),end=core.indexOf("function getInventoryIdentityRepairLocalState",start);
+  vm.runInContext(core.slice(core.indexOf("function captureCuttingJobSaveTarget"),core.indexOf("// Foundation adapter only.")),context);
   vm.runInContext(core.slice(start,end)+";this.adapter=cuttingJobChronologyMutationApi",context);
   assert.equal(context.adapter.baselineMatches(source),true);
   const version=JSON.stringify(context.adapter.localVersion());
@@ -249,6 +251,7 @@ test("real authoritative hydration round-trips new fields and never initializes 
     saveCloudNow(){throw Error("Hydration must not save");}
   });
   const start=core.indexOf("function adoptAuthoritativeRecoveryState"),end=core.indexOf("function renderInventoryIdentityRecoveryData",start);
+  vm.runInContext(core.slice(core.indexOf("function captureCuttingJobSaveTarget"),core.indexOf("// Foundation adapter only.")),context);
   vm.runInContext(core.slice(start,end)+";this.adopt=adoptAuthoritativeRecoveryState",context);
   context.adopt(cloud);
   assert.deepEqual(context.window.cuttingJobs,cloud.cuttingJobs);

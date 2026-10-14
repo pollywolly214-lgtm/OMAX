@@ -47,7 +47,7 @@
     request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
   });
   async function read(path){const db=await database;return new Promise((resolve,reject)=>{const tx=db.transaction("documents","readonly"),request=tx.objectStore("documents").get(path);request.onsuccess=()=>resolve(copy(request.result??null));request.onerror=()=>reject(request.error);});}
-  async function snapshot(path){const value=await read(path);return{exists:value!=null,data:()=>copy(value),metadata:{hasPendingWrites:false}};}
+  async function snapshot(path){const value=await read(path);return{exists:value!=null,data:()=>copy(value),metadata:{fromCache:false,hasPendingWrites:false}};}
   async function store(path,value){const db=await database;await new Promise((resolve,reject)=>{const tx=db.transaction("documents","readwrite");if(value==null)tx.objectStore("documents").delete(path);else tx.objectStore("documents").put(copy(value),path);tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);tx.onerror=()=>reject(tx.error);});}
   const write=async(path,value,options)=>{
     const next=options?.merge?{...await read(path),...copy(value)}:copy(value);

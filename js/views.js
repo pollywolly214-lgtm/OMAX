@@ -3927,7 +3927,7 @@ function viewJobs(){
                 <span class="job-main-category-label">Category</span>
                 <span class="job-main-category-name">${esc(categoryName)}</span>
               </div>
-              <div class="job-main-dates">${startTxt} → ${dueTxt}</div>
+              <div class="job-main-dates" title="Start Date → Completion Date">${startTxt} → ${completedTxt}</div>
               <div class="job-main-summary small muted">Actual ${actualDisplay} vs ${estimateDisplay}</div>
             </div>
           </td>
@@ -4550,6 +4550,7 @@ function viewJobs(){
     </div>
 
     <div class="block job-main-block">
+      <p data-cutting-job-verification-notice role="alert" class="small" style="padding:10px;border:1px solid #b45309;background:#fff7ed;color:#7c2d12" ${window.__cuttingJobDisplayUnconfirmed ? "" : "hidden"}>Unverified cutting-job display: values below may be previously loaded data or unsaved edits. The latest save has not been verified; do not treat the information below as confirmed.</p>
       <div class="job-page-topbar">
         <div class="job-page-toolbar">
           <h3>Cutting Jobs</h3>
@@ -4828,6 +4829,7 @@ function viewJobs(){
     </div>
 
     <div class="block past-jobs-block job-main-block" id="pastJobs">
+      <p data-cutting-job-verification-notice role="alert" class="small" style="padding:10px;border:1px solid #b45309;background:#fff7ed;color:#7c2d12" ${window.__cuttingJobDisplayUnconfirmed ? "" : "hidden"}>Unverified cutting-job display: values below may be previously loaded data or unsaved edits. The latest save has not been verified; do not treat the information below as confirmed.</p>
       <h3>Past Cutting Jobs</h3>
       <div class="past-jobs-toolbar">
         <div class="past-jobs-category">
