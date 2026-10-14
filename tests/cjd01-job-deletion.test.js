@@ -492,3 +492,20 @@ test("immediate and debounced disabled saves return the same definite no-write c
     assertDefiniteNoWrite(h.context.saveCloudDebounced(),code);assert.equal(h.transactions,0);assert.equal(h.reads,0);h.api.cancel();
   }
 });
+
+for(const collection of ["cuttingJobs","completedCuttingJobs"])test("CJO-06 exact guarded deletion and Undo/Redo retain three chronology self-references: "+collection,async()=>{
+  const identities=require("../js/globalIdentityRepair"),fixture=require("./fixtures/cjo06-archived-job").liveState();
+  const owner=fixture.completedCuttingJobs.find(job=>job.id==="archived-owner"),peer=fixture.completedCuttingJobs.find(job=>job.id!=="archived-owner");
+  const h=harness(collection==="cuttingJobs"?[owner]:[],collection==="completedCuttingJobs"?[owner,peer]:[peer]),before=h.cloud;
+  assert.equal(identities.integrity(before).valid,true);
+  const result=await h.delete(collection,owner.id);assert.equal(result.saved,true,result.error);assert.equal(h.commits,1);
+  const archive=h.cloud.deletedItems[0];assert.equal(archive.type,collection==="cuttingJobs"?"job":"completed-job");assert.deepEqual(archive.payload,owner);
+  assert.ok(archive.payload.cutChronologyHistory.every(entry=>entry.jobId===archive.payload.id));assert.equal(identities.integrity(h.cloud).valid,true);
+  h.reload();assert.equal(identities.integrity(h.cloud).valid,true);assert.deepEqual(h.window.deletedItems[0].payload,owner);
+  assert.equal(await h.api.undoLastChange(),true);assert.deepEqual(h.cloud[collection],before[collection]);assert.deepEqual(h.cloud.deletedItems,before.deletedItems);assert.equal(identities.integrity(h.cloud).valid,true);
+  assert.equal(await h.api.redoLastUndo(),true);assert.deepEqual(h.cloud.deletedItems[0],archive);assert.equal(identities.integrity(h.cloud).valid,true);
+});
+test("CJO-06 chronology history never authorizes an unproved live job removal",async()=>{
+  const owner=require("./fixtures/cjo06-archived-job").liveState().completedCuttingJobs[0],h=harness([], [owner]),before=h.cloud;
+  h.window.completedCuttingJobs=[];const result=await h.api.performCloudSave();assert.equal(result.saved,false);assert.equal(h.commits,0);assert.deepEqual(h.cloud,before);
+});

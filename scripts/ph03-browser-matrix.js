@@ -19,9 +19,17 @@ async function main(){
     // Provision a complete disposable snapshot before testing this feature.
     // The older broad harness's bootstrap omits optional runtime collections;
     // keep that unrelated fixture issue out of the PRB browser scenario.
+    // Reuse current main's archived-owner fixture: no corresponding live job.
+    await page.evaluate(archive=>{if(!window.OMAXDevSafe?.active)throw Error("Disposable backend required");deletedItems.push(...archive.deletedItems);},require("../tests/fixtures/cjo06-archived-job").archivedState());
     await page.evaluate(async()=>{for(let pass=0;pass<2;pass++){await FB.docRef.set(snapshotState({skipLocalFileCacheSync:true}));await loadFromCloud();route();}});
     await page.waitForTimeout(2200);await save();await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete&&!hasPendingLocalChanges);
   }
+  if(prbOnly)await check("PRB archived chronology startup passes identity without live owner or fabricated baseline history",async()=>{
+    const status=await page.evaluate(()=>({recovery:isRecoveryMode(),integrity:OMAXGlobalIdentityRepair.integrity(window.__lastLoadedCloudState),
+      liveOwner:[...cuttingJobs,...completedCuttingJobs].some(job=>job.id==="archived-owner"),historyPresent:Object.hasOwn(pumpEff,"baselineHistory")}));
+    assert.equal(status.recovery,false);assert.equal(status.integrity.valid,true);assert.equal(status.liveOwner,false);assert.equal(status.historyPresent,false);
+    assert.equal(status.integrity.plan.references.filter(ref=>ref.resolution==="archived_job_self").length,3);
+  });
   await check("Disposable bootstrap and initial atomic save",async()=>{assert.equal(await page.evaluate(()=>DEVSAFE_MODE&&OMAXDevSafe.active&&FB.ready),true);await save();});
   await check("Dashboard hours UI create/save/rerender",async()=>{await page.locator("#totalInput").fill("100");await page.locator("#logBtn").click();await save();assert.equal(await page.evaluate(()=>totalHistory.length),1);await navigate("#/inventory");await navigate("#/");assert.equal(await page.evaluate(()=>totalHistory[0].hours),100);});
   await check("Pump RPM UI create/edit and merge",async()=>{await page.locator("#pumpLogDate").fill("2026-09-30");await page.locator("#pumpLogRPM").fill("3500");await page.getByRole("button",{name:"Add / Update",exact:true}).click();await save();await page.locator("#pumpLogRPM").fill("3450");await page.getByRole("button",{name:"Add / Update",exact:true}).click();await save();assert.equal(await page.evaluate(()=>pumpEff.entries.find(entry=>entry.dateISO==="2026-09-30").rpm),3450);});

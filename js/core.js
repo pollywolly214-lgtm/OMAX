@@ -2751,6 +2751,9 @@ function startWorkspaceStateListener(){
     if (!incomingRev) return;
     const incomingBy = String(meta?.updatedBy || "");
     if (hasPendingLocalChanges) return;
+    // The chronology coordinator owns acknowledgement, exact server readback,
+    // and adoption. Its realtime echo must not normalize live state mid-save.
+    if (window.isCuttingJobChronologySaving?.()) return;
     const localEditAgeMs = Date.now() - (Number(lastLocalMutationAt) || 0);
     if (incomingBy !== localClientId && localEditAgeMs >= 0 && localEditAgeMs < 15000) return;
     if (incomingRev && incomingRev <= lastAppliedCloudRevision) return;
@@ -3220,6 +3223,8 @@ function applyRestoreByType(entry, index){
       return { handledRemoval: false, value: { type: "inventory", id: clone.id } };
     }
     case "job": {
+      const gate = window.CuttingJobHistory?.planDirectResequence([...(cuttingJobs || []), clone], window.completedCuttingJobs);
+      if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
       if (!Array.isArray(cuttingJobs)) cuttingJobs = [];
       if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
       if (!Array.isArray(clone.files)) clone.files = [];
@@ -3228,12 +3233,15 @@ function applyRestoreByType(entry, index){
       while (existing.has(String(clone.id))){
         clone.id = genId(clone.name || "job");
       }
+      const resequence = window.CuttingJobHistory.resequence([...cuttingJobs, clone], window.completedCuttingJobs);
+      if (window.CuttingJobHistory.isResequenceBlocked(resequence))return {...resequence,ok:false,blocked:true};
       cuttingJobs.push(clone);
-      window.CuttingJobHistory?.resequence(cuttingJobs,window.completedCuttingJobs);
       window.cuttingJobs = cuttingJobs;
       return { handledRemoval: false, value: { type: "job", id: clone.id } };
     }
     case "completed-job": {
+      const gate = window.CuttingJobHistory?.planDirectResequence(window.cuttingJobs, [...(completedCuttingJobs || []), clone]);
+      if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
       if (!Array.isArray(completedCuttingJobs)) completedCuttingJobs = [];
       if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
       if (!Array.isArray(clone.files)) clone.files = [];
@@ -3242,8 +3250,9 @@ function applyRestoreByType(entry, index){
       while (existing.has(String(clone.id))){
         clone.id = genId(clone.name || "job");
       }
+      const resequence = window.CuttingJobHistory.resequence(window.cuttingJobs, [...completedCuttingJobs, clone]);
+      if (window.CuttingJobHistory.isResequenceBlocked(resequence))return {...resequence,ok:false,blocked:true};
       completedCuttingJobs.push(clone);
-      window.CuttingJobHistory?.resequence(window.cuttingJobs,completedCuttingJobs);
       window.completedCuttingJobs = completedCuttingJobs;
       return { handledRemoval: false, value: { type: "completed-job", id: clone.id } };
     }
@@ -3362,12 +3371,20 @@ function applyRestoreByType(entry, index){
 
 function restoreDeletedItem(id){
   refreshGlobalCollections();
+  const candidate = deletedItems.find(entry=>entry && entry.id === id);
+  if (candidate && ["job","completed-job"].includes(candidate.type)){
+    const active = candidate.type === "job" ? [...(cuttingJobs || []), candidate.payload] : cuttingJobs;
+    const completed = candidate.type === "completed-job" ? [...(completedCuttingJobs || []), candidate.payload] : completedCuttingJobs;
+    const gate = window.CuttingJobHistory?.planDirectResequence(active, completed);
+    if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
+  }
   purgeExpiredDeletedItems();
   const idx = deletedItems.findIndex(entry => entry && entry.id === id);
   if (idx < 0) return { ok:false, reason:"not_found" };
   const entry = deletedItems[idx];
   const result = applyRestoreByType(entry, idx);
   if (!result) return { ok:false, reason:"restore_failed" };
+  if (result.blocked) return { ...result, ok:false };
   if (!result.handledRemoval){
     const currentIdx = deletedItems.findIndex(e => e && e.id === entry.id);
     if (currentIdx >= 0){
@@ -3697,64 +3714,24 @@ function buildCompletedJob(job, completionISO){
   };
 }
 
-function completeCuttingJob(jobId, { completedAtISO = null, normalizePriorities = null } = {}){
-  const idStr = jobId != null ? String(jobId) : "";
-  if (!idStr) return null;
-
-  if (!Array.isArray(window.cuttingJobs)) window.cuttingJobs = [];
-  if (!Array.isArray(window.completedCuttingJobs)) window.completedCuttingJobs = [];
-
-  cuttingJobs = window.cuttingJobs;
-  completedCuttingJobs = window.completedCuttingJobs;
-
-  const idx = cuttingJobs.findIndex(job => job && String(job.id) === idStr);
-  if (idx < 0) return null;
-
-  const job = cuttingJobs[idx];
-  const completionISO = typeof completedAtISO === "string" && completedAtISO
-    ? completedAtISO
-    : new Date().toISOString();
-  const completed = buildCompletedJob(job, completionISO);
-  if (!completed) return null;
-
-  cuttingJobs.splice(idx, 1);
-
-  if (typeof normalizePriorities === "function"){
-    try {
-      normalizePriorities(cuttingJobs);
-    } catch (err){
-      console.warn("Failed to apply custom job priority normalization", err);
-      normalizeJobPriorityOrder(cuttingJobs);
-    }
-  } else {
-    normalizeJobPriorityOrder(cuttingJobs);
-  }
-
-  window.cuttingJobs = cuttingJobs;
-
-  completedCuttingJobs.push(completed);
-  window.completedCuttingJobs = completedCuttingJobs;
-  window.CuttingJobHistory?.resequence(window.cuttingJobs,window.completedCuttingJobs);
-
-  if (!Array.isArray(window.syncProcessLog)) window.syncProcessLog = [];
-  window.syncProcessLog.unshift({
-    id: typeof genId === "function" ? genId("sync_log") : `sync_log_${Date.now()}`,
-    atISO: new Date().toISOString(),
-    eventType: "cutting_job_completed",
-    status: "saved",
-    sourceArea: "cuttingJobs",
-    targetArea: "completedCuttingJobs,dataCenter,charts",
-    message: `Cutting job "${String(job?.name || idStr)}" moved from active to completed and propagated to dependent views.`
-  });
-  if (window.syncProcessLog.length > 1000) window.syncProcessLog.length = 1000;
-
-  if (typeof saveCloudDebounced === "function") saveCloudDebounced();
-  if (typeof saveCloudNow === "function"){
-    try { saveCloudNow(); } catch (err){ console.warn("Immediate save failed after completing cutting job", err); }
-  }
-
-  return completed;
+function completeCuttingJob(jobId, { completedAtISO = null } = {}){
+  return saveCuttingJobBusinessOperation({type:"complete",id:String(jobId || ""),completedAtISO:completedAtISO || new Date().toISOString()});
 }
+
+function saveCuttingJobEdit(jobId, updates){
+  return saveCuttingJobBusinessOperation({type:"edit",id:String(jobId || ""),updates});
+}
+
+function createCuttingJob(job){
+  return saveCuttingJobBusinessOperation({type:"create",job});
+}
+
+async function saveCuttingJobBusinessOperation(operation){
+  if(typeof cuttingJobChronologyMutationApi==="undefined" || !cuttingJobChronologyMutationApi || !window.CuttingJobDateEditing)return {saved:false,blocked:true,error:"Cutting-job date saving is unavailable."};
+  return cuttingJobChronologyMutationApi.save([], {expectedRevision:window.__loadedCloudRevisionForSaveGuard,businessOperation:operation});
+}
+window.saveCuttingJobEdit=saveCuttingJobEdit;
+window.createCuttingJob=createCuttingJob;
 
 window.completeCuttingJob = completeCuttingJob;
 
@@ -4586,6 +4563,8 @@ async function writeReviewedInventoryIdentityRepair(next,{source,expectedRevisio
 }
 
 async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true }, options = {}){
+  const target=options.authoritativeTarget;
+  if(target&&!cuttingJobSaveTargetIsCurrent(target))return {saved:false,blocked:true,definiteFailure:true,stateWriteAttempted:false,stateWriteCompleted:false,error:"Cutting-job workspace/backend changed before the transaction."};
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
   const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
     &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
@@ -4608,10 +4587,11 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const loadedState = window.__lastLoadedCloudState;
   const totalHistoryBaseline = loadedState?.syncMeta?.rev === expectedRevision && Array.isArray(loadedState.totalHistory)
     ? loadedState.totalHistory.map(entry => ({ ...entry })) : null;
-  const result = await writer({ db:FB.db, docRef:FB.docRef, state, setOptions,
+  const result = await writer({ db:target?.db||FB.db, docRef:target?.docRef||FB.docRef, state, setOptions,
     expectedRevision,
     clientId:getCloudSyncClientId(), scan:scanAuthoritativeCutFileContent,
     prepare:(pending, remote)=>{
+      if(target&&!cuttingJobSaveTargetIsCurrent(target))throw Object.assign(Error("Cutting-job workspace/backend changed during the transaction."),{definite:true,code:"chronology_target_changed"});
       if (options.validateSourceState && options.validateSourceState(JSON.parse(JSON.stringify(remote))) !== true){
         throw Object.assign(new Error("Mutation source or local evidence changed."), { definite:true, code:"mutation_source_changed" });
       }
@@ -4626,11 +4606,32 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       const historyRestoreCheck = validateCuttingJobHistoryRestoreSave(remote, pending, historyRestoreProof);
       if (!historyRestoreCheck.valid) throw Object.assign(new Error(historyRestoreCheck.error), { definite:true, code:"cutting_job_history_restore_rejected" });
       if (proof && !validateMaintenanceV2RepairRemoteBaseline(proof, remote)) throw Object.assign(new Error("Latest V2 state no longer matches the authorized repair baseline."), { definite:true, code:"repair_conflict" });
-      const safetyRemote = cuttingJobDeletionSafetyBaseline(proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote, pending, deletionProof);
-      const safetyBaseline = cuttingJobDeletionSafetyBaseline(proof ? { ...window.__lastLoadedCloudState, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : window.__lastLoadedCloudState, pending, deletionProof);
+      // A confirmed completion is a transfer of one intact stable identity,
+      // not a reduction of protected business data. Validate the exact prepared
+      // result before projecting that transfer into the guard baselines. All
+      // unrelated fields and guards remain unchanged, including job-to-trash.
+      const completionId=options.cuttingJobCompletionId;
+      const completionSafetyBaseline=baseline=>{
+        if(!completionId||!baseline)return baseline;
+        const active=baseline.cuttingJobs||[],completed=baseline.completedCuttingJobs||[];
+        const matches=active.filter(job=>job.id===completionId);
+        if(matches.length!==1||completed.some(job=>job.id===completionId))return baseline;
+        return {...baseline,cuttingJobs:active.filter(job=>job.id!==completionId),completedCuttingJobs:[...completed,matches[0]]};
+      };
+      if(completionId){
+        const prior=(remote.cuttingJobs||[]).filter(job=>job.id===completionId),after=(pending.completedCuttingJobs||[]).filter(job=>job.id===completionId);
+        const derived=new Set(["completedAtISO","actualHours","efficiency","priority","cutNumber","cutDateISO","cutOrderWithinDay","cutChronologyHistory","notes","material","materialCost","materialQty","chargeRate"]);
+        const preserved=prior.length===1&&after.length===1&&Object.keys(prior[0]).filter(key=>!derived.has(key)).every(key=>stableStringify(prior[0][key])===stableStringify(after[0][key]));
+        if(!preserved||(remote.completedCuttingJobs||[]).some(job=>job.id===completionId)||(pending.cuttingJobs||[]).some(job=>job.id===completionId)
+          ||pending.cuttingJobs.length!==remote.cuttingJobs.length-1||pending.completedCuttingJobs.length!==remote.completedCuttingJobs.length+1
+          ||!window.CuttingJobDateEditing?.dateKey(after[0]?.completedAtISO)||typeof options.validatePreparedState!=="function"||options.validatePreparedState(JSON.parse(JSON.stringify(pending)))!==true)
+          throw Object.assign(new Error("Completion must preserve the exact job in completed history."),{definite:true,code:"cutting_job_completion_rejected"});
+      }
+      const safetyRemote = completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote, pending, deletionProof));
+      const safetyBaseline = completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...window.__lastLoadedCloudState, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : window.__lastLoadedCloudState, pending, deletionProof));
       const backup = readLocalStateBackup();
-      const safetyBackup = cuttingJobDeletionSafetyBaseline(proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup, pending, deletionProof);
-      const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:buildWindowProtectedStateForCoverage(), coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
+      const safetyBackup = completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup, pending, deletionProof));
+      const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:completionSafetyBaseline(buildWindowProtectedStateForCoverage()), coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
       if (preflight.blocked || detectDangerousProtectedFieldReduction(safetyRemote, pending).blocked) throw Object.assign(new Error("Protected-state transaction preflight blocked the write."), { definite:true, code:"protected_preflight_blocked" });
       if (remote.pumpEff?.baselineHistory !== undefined || pending.pumpEff?.baselineHistory !== undefined){
         const retention=validatePumpBaselineRetention(remote.pumpEff,pending.pumpEff);
@@ -4648,13 +4649,14 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
         pending.pumpEff = mergeUnlessIdentical("pumpEff",mergePumpEffForSave);
       }
       if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
-      // Additional restriction only: validate an isolated copy after protected
-      // merges, without granting any exception to the existing save guards.
+      // Additional restriction after all existing protected merges. Validation
+      // receives an isolated copy and cannot alter the guarded save or bypass
+      // CAS, identity, content, size or protected-state gates.
       if (options.validatePreparedState){
         try {
-          if (options.validatePreparedState(JSON.parse(JSON.stringify(pending))) !== true) throw Error("Prepared mutation changed; review again.");
+          if (options.validatePreparedState(JSON.parse(JSON.stringify(pending))) !== true) throw Error(options.validateSourceState ? "Prepared mutation changed; review again." : "Prepared chronology state changed; review again.");
         } catch (error){
-          throw Object.assign(new Error(String(error?.message || error)), { definite:true, code:"mutation_state_changed" });
+          throw Object.assign(new Error(String(error?.message || error)), { definite:true, code:options.validateSourceState ? "mutation_state_changed" : "chronology_state_changed" });
         }
       }
       return pending;
@@ -4671,6 +4673,95 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
     if (result.indeterminate) renderRecoveryDiagnosticsPanel();
   } catch (error){ return reportCloudSaveSecondaryError(result, error); }
   return result;
+}
+
+function captureCuttingJobSaveTarget(){
+  const target={db:FB.db,docRef:FB.docRef,path:String(FB.docRef?.path||""),projectId:String(FB.app?.options?.projectId||""),actorUid:String(FB.user?.uid||""),backend:window.OMAXDevSafe?.active?"disposable":"firestore"};
+  if(!target.db||!target.docRef||!target.path||!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend is unavailable or changed.");
+  return Object.freeze(target);
+}
+function cuttingJobSaveTargetIsCurrent(target){
+  if(!target || target.db!==FB.db || target.docRef!==FB.docRef || target.path!==FB.docRef?.path || target.projectId!==String(FB.app?.options?.projectId||"") || target.actorUid!==String(FB.user?.uid||"") || target.backend!==(window.OMAXDevSafe?.active?"disposable":"firestore"))return false;
+  const aliases=[FB.workspaceRef,window.workspaceRef].filter(Boolean);
+  return (!target.docRef.firestore||target.docRef.firestore===target.db)&&aliases.every(ref=>ref.path===target.path&&(!ref.firestore||ref.firestore===target.db));
+}
+async function readCuttingJobAuthoritativeSnapshot(target){
+  if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend changed before server verification.");
+  const snapshot=await target.docRef.get({source:"server"});
+  return {state:snapshot?.exists?snapshot.data():null,fromCache:snapshot?.metadata?.fromCache,hasPendingWrites:snapshot?.metadata?.hasPendingWrites,path:snapshot?.ref?.path||target.path,backendMatches:!snapshot?.ref?.firestore||snapshot.ref.firestore===target.db};
+}
+function refreshCuttingJobVerificationNotice(){
+  if(typeof document==="undefined"||typeof document.querySelectorAll!=="function")return;
+  document.querySelectorAll("[data-cutting-job-verification-notice]").forEach(node=>{node.hidden=!window.__cuttingJobDisplayUnconfirmed;});
+}
+window.refreshCuttingJobVerificationNotice=refreshCuttingJobVerificationNotice;
+
+// Foundation adapter only. The reviewed UI supplies an exact preview binding.
+const cuttingJobChronologyMutationApi = window.CuttingJobChronology?.createMutationApi({
+  canWrite:()=>canWriteCloud("cutting-job chronology") && !hasPendingLocalChanges
+    && !isVercelPreviewRuntime() && !window.__lastIndeterminateSave,
+  localVersion:()=>({
+    revision:window.__loadedCloudRevisionForSaveGuard, mutation:lastLocalMutationAt,
+    actorUid:String(FB.user?.uid||""),state:getCuttingJobChronologyLocalState()
+  }),
+  captureTarget:captureCuttingJobSaveTarget,
+  targetIsCurrent:cuttingJobSaveTargetIsCurrent,
+  readState:async target=>{
+    const snapshot=await readCuttingJobAuthoritativeSnapshot(target);
+    if(snapshot.fromCache!==false||snapshot.hasPendingWrites!==false||snapshot.path!==target.path||snapshot.backendMatches===false)throw Error("Cutting-job baseline requires a confirmed server snapshot.");
+    return snapshot.state;
+  },
+  readVerificationState:readCuttingJobAuthoritativeSnapshot,
+  baselineMatches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)
+    && stableStringify(source)===stableStringify(getCuttingJobChronologyLocalState()),
+  writeState:(next,expectedRevision,validatePreparedState,operation,target)=>writeAuthoritativeStateSnapshot(next,{merge:true},{expectedRevision,validatePreparedState,authoritativeTarget:target,cuttingJobCompletionId:operation?.type==="complete"?operation.id:null}),
+  adoptVerifiedState:cloud=>{
+    const adopted=adoptIdentityCheckedAuthoritativeState(cloud)?.recovery===false;
+    if(adopted){window.__cuttingJobDisplayUnconfirmed=false;refreshCuttingJobVerificationNotice();}
+    return adopted;
+  },
+  prepareBusinessMutation:(source,operation,options)=>window.CuttingJobDateEditing.prepareMutation(source,operation,{
+    ...options,buildCompletedJob,
+    normalizePriorities:(list,targetId)=>{
+      const target=list.find(job=>job.id===targetId);
+      if(!target){normalizeJobPriorityOrder(list);return;}
+      const other=list.filter(job=>job.id!==targetId);normalizeJobPriorityOrder(other);
+      const index=Math.max(0,Math.min(other.length,(Number(target.priority)||1)-1));other.splice(index,0,target);
+      other.forEach((job,index)=>{job.priority=index+1;});
+    },
+    validateCategory:(job,state)=>window.CuttingJobHistory.validateManualProjectCategory(job.cat,job.projectNumber,state.jobFolders||[],[...state.cuttingJobs,...state.completedCuttingJobs],[...state.cuttingJobs,...state.completedCuttingJobs].find(original=>original.id===job.id)||null).ok===true
+  }),
+  audit:()=>({operationId:genId("cut_chronology"),atISO:new Date().toISOString(),actorUid:String(FB.user?.uid||"")}),
+  suspend:result=>{
+    window.__autosaveDisabled=true;
+    window.__recoveryInspectMode=true;
+    window.__lastIndeterminateSave=result;
+    window.__cuttingJobDisplayUnconfirmed=true;refreshCuttingJobVerificationNotice();
+    renderRecoveryDiagnosticsPanel();
+  }
+});
+
+window.isCuttingJobChronologySaving=()=>cuttingJobChronologyMutationApi?.isBusy?.()===true;
+window.cuttingJobChronologyWorkflow = window.CuttingJobChronologyReview?.createWorkflow({
+  canWrite:()=>canWriteCloud("cutting-job chronology")&&!hasPendingLocalChanges&&!isVercelPreviewRuntime()&&!window.__lastIndeterminateSave,
+  state:()=>getCuttingJobChronologyLocalState(),
+  version:()=>({revision:window.__loadedCloudRevisionForSaveGuard,mutation:lastLocalMutationAt,actorUid:String(FB.user?.uid||"")}),
+  audit:()=>({operationId:genId("cut_chronology"),atISO:new Date().toISOString(),actorUid:String(FB.user?.uid||"")}),
+  coordinator:cuttingJobChronologyMutationApi,
+  suspend:result=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastIndeterminateSave=result;renderRecoveryDiagnosticsPanel();}
+});
+
+function getCuttingJobChronologyLocalState(){
+  // Normal adoption does not populate every recovery-display global. Preserve
+  // loaded metadata/evidence and read current supported fields from the ordinary
+  // snapshot. This projection never writes and never invents chronology.
+  const source=window.__lastLoadedCloudState||{},live={};
+  const snapshot=compactStateForStorage(snapshotState({skipLocalFileCacheSync:true}));
+  for(const field of Object.keys(source)){
+    if(["schema","syncMeta","saveMeta","syncProcessLog"].includes(field)){live[field]=source[field];continue;}
+    live[field]=Object.prototype.hasOwnProperty.call(snapshot,field)?snapshot[field]:source[field];
+  }
+  return live;
 }
 
 function getInventoryIdentityRepairLocalState(){

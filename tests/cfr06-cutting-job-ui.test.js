@@ -27,7 +27,7 @@ assert.match(uploadHandler,/Upload succeeded; Cloud Files refresh failed\. Do no
 assert.equal((uploadHandler.match(/uploadCfr05CuttingFile/g)||[]).length,1,"listing refresh must never retry the upload");
 assert.equal(uploadHandler.includes("saveCloudNow"),false,"existing-job cloud upload must not rewrite app/state");
 assert.match(renderers,/pendingSecureCloudJobFiles/);
-assert.match(renderers,/saved\?\.saved !== true \|\| saved\?\.stateWriteCompleted !== true/);
+assert.match(renderers,/!created.saved\|\|!created.verified\|\|created.requiresReload/);
 assert.match(renderers,/for \(const file of pendingCloudFiles\)/);
 assert.match(renderers,/files:attachments/,"local/reference metadata remains in the authoritative job exactly as current main intended");
 assert.doesNotMatch(renderers,/files:\s*pendingCloudFiles/,"cloud bytes and pending cloud wrappers must not enter app\/state");

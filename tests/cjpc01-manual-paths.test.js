@@ -1,5 +1,6 @@
 "use strict";
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),vm=require("node:vm");
+const chronology=require("../js/cuttingJobChronology");
 const history=require("../js/cuttingJobHistory");
 const renderers=fs.readFileSync("js/renderers.js","utf8").replace(/\r\n/g,"\n"),core=fs.readFileSync("js/core.js","utf8"),views=fs.readFileSync("js/views.js","utf8");
 const folders=[{id:"jobs_root",name:"All Jobs"},{id:"blanco",name:"1254 Blanco"},{id:"mesquite",name:"1242 Mesquite"},{id:"unknown",name:"Smith County"}];
@@ -13,7 +14,7 @@ class Select{
 }
 function harness(active=[],completed=[]){
   const calls={save:0,upload:0,resequence:0},messages=[],elements={},fields={};
-  const window={CuttingJobHistory:{...history,resequence:()=>{calls.resequence++;}},cuttingJobs:active,completedCuttingJobs:completed,jobFolders:structuredClone(folders)};
+  const window={CuttingJobChronology:chronology,CuttingJobHistory:{...history,resequence:(active,completed)=>{calls.resequence++;return history.planDirectResequence(active,completed);}},cuttingJobs:active,completedCuttingJobs:completed,jobFolders:structuredClone(folders)};
   const noop=()=>{},content={dataset:{},querySelector:selector=>fields[/data-(?:j|history-field)="([^"]+)"/.exec(selector)?.[1]]||null,querySelectorAll:()=>[],addEventListener:(_,handler)=>{c.handler=handler;}};
   const c=vm.createContext({window,Date,console,content,document:{getElementById:id=>elements[id]||null,createElement:()=>({})},HTMLSelectElement:Select,
     cuttingJobs:active,completedCuttingJobs:completed,toast:message=>messages.push(message),genId:()=>"new-job",editingJobs:new Set(["j"]),editingCompletedJobsSet:()=>new Set(["j"]),
@@ -25,6 +26,9 @@ function harness(active=[],completed=[]){
     materialSettings:{materials:[]},pendingNewJobFiles:[],pendingSecureCloudJobFiles:[],recalcMaterialTotals:noop,applyMinutesToHours:noop,fractionToNumber:()=>.25,
     refreshCfr05CloudPresentation:async()=>{},JOB_ROOT_FOLDER_ID:"jobs_root",ensureJobFolderState:()=>window.jobFolders,setJobFolders:value=>{window.jobFolders=value;},normalizeHexColor:()=>null,
     ensureJobCategories:()=>{throw Error("Manual flow must not normalize historical jobs");}});
+  c.structuredClone=structuredClone;
+  c.createCuttingJob=async job=>{calls.save++;window.cuttingJobs.push(job);return{saved:true,verified:true};};
+  c.saveCuttingJobEdit=async(id,updates)=>{calls.save++;Object.assign([...window.cuttingJobs,...window.completedCuttingJobs].find(job=>job.id===id),updates);return{saved:true,verified:true};};
   for(const name of ["validateManualJobProjectCategory","applyManualJobProjectCategory","addJobFolder"])vm.runInContext(fn(core,name),c);
   for(const name of ["promptCreateCategory","selectManualJobCategory","syncManualJobProjectControl","syncManualJobProjectControls"])vm.runInContext(fn(renderers,name),c);
   window.uploadCfr05CuttingFile=async()=>{calls.upload++;return{stage:"completed"};};
@@ -46,6 +50,7 @@ function harness(active=[],completed=[]){
     return c.handler({preventDefault:noop});
   }
   function edit(historyEdit=false,values={}){
+    values={startISO:"2026-10-06",completedAtISO:"2026-10-07",...values};
     Object.assign(fields,Object.fromEntries(Object.entries(values).map(([key,value])=>[key,{value}])));
     const token=historyEdit?"histSave":"sv";c[token]={getAttribute:()=>"j"};
     const code=historyEdit?between("    if (histSave){","\n  });\n\n  // 6) Edit"):between("    if (sv){","\n    // Cancel edit");
@@ -56,10 +61,11 @@ function harness(active=[],completed=[]){
   return{c,window,calls,messages,elements,fields,dashboard,add,edit,copy,inline};
 }
 const job=(extra={})=>({id:"j",name:"Original",cat:"blanco",projectNumber:"1254",estimateHours:2,materialCost:9,materialQty:1,files:[{fileId:"secure"}],manualLogs:[{completedHours:1}],cutDateISO:"2026-01-02",cutOrderWithinDay:2,cutNumber:"C042",importProvenance:{sourceRowNumber:3},...extra});
+const legacyJob=extra=>{const value=job(extra);delete value.cutDateISO;delete value.cutOrderWithinDay;return value;};
 
-test("Dashboard creates a project-bearing job and blocks manipulated/unmapped pairs",()=>{
-  const h=harness();h.dashboard();assert.equal(h.window.cuttingJobs[0].projectNumber,"1254");assert.equal(h.calls.save,1);
-  for(const [cat,project]of [["mesquite","1254"],["unknown","1305"],["jobs_root",""]]){const bad=harness();bad.dashboard(cat,project);assert.equal(bad.window.cuttingJobs.length,0);assert.equal(bad.calls.save,0);assert.equal(bad.calls.resequence,0);assert.ok(bad.messages.length);}
+test("Dashboard creates a project-bearing job and blocks manipulated/unmapped pairs",async()=>{
+  const h=harness();await h.dashboard();assert.equal(h.window.cuttingJobs[0].projectNumber,"1254");assert.equal(h.calls.save,1);
+  for(const [cat,project]of [["mesquite","1254"],["unknown","1305"],["jobs_root",""]]){const bad=harness();await bad.dashboard(cat,project);assert.equal(bad.window.cuttingJobs.length,0);assert.equal(bad.calls.save,0);assert.equal(bad.calls.resequence,0);assert.ok(bad.messages.length);}
 });
 test("Add Job validates before push, persistence, numbering or secure upload",async()=>{
   for(const secure of [false,true]){
@@ -92,13 +98,14 @@ test("inline Category updates both fields and rolls the control back when blocke
   const original=job(),h=harness([original]);h.inline("mesquite");assert.equal(original.projectNumber,"1242");assert.equal(original.cat,"mesquite");assert.equal(h.calls.save,1);
   const badOriginal=job(),before=structuredClone(badOriginal),bad=harness([badOriginal]),select=bad.inline("unknown");assert.deepEqual(badOriginal,before);assert.equal(bad.calls.save,0);assert.equal(select.value,"blanco");
 });
-test("active copy receives projectNumber without altering its historical source",async()=>{
-  const original=job({completedAtISO:"2026-01-02"}),before=structuredClone(original),h=harness([],[original]);await h.copy();
+test("legacy active copy receives projectNumber without altering its historical source",async()=>{
+  const original=legacyJob({completedAtISO:"2026-01-02"}),before=structuredClone(original),h=harness([],[original]);await h.copy();
   assert.equal(h.window.cuttingJobs[0].projectNumber,"1254");assert.equal(h.window.cuttingJobs[0].cat,"blanco");assert.deepEqual(original,before);
-  const bad=harness([],[job({cat:"unknown",projectNumber:""})]);await bad.copy();assert.equal(bad.window.cuttingJobs.length,0);assert.equal(bad.calls.save,0);
+  const bad=harness([],[legacyJob({cat:"unknown",projectNumber:""})]);await bad.copy();assert.equal(bad.window.cuttingJobs.length,0);assert.equal(bad.calls.save,0);
 });
+test("canonical active copy uses guarded creation and preserves original project/category data",async()=>{const original=job(),before=structuredClone(original),h=harness([],[original]);await h.copy();assert.equal(h.window.cuttingJobs.length,1);assert.equal(h.calls.save,1);assert.deepEqual(original,before);assert.equal(h.window.cuttingJobs[0].cat,"blanco");assert.equal(h.window.cuttingJobs[0].projectNumber,"1254");});
 test("active copy revalidates category ownership after the awaited dialog",async()=>{
-  const h=harness([],[job()]);h.c.showMakeActiveCopyModal=async()=>{h.window.jobFolders.push({id:"duplicate",name:"Blanco"});return{};};await h.copy();assert.equal(h.window.cuttingJobs.length,0);assert.equal(h.calls.save,0);
+  const h=harness([],[legacyJob()]);h.c.showMakeActiveCopyModal=async()=>{h.window.jobFolders.push({id:"duplicate",name:"Blanco"});return{};};await h.copy();assert.equal(h.window.cuttingJobs.length,0);assert.equal(h.calls.save,0);
 });
 test("project control follows Category, while unchanged legacy displays remain exact",()=>{
   const original=job({projectNumber:" legacy "}),h=harness([original]),select=new Select("blanco"),input={parentElement:{querySelector:()=>null}};
