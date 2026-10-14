@@ -2638,6 +2638,19 @@ async function initFirebase(){
   }
 
 
+  // Recovered from 947b9d3: Ctrl/Cmd+S opens the normal sign-in dialog.
+  const handleLoginShortcut = (event)=>{
+    if (event.defaultPrevented || event.repeat || event.altKey || event.shiftKey) return;
+    if (!(event.ctrlKey || event.metaKey) || String(event.key || "").toLowerCase() !== "s") return;
+    if (FB.user || !modal || isEditableTarget(event.target) || isEditableTarget(document.activeElement)) return;
+    if (event.target?.closest?.('[contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
+    event.preventDefault();
+    showModal();
+    emailEl?.focus();
+    emailEl?.select();
+  };
+  window.addEventListener("keydown", handleLoginShortcut);
+
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
     workspaceMetadataWritesBlocked = false;

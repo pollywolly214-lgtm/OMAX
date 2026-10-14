@@ -128,9 +128,10 @@ function viewDashboard(){
       <span class="dashboard-edit-hint" id="dashboardEditHint" hidden>Drag windows to rearrange and resize. Calendar stays fixed.</span>
     </div>
 
-    ${avgBanner}
-
     <div class="dashboard-layout" id="dashboardLayout">
+      <div class="dashboard-window" data-dashboard-window="averageHours">
+        ${avgBanner}
+      </div>
       <div class="dashboard-window" data-dashboard-window="totalHours">
         <div class="block total-hours-block">
           <h3>Total Hours</h3>
@@ -1985,7 +1986,6 @@ function viewCosts(model){
             <button type="button" class="btn secondary" data-receipt-clear-all>Clear all</button>
             <button type="button" class="btn secondary" data-receipt-undo-clear disabled>Undo clear</button>
             <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
-            <button type="button" class="btn secondary" data-receipt-export-range>Export range (CSV)</button>
           </div>
           <p class="small muted" data-receipt-week-range>—</p>
           <p class="small muted" data-receipt-week-allocation-note hidden>Historical shipping and tax may be allocated across items from the same original order.</p>
@@ -2008,6 +2008,7 @@ function viewCosts(model){
                 <option value="all">All time</option>
               </select>
             </label>
+            <button type="button" class="btn secondary" data-receipt-export-range>Export range (CSV)</button>
           </div>
           <p class="small muted" data-receipt-range-label>—</p>
           <p class="small muted" data-receipt-range-allocation-note hidden>Historical shipping and tax may be allocated across items from the same original order.</p>
@@ -4641,10 +4642,10 @@ function viewJobs(){
             <input type="text" id="jobMaterialThickness" placeholder="1/4" inputmode="decimal" value="${esc(addJobDraftField("materialThickness"))}">
           </label>
           <label>Path length (ft)
-            <input type="number" id="jobMaterialLengthFt" placeholder="10" min="0.01" step="0.01" value="${esc(addJobDraftField("materialLengthFt"))}">
+            <input type="text" id="jobMaterialLengthFt" placeholder="10 or 3/12" title="Feet: enter a decimal or a fraction such as 3/12 for 3 inches" value="${esc(addJobDraftField("materialLengthFt"))}">
           </label>
           <label>Path width (ft)
-            <input type="number" id="jobMaterialWidthFt" placeholder="4" min="0.01" step="0.01" value="${esc(addJobDraftField("materialWidthFt"))}">
+            <input type="text" id="jobMaterialWidthFt" placeholder="4 or 3/12" title="Feet: enter a decimal or a fraction such as 3/12 for 3 inches" value="${esc(addJobDraftField("materialWidthFt"))}">
           </label>
           <label>Material cost ($)
             <input type="number" id="jobMaterialCost" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}" readonly aria-readonly="true">

@@ -3152,6 +3152,38 @@ function addDashboardWindowHandles(state){
   });
 }
 
+function positionJobActionsMenu(menu, trigger){
+  if (!menu || !trigger) return;
+  const gap = 6, margin = 8;
+  const width = document.documentElement.clientWidth || window.innerWidth;
+  const height = window.innerHeight;
+  const anchor = trigger.getBoundingClientRect();
+  const box = menu.getBoundingClientRect();
+  const left = Math.max(margin, Math.min(anchor.right - box.width, width - box.width - margin));
+  const top = anchor.bottom + gap + box.height <= height - margin
+    ? anchor.bottom + gap : anchor.top - gap - box.height;
+  menu.style.left = `${left}px`;
+  menu.style.top = `${Math.max(margin, Math.min(top, height - box.height - margin))}px`;
+}
+
+function showJobActionsMenu(menu, trigger){
+  if (typeof menu.showPopover !== "function") return ()=>{};
+  menu.setAttribute("popover", "manual");
+  menu.showPopover();
+  positionJobActionsMenu(menu, trigger);
+  const reposition = event=>{
+    if (event?.target && menu.contains(event.target)) return;
+    positionJobActionsMenu(menu, trigger);
+  };
+  window.addEventListener("resize", reposition);
+  window.addEventListener("scroll", reposition, true);
+  return ()=>{
+    window.removeEventListener("resize", reposition);
+    window.removeEventListener("scroll", reposition, true);
+    if (menu.matches(":popover-open")) menu.hidePopover();
+  };
+}
+
 function renderNextDueWidget(ndBox){
   if (!ndBox) return;
 
@@ -3338,9 +3370,9 @@ function renderNextDueWidget(ndBox){
     ndBox.classList.remove("next-due-preview-mode");
     delete ndBox.dataset.preview;
   }else{
-    ndBox.innerHTML = buildNextDuePreview();
-    ndBox.classList.add("next-due-preview-mode");
-    ndBox.dataset.preview = "1";
+    ndBox.innerHTML = '<div class="next-due-window"><strong class="chip green-better">Caught up!</strong><p class="next-due-empty">No new tasks are required.</p></div>';
+    ndBox.classList.remove("next-due-preview-mode");
+    delete ndBox.dataset.preview;
   }
 }
 
@@ -8953,6 +8985,19 @@ const makeActiveCopyModalState = {
 const DATE_INPUT_RE = /^\d{4}-\d{2}-\d{2}$/;
 const JOB_DAY_MS = 24 * 60 * 60 * 1000;
 
+// Local form parser: decimal/scientific number or a single numeric division.
+function parseCuttingJobDimension(value){
+  const text = String(value ?? "").trim();
+  const number = "[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?";
+  const match = text.match(new RegExp(`^(${number})(?:\\s*/\\s*(${number}))?$`));
+  if (!match) return NaN;
+  const numerator = Number(match[1]);
+  const denominator = match[2] == null ? 1 : Number(match[2]);
+  const result = numerator / denominator;
+  return Number.isFinite(numerator) && Number.isFinite(denominator) && denominator !== 0 && Number.isFinite(result)
+    ? result : NaN;
+}
+
 function parseJobDate(value){
   if (!value) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())){
@@ -9083,8 +9128,16 @@ function ensureMakeActiveCopyModal(){
       }
     };
 
-    state.startInput.addEventListener("change", updateDuration);
-    state.startInput.addEventListener("input", updateDuration);
+    const updateStartDate = ()=>{
+      const startDate = parseJobDate(state.startInput.value);
+      const dueDate = parseJobDate(state.dueInput.value);
+      if (startDate && dueDate && dueDate < startDate){
+        state.dueInput.value = toDateInputValue(startDate);
+      }
+      updateDuration();
+    };
+    state.startInput.addEventListener("change", updateStartDate);
+    state.startInput.addEventListener("input", updateStartDate);
     state.dueInput.addEventListener("change", updateDuration);
     state.dueInput.addEventListener("input", updateDuration);
 
@@ -9158,10 +9211,10 @@ function showMakeActiveCopyModal(options){
       : "Select the start and due dates for the new active job.";
   }
 
-  state.startInput.value = defaultStart || "";
-  state.dueInput.value = defaultEnd || "";
-  if (defaultStart){
-    state.dueInput.min = defaultStart;
+  state.startInput.value = toDateInputValue(parseJobDate(defaultStart));
+  state.dueInput.value = toDateInputValue(parseJobDate(defaultEnd));
+  if (state.startInput.value){
+    state.dueInput.min = state.startInput.value;
   }else{
     state.dueInput.removeAttribute("min");
   }
@@ -10199,7 +10252,13 @@ function renderSettings(){
       #explorer .toolbar-search button:disabled{opacity:.5;cursor:default}
       #explorer .toolbar .hint{flex:1 1 auto;text-align:center;width:100%}
       #explorer .hint{font-size:.8rem;color:#666}
-      #explorer .history-import-admin{margin-top:1rem;border:1px solid #d7e1f1;background:#f8fbff;border-radius:10px;padding:12px}
+      #explorer .history-import-admin{margin-top:1rem;border:1px solid var(--brand-card-border);background:var(--brand-card-bg);color:var(--brand-blue-900);border-radius:10px;padding:12px}
+      #explorer .history-import-admin .hint{color:var(--brand-blue-800)}
+      #explorer .history-import-controls input{color:var(--brand-blue-900);background:#fff;max-width:100%}
+      #explorer .history-import-controls input::placeholder{color:var(--brand-blue-800);opacity:1}
+      #explorer .history-import-controls input::file-selector-button{background:var(--brand-blue-800);color:#fff;border:1px solid var(--brand-blue-800);border-radius:6px;padding:.4rem .6rem}
+      #explorer .history-import-controls button{background:var(--brand-blue-800);color:#fff}
+      #explorer .history-import-controls button:disabled{opacity:1;background:var(--brand-card-bg);color:var(--brand-blue-800);border:1px solid var(--brand-blue-800);cursor:not-allowed}
       #explorer .history-import-admin h4{margin:.1rem 0 .35rem}
       #explorer .history-import-controls{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.6rem 0}
       #explorer .history-import-controls input[type="text"]{min-width:280px;max-width:100%;padding:.4rem .5rem;border:1px solid #cbd5e1;border-radius:8px}
@@ -20695,7 +20754,11 @@ function renderJobs(){
     document.addEventListener("keydown", fileMenuKeyHandler);
   };
 
+  let cleanupActionMenuPosition = null;
+  let cleanupHistoryActionMenuPosition = null;
   const closeActionMenu = ()=>{
+    cleanupActionMenuPosition?.();
+    cleanupActionMenuPosition = null;
     if (!openActionMenuId) return;
     const menu = content.querySelector(`[data-job-actions-menu="${openActionMenuId}"]`);
     if (menu){
@@ -20737,6 +20800,7 @@ function renderJobs(){
       openActionTrigger.classList.add("is-open");
     }
 
+    cleanupActionMenuPosition = showJobActionsMenu(menu, openActionTrigger);
     actionMenuDocHandler = (event)=>{
       if (!openActionMenuId) return;
       const menuEl = content.querySelector(`[data-job-actions-menu="${openActionMenuId}"]`);
@@ -20761,6 +20825,8 @@ function renderJobs(){
   };
 
   const closeHistoryActionMenu = ()=>{
+    cleanupHistoryActionMenuPosition?.();
+    cleanupHistoryActionMenuPosition = null;
     if (!openHistoryActionMenuId) return;
     const menu = content.querySelector(`[data-history-actions-menu="${openHistoryActionMenuId}"]`);
     if (menu){
@@ -20802,6 +20868,7 @@ function renderJobs(){
       openHistoryActionTrigger.classList.add("is-open");
     }
 
+    cleanupHistoryActionMenuPosition = showJobActionsMenu(menu, openHistoryActionTrigger);
     historyActionMenuDocHandler = (event)=>{
       if (!openHistoryActionMenuId) return;
       const menuEl = content.querySelector(`[data-history-actions-menu="${openHistoryActionMenuId}"]`);
@@ -22725,8 +22792,12 @@ function renderJobs(){
     if (!(matEl && tEl && lengthEl && widthEl && costEl && qtyEl)) return;
     const selected = materialSettings.materials.find(m => m.name === matEl.value);
     const thickness = fractionToNumber(tEl.value);
-    const lengthFt = Number(lengthEl.value);
-    const widthFt = Number(widthEl.value);
+    const lengthFt = parseCuttingJobDimension(lengthEl.value);
+    const widthFt = parseCuttingJobDimension(widthEl.value);
+    for (const [input, value] of [[lengthEl, lengthFt], [widthEl, widthFt]]){
+      input.setCustomValidity(input.value.trim() && (!Number.isFinite(value) || value <= 0)
+        ? "Enter positive feet as a decimal or fraction, such as 3/12." : "");
+    }
     const areaSqIn = lengthFt * widthFt * 144;
     if (!selected || !Number.isFinite(thickness) || !Number.isFinite(areaSqIn) || thickness <= 0 || areaSqIn <= 0){
       costEl.value = "";
@@ -22843,6 +22914,7 @@ function renderJobs(){
     if(typeof createCuttingJob!=="function"){toast("Cutting-job saving is unavailable.");return {blocked:true};}
 
     recalcMaterialTotals();
+    if (typeof e.currentTarget?.reportValidity === "function" && !e.currentTarget.reportValidity()) return;
     const name  = document.getElementById("jobName").value.trim();
     const estMinutesInput = document.getElementById("jobEstMinutes");
     applyMinutesToHours(addJobEstHoursInput, estMinutesInput, addJobEstBreakdown);
@@ -22898,8 +22970,13 @@ function renderJobs(){
     const attachments = pendingNewJobFiles.map(f=>({ ...f }));
     const pendingCloudFiles = pendingSecureCloudJobFiles.map(entry=>entry?.file).filter(file=>file && typeof file.arrayBuffer === "function");
     const thickness = fractionToNumber(document.getElementById("jobMaterialThickness")?.value);
-    const pathLength = Number(document.getElementById("jobMaterialLengthFt")?.value);
-    const pathWidth = Number(document.getElementById("jobMaterialWidthFt")?.value);
+    const lengthText = document.getElementById("jobMaterialLengthFt")?.value || "";
+    const widthText = document.getElementById("jobMaterialWidthFt")?.value || "";
+    const pathLength = lengthText.trim() ? parseCuttingJobDimension(lengthText) : 0;
+    const pathWidth = widthText.trim() ? parseCuttingJobDimension(widthText) : 0;
+    if (![pathLength, pathWidth].every(value => Number.isFinite(value) && value >= 0)){
+      toast("Enter valid dimensions in feet, using decimals or fractions."); return;
+    }
     const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material,
       thickness, pathLength, pathWidth, materialCost, materialQty, materialWeight, materialCostComplete:materialCostRaw !== "",
       chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: pair.cat };

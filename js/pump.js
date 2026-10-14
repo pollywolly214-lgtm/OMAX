@@ -1385,13 +1385,13 @@ function pumpRenderNotesModal(){
     if (dateLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(dateLabel)}</span>`);
     if (timeLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(timeLabel)}</span>`);
     if (rangeDisplay) subtitleParts.push(`<span>${pumpEscapeTooltipValue(rangeDisplay)}</span>`);
-    if (rpmLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(rpmLabel)}</span>`);
     const subtitle = subtitleParts.length
       ? `<p class="pump-notes-subtitle">${subtitleParts.join('<span aria-hidden="true">·</span>')}</p>`
       : "";
     pumpNotesModalDialog.innerHTML = `
       <header class="pump-notes-header">
         <div class="pump-notes-title-group">
+          ${rpmLabel ? `<strong class="pump-point-rpm">${pumpEscapeTooltipValue(rpmLabel)}</strong>` : ""}
           <h3 id="${headingId}" data-pump-notes-heading>${note ? "Edit note" : "Add note"}</h3>
           ${subtitle}
         </div>
@@ -1586,7 +1586,8 @@ function pumpShowChartTooltip(canvas, tooltip, target, { scaleX, scaleY }){
   let anchorY = targetTop;
   let placement = "above";
 
-  const topIfAbove = (targetTop * cssScaleY) - (tipHeight * 1.05);
+  const gap = 10;
+  const topIfAbove = (targetTop * cssScaleY) - tipHeight - gap;
   if (topIfAbove < margin){
     placement = "below";
     anchorY = targetBottom;
@@ -1594,16 +1595,16 @@ function pumpShowChartTooltip(canvas, tooltip, target, { scaleX, scaleY }){
 
   let anchorYCss = anchorY * cssScaleY;
   if (placement === "above"){
-    const minAnchorY = margin + (tipHeight * 1.05);
-    const maxAnchorY = canvasHeight - margin + (tipHeight * 0.1);
+    const minAnchorY = margin + tipHeight + gap;
+    const maxAnchorY = canvasHeight - margin;
     if (maxAnchorY < minAnchorY){
       anchorYCss = (minAnchorY + maxAnchorY) / 2;
     }else{
       anchorYCss = Math.min(maxAnchorY, Math.max(minAnchorY, anchorYCss));
     }
   }else{
-    const minAnchorY = margin - (tipHeight * 0.1);
-    const maxAnchorY = canvasHeight - margin - (tipHeight * 1.05);
+    const minAnchorY = margin;
+    const maxAnchorY = canvasHeight - margin - tipHeight - gap;
     if (maxAnchorY < minAnchorY){
       anchorYCss = (minAnchorY + maxAnchorY) / 2;
     }else{
@@ -1612,8 +1613,13 @@ function pumpShowChartTooltip(canvas, tooltip, target, { scaleX, scaleY }){
   }
 
   tooltip.dataset.placement = placement;
-  tooltip.style.left = `${anchorXCss}px`;
-  tooltip.style.top = `${anchorYCss}px`;
+  const canvasBox = canvas.getBoundingClientRect();
+  const host = tooltip.offsetParent;
+  const hostBox = host?.getBoundingClientRect() || canvasBox;
+  const offsetX = canvasBox.left - hostBox.left - (host?.clientLeft || 0) + (host?.scrollLeft || 0);
+  const offsetY = canvasBox.top - hostBox.top - (host?.clientTop || 0) + (host?.scrollTop || 0);
+  tooltip.style.left = `${offsetX + anchorXCss}px`;
+  tooltip.style.top = `${offsetY + anchorYCss}px`;
   tooltip.style.visibility = "";
   tooltip.dataset.visible = "true";
   canvas.style.cursor = "pointer";

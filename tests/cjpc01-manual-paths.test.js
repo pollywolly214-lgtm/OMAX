@@ -30,7 +30,7 @@ function harness(active=[],completed=[]){
   c.createCuttingJob=async job=>{calls.save++;window.cuttingJobs.push(job);return{saved:true,verified:true};};
   c.saveCuttingJobEdit=async(id,updates)=>{calls.save++;Object.assign([...window.cuttingJobs,...window.completedCuttingJobs].find(job=>job.id===id),updates);return{saved:true,verified:true};};
   for(const name of ["validateManualJobProjectCategory","applyManualJobProjectCategory","addJobFolder"])vm.runInContext(fn(core,name),c);
-  for(const name of ["promptCreateCategory","selectManualJobCategory","syncManualJobProjectControl","syncManualJobProjectControls"])vm.runInContext(fn(renderers,name),c);
+  for(const name of ["parseCuttingJobDimension","promptCreateCategory","selectManualJobCategory","syncManualJobProjectControl","syncManualJobProjectControls"])vm.runInContext(fn(renderers,name),c);
   window.uploadCfr05CuttingFile=async()=>{calls.upload++;return{stage:"completed"};};
   function dashboard(cat="blanco",project="1254"){
     const defaults={jobNameInput:"Part",jobEstimateInput:"2",jobChargeInput:"200",jobCostRateInput:"45",jobMaterialInput:"Steel",jobMaterialCostInput:"9",jobMaterialQtyInput:"1",jobStartInput:"2026-10-06",jobDueInput:"2026-10-07",jobProjectInput:project};
@@ -142,4 +142,29 @@ test("views lock project controls and retain unknown legacy category selections"
   assert.match(views,/Stored category \(needs project-number review\)/);
   assert.equal(renderers.slice(renderers.indexOf("function renderJobs(){"),renderers.indexOf("function renderJobs(){")+1000).includes("ensureJobCategories"),false);
   assert.match(renderers,/openJobsEditor\(jobId\)/);
+});
+
+// POLISH-01: existing edit exit must follow verified persistence, never optimism.
+test("active and history edits stay open until verification, including failed/indeterminate saves",async()=>{
+  for(const historyEdit of [false,true]){
+    for(const result of [
+      {saved:false,verified:false,error:"fixture failure"},
+      {saved:true,verified:false,requiresReload:true,error:"fixture indeterminate"},
+      {saved:true,verified:true,requiresReload:true},
+      {saved:true,verified:true}
+    ]){
+      const h=harness(historyEdit?[]:[job()],historyEdit?[job({completedAtISO:"2026-10-07"})]:[]);
+      const editing=new Set(["j"]);let renders=0,release;
+      if(historyEdit)h.c.editingCompletedJobsSet=()=>editing;else h.c.editingJobs=editing;
+      h.c.renderJobs=()=>renders++;
+      h.c.saveCuttingJobEdit=()=>new Promise(resolve=>{release=resolve;});
+      const pending=h.edit(historyEdit,{name:"Updated",cat:"blanco",projectNumber:"1254",materialCost:"9",materialQty:"1"});
+      assert.equal(editing.has("j"),true,"keep edit open while save is pending");
+      assert.equal(renders,0);
+      release(result);await pending;
+      const confirmed=result.saved&&result.verified&&!result.requiresReload;
+      assert.equal(editing.has("j"),!confirmed);
+      assert.equal(renders,confirmed?1:0);
+    }
+  }
 });

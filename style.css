@@ -84,15 +84,14 @@ body.pump-log-edit-open { overflow:hidden; }
 }
 .pump-notes-btn:hover { background:rgba(12, 37, 84, 0.95); }
 .pump-notes-btn:focus-visible { outline:2px solid rgba(59,130,246,0.8); outline-offset:2px; }
-.pump-chart-tooltip{ position:absolute; pointer-events:none; background:#0f1f3d; color:#f3f6ff; padding:8px 10px; border-radius:6px; font-size:12px; line-height:1.4; max-width:240px; box-shadow:0 12px 28px rgba(15,23,42,0.32); opacity:0; transition:opacity 120ms ease, transform 120ms ease; z-index:20; white-space:normal; }
-.pump-chart-tooltip[data-placement="above"]{ transform:translate(-50%, -110%); }
-.pump-chart-tooltip[data-placement="above"][data-visible="true"]{ opacity:1; transform:translate(-50%, -120%); }
-.pump-chart-tooltip[data-placement="below"]{ transform:translate(-50%, 10%); }
-.pump-chart-tooltip[data-placement="below"][data-visible="true"]{ opacity:1; transform:translate(-50%, 0%); }
+.pump-chart-tooltip{ position:absolute; pointer-events:none; background:#0f1f3d; color:#f3f6ff; padding:8px 10px; border-radius:6px; font-size:12px; line-height:1.4; max-width:240px; box-shadow:0 12px 28px rgba(15,23,42,0.32); opacity:0; transition:opacity 120ms ease; z-index:20; white-space:normal; }
+.pump-chart-tooltip[data-placement="above"]{ transform:translate(-50%, calc(-100% - 10px)); }
+.pump-chart-tooltip[data-placement="below"]{ transform:translate(-50%, 10px); }
+.pump-chart-tooltip[data-visible="true"]{ opacity:1; }
 .pump-chart-tooltip[hidden]{ display:none; opacity:0; }
 .pump-chart-tooltip strong{ display:block; font-weight:600; color:#c8ddff; margin-bottom:4px; }
 .pump-chart-tooltip span{ display:block; color:#e3e8ff; }
-.pump-chart-tooltip span.value{ font-weight:600; color:#ffffff; margin-bottom:4px; }
+.pump-chart-tooltip span.value{ font-size:18px; font-weight:700; color:#ffffff; margin-bottom:4px; }
 .pump-chart-tooltip::after{ content:""; position:absolute; left:50%; transform:translateX(-50%); border-style:solid; }
 .pump-chart-tooltip[data-placement="above"]::after{ bottom:-6px; border-width:6px 6px 0 6px; border-color:#0f1f3d transparent transparent transparent; }
 .pump-chart-tooltip[data-placement="below"]::after{ top:-6px; border-width:0 6px 6px 6px; border-color:transparent transparent #0f1f3d transparent; }
@@ -6524,3 +6523,17 @@ button.job-cloud-preview-button { display: block; width: min(100%, 340px); margi
 .cut-chronology-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
 .cut-chronology-dialog [data-cjo-preview] { border-top: 1px solid #d5dbe3; padding-top: 12px; }
 .cut-chronology-dialog [role="alert"] { color: #a12622; }
+
+/* POLISH-01: keep point details legible and action menus within the viewport. */
+.pump-notes-dialog .pump-notes-header { background:var(--brand-card-bg); color:var(--brand-blue-900); }
+.pump-point-rpm { font-size:28px; line-height:1.2; color:var(--brand-blue-900); }
+.pump-notes-dialog .pump-notes-subtitle { color:var(--brand-blue-800); }
+.pump-notes-dialog .pump-notes-description { color:var(--brand-blue-800); }
+.dashboard-layout:not(.has-custom-layout) [data-dashboard-window="averageHours"] { grid-column:1 / -1; }
+[data-dashboard-window="averageHours"] .average-hours-banner { margin:0; align-content:center; }
+.job-actions-menu[popover] {
+  position:fixed; inset:auto; margin:0; min-width:min(180px, calc(100vw - 16px));
+  max-width:calc(100vw - 16px); max-height:calc(100vh - 16px); overflow:auto;
+  z-index:10050; box-shadow:0 12px 28px rgba(19, 41, 75, 0.18);
+}
+.job-actions-menu[popover] button { white-space:normal; overflow-wrap:anywhere; }
