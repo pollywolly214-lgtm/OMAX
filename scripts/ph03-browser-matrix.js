@@ -4,19 +4,231 @@ const {chromium}=require(process.env.OMAX_PLAYWRIGHT_PATH||"playwright");
 const output=path.resolve(__dirname,"../artifacts/ph03");fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,".gitignore"),"*\n");
 const url="http://localhost:8000/?devsafe=1";
 async function main(){
+  const prbOnly=process.env.OMAX_PRB_ONLY==="1";
   const browser=await chromium.launch({channel:"msedge",headless:true}),context=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true});
   const errors=[],expectedErrors=[],requests=[],checks=[],overflows=[],controls=[];let expectedFailure=false;
   function observe(page){page.on("pageerror",error=>errors.push(String(error)));page.on("console",message=>{if(message.type()==="error")(expectedFailure?expectedErrors:errors).push(message.text());});page.on("request",request=>requests.push(request.url()));page.on("dialog",dialog=>dialog.accept(dialog.type()==="prompt"?"PH03 UI Folder":undefined));}
   await context.route(/https?:\/\/[^/]*(googleapis\.com|firebasestorage\.app|firebaseio\.com|graph\.microsoft\.com|api\.onedrive\.com)/,route=>{errors.push("Forbidden business request: "+route.request().url());return route.abort();});
   const page=await context.newPage();page.setDefaultTimeout(8000);observe(page);
-  const check=async(name,fn)=>{try{await fn();checks.push({name,passed:true});console.log("PASS",name);}catch(error){checks.push({name,passed:false,error:String(error?.stack||error)});console.error("FAIL",name,error.message);}};
+  const check=async(name,fn)=>{if(prbOnly&&!name.startsWith("PRB ")&&!name.startsWith("No unexpected"))return;try{await fn();checks.push({name,passed:true});console.log("PASS",name);}catch(error){checks.push({name,passed:false,error:String(error?.stack||error)});console.error("FAIL",name,error.message);}};
   const navigate=async hash=>{await page.evaluate(hash=>{location.hash=hash;route();},hash);await page.waitForTimeout(80);};
   const save=async()=>{const result=await page.evaluate(()=>saveCloudNow());if(!result?.saved)console.log("SAVE DIAGNOSTIC",await page.evaluate(()=>({blocked:window.__lastCloudSaveBlock,recovery:window.__recoveryInspectMode,disabled:window.__autosaveDisabled,identity:window.__inventoryIdentityIssues,missing:window.__missingAuthoritativeState,indeterminate:window.__lastIndeterminateSave,uid:FB.user?.uid})));assert.equal(result?.saved,true,JSON.stringify(result));return result;};
   const load=async()=>{await page.goto(url,{waitUntil:"load"});await page.waitForFunction(()=>window.OMAXDevSafe?.active&&window.__initialAdoptComplete);};
   await load();
+  if(prbOnly){
+    // Provision a complete disposable snapshot before testing this feature.
+    // The older broad harness's bootstrap omits optional runtime collections;
+    // keep that unrelated fixture issue out of the PRB browser scenario.
+    // Reuse current main's archived-owner fixture: no corresponding live job.
+    await page.evaluate(archive=>{if(!window.OMAXDevSafe?.active)throw Error("Disposable backend required");deletedItems.push(...archive.deletedItems);},require("../tests/fixtures/cjo06-archived-job").archivedState());
+    await page.evaluate(async()=>{for(let pass=0;pass<2;pass++){await FB.docRef.set(snapshotState({skipLocalFileCacheSync:true}));await loadFromCloud();route();}});
+    await page.waitForTimeout(2200);await save();await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete&&!hasPendingLocalChanges);
+  }
+  if(prbOnly)await check("PRB archived chronology startup passes identity without live owner or fabricated baseline history",async()=>{
+    const status=await page.evaluate(()=>({recovery:isRecoveryMode(),integrity:OMAXGlobalIdentityRepair.integrity(window.__lastLoadedCloudState),
+      liveOwner:[...cuttingJobs,...completedCuttingJobs].some(job=>job.id==="archived-owner"),historyPresent:Object.hasOwn(pumpEff,"baselineHistory")}));
+    assert.equal(status.recovery,false);assert.equal(status.integrity.valid,true);assert.equal(status.liveOwner,false);assert.equal(status.historyPresent,false);
+    assert.equal(status.integrity.plan.references.filter(ref=>ref.resolution==="archived_job_self").length,3);
+  });
   await check("Disposable bootstrap and initial atomic save",async()=>{assert.equal(await page.evaluate(()=>DEVSAFE_MODE&&OMAXDevSafe.active&&FB.ready),true);await save();});
   await check("Dashboard hours UI create/save/rerender",async()=>{await page.locator("#totalInput").fill("100");await page.locator("#logBtn").click();await save();assert.equal(await page.evaluate(()=>totalHistory.length),1);await navigate("#/inventory");await navigate("#/");assert.equal(await page.evaluate(()=>totalHistory[0].hours),100);});
   await check("Pump RPM UI create/edit and merge",async()=>{await page.locator("#pumpLogDate").fill("2026-09-30");await page.locator("#pumpLogRPM").fill("3500");await page.getByRole("button",{name:"Add / Update",exact:true}).click();await save();await page.locator("#pumpLogRPM").fill("3450");await page.getByRole("button",{name:"Add / Update",exact:true}).click();await save();assert.equal(await page.evaluate(()=>pumpEff.entries.find(entry=>entry.dateISO==="2026-09-30").rpm),3450);});
+  await check("PRB widget header never collapses and Change Baseline opens dedicated management popup",async()=>{
+    const widget=page.locator("#pump-log-widget");assert.equal(await widget.locator("#pumpBaselineForm").count(),0);
+    for(let click=0;click<2;click++){await widget.locator("#pumpEfficiencyHeading").click();assert.equal(await widget.locator("#pumpLogForm").isVisible(),true);}
+    assert.equal(await widget.locator("details,summary").count(),0);assert.ok(await page.locator("#totalInput").isVisible());
+    await page.locator("#pumpChangeBaselineBtn").click();const modal=page.getByRole("dialog",{name:"Change Baseline",exact:true});
+    for(const id of ["pumpBaselineRPM","pumpBaselineDate","pumpBaselineNote"])assert.ok(await modal.locator("#"+id).isVisible());
+    assert.ok(await modal.getByText("Baseline history (0)",{exact:true}).isVisible());
+    await modal.getByRole("button",{name:"Close Change Baseline",exact:true}).click();assert.ok(await page.locator("#pumpLogForm").isVisible());
+  });
+  await check("PRB popup create/note/history/edit/verification/reload and historical chart",async()=>{
+    await page.evaluate(()=>{window.__prbResults=[];const original=window.savePumpBaseline;window.savePumpBaseline=async action=>{const result=await original(action);window.__prbResults.push(result);return result;};});
+    const before=await page.evaluate(()=>structuredClone(window.__lastLoadedCloudState));
+    await page.locator("#pumpChangeBaselineBtn").click();
+    for(const [date,rpm]of [["2026-06-01","3480"],["2026-09-20","3515"]]){
+      await page.locator("#pumpBaselineRPM").fill(rpm);await page.locator("#pumpBaselineDate").fill(date);
+      await page.locator("#pumpBaselineNote").fill(date==="2026-06-01"?"Pump rebuild\nVerified at 49 ksi":"Nozzle body change");
+      await page.locator('#pumpBaselineForm button[type="submit"]').click();
+      try{await page.waitForFunction(date=>!window.__pumpBaselineMutationPending&&window.pumpEff.baselineHistory?.some(row=>row.effectiveDateISO===date),date);}
+      catch(error){throw Error(JSON.stringify(await page.evaluate(()=>({results:window.__prbResults,recovery:window.__recoveryReason,blocked:window.__lastCloudSaveBlock,pending:hasPendingLocalChanges,loadedRevision:window.__loadedCloudRevisionForSaveGuard,
+        difference:window.CuttingJobImporter.firstDifferencePath(window.__lastLoadedCloudState,getInventoryIdentityRepairLocalState())})))+" "+error.message);}
+    }
+    const created=await page.evaluate(()=>structuredClone(window.__lastLoadedCloudState));
+    for(const key of Object.keys(before).filter(key=>!["pumpEff","syncMeta"].includes(key)))assert.deepEqual(created[key],before[key],key);
+    for(const key of Object.keys(before.pumpEff))assert.deepEqual(created.pumpEff[key],before.pumpEff[key],key);
+    const id=created.pumpEff.baselineHistory[0].id;
+    assert.equal(created.pumpEff.baselineHistory[0].note,"Pump rebuild\nVerified at 49 ksi");
+    const rows=page.locator("[data-pump-baseline-row]");assert.equal(await rows.count(),2);
+    assert.equal(await rows.first().getAttribute("data-pump-baseline-row"),created.pumpEff.baselineHistory[1].id);
+    await page.getByRole("button",{name:"Close Change Baseline",exact:true}).click();
+    await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete);
+    await page.locator("#pumpChangeBaselineBtn").click();assert.ok(await page.locator(`[data-pump-baseline-row="${id}"]`).innerText().then(text=>text.includes("Pump rebuild")));
+    assert.equal(await page.evaluate(id=>pumpEff.baselineHistory.find(row=>row.id===id).note,id),"Pump rebuild\nVerified at 49 ksi");
+    // Duplicate creation remains a rejected action and keeps the operator's draft.
+    await page.locator("#pumpBaselineRPM").fill("3520");await page.locator("#pumpBaselineDate").fill("2026-09-20");await page.locator("#pumpBaselineNote").fill("Duplicate draft");
+    await page.locator('#pumpBaselineForm button[type="submit"]').click();
+    await page.getByText("A baseline already exists for this date. Edit that record instead.",{exact:true}).waitFor();
+    assert.equal(await page.locator("#pumpBaselineNote").inputValue(),"Duplicate draft");assert.equal(await rows.count(),2);
+    await page.getByRole("button",{name:"Close Change Baseline",exact:true}).click();
+    assert.equal(await page.evaluate(()=>resolvePumpBaselineForDate("2026-07-15").rpm),3480);
+    await page.locator("#pumpLogDate").fill("2026-07-15");await page.locator("#pumpLogRPM").fill("3600");
+    await page.getByRole("button",{name:"Add / Update",exact:true}).click();await save();
+    assert.match(await page.evaluate(()=>document.getElementById("pumpChart").__pumpChartTargets.find(row=>row.dateISO==="2026-07-15").detailLines.join(" ")),/Baseline 3,480 RPM/);
+    await page.locator("#pumpChangeBaselineBtn").click();
+    await page.locator(`[data-pump-baseline-edit="${id}"]`).click();await page.locator("#pumpBaselineRPM").fill("3490");
+    await page.locator("#pumpBaselineDate").fill("2026-09-20");await page.locator("#pumpBaselineNote").fill("Corrected rebuild explanation");await page.locator("#pumpBaselineReason").fill("Disposable correction verification");
+    await page.locator('#pumpBaselineForm button[type="submit"]').click();
+    await page.getByText("A baseline already exists for this date. Edit that record instead.",{exact:true}).waitFor();
+    assert.equal(await rows.count(),2);await page.locator("#pumpBaselineDate").fill("2026-06-02");
+    await page.locator('#pumpBaselineForm button[type="submit"]').click();
+    try{await page.waitForFunction(id=>!window.__pumpBaselineMutationPending&&pumpEff.baselineHistory.find(row=>row.id===id)?.corrections.length===1,id);}
+    catch(error){throw Error(JSON.stringify(await page.evaluate(async()=>{const source=(await FB.db.runTransaction(tx=>tx.get(FB.docRef))).data(),business=state=>Object.fromEntries(Object.entries(state).filter(([key])=>!["syncMeta","saveMeta","syncProcessLog"].includes(key)));return {results:window.__prbResults,recovery:window.__recoveryReason,pending:hasPendingLocalChanges,
+      loadedDifference:window.CuttingJobImporter.firstDifferencePath(source,window.__lastLoadedCloudState),businessDifference:window.CuttingJobImporter.firstDifferencePath(business(source),business(getInventoryIdentityRepairLocalState()))};}))+" "+error.message);}
+    await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete);
+    const record=await page.evaluate(id=>pumpEff.baselineHistory.find(row=>row.id===id),id);
+    assert.equal(record.rpm,3490);assert.equal(record.effectiveDateISO,"2026-06-02");assert.equal(record.note,"Corrected rebuild explanation");
+    assert.deepEqual(record.corrections[0].before,{rpm:3480,effectiveDateISO:"2026-06-01",note:"Pump rebuild\nVerified at 49 ksi"});
+    assert.deepEqual(record.corrections[0].after,{rpm:3490,effectiveDateISO:"2026-06-02",note:"Corrected rebuild explanation"});
+    assert.equal(await page.evaluate(()=>resolvePumpBaselineForDate("2026-07-15").rpm),3490);
+    assert.match(await page.evaluate(()=>document.getElementById("pumpChart").__pumpChartTargets.find(row=>row.dateISO==="2026-07-15").detailLines.join(" ")),/Baseline 3,490 RPM/);
+    assert.equal(await page.evaluate(()=>isRecoveryMode()),false);
+    await page.locator("#pumpChangeBaselineBtn").click();
+    await page.screenshot({path:path.join(output,"prb-change-baseline-desktop.png"),fullPage:false});
+    await page.setViewportSize({width:390,height:850});const box=await page.locator(".pump-baseline-dialog").boundingBox();assert.ok(box.x>=0&&box.x+box.width<=392);
+    await page.screenshot({path:path.join(output,"prb-change-baseline-mobile.png"),fullPage:false});
+    await page.getByRole("button",{name:"Close Change Baseline",exact:true}).click();await page.setViewportSize({width:1440,height:1000});
+    const fresh=await browser.newContext({storageState:await context.storageState({indexedDB:true})}),tab=await fresh.newPage();observe(tab);
+    await tab.goto(url,{waitUntil:"load"});await tab.waitForFunction(()=>window.__initialAdoptComplete);
+    assert.equal(await tab.evaluate(id=>pumpEff.baselineHistory.find(row=>row.id===id)?.rpm,id),3490);
+    assert.equal(await tab.evaluate(id=>pumpEff.baselineHistory.find(row=>row.id===id)?.note,id),"Corrected rebuild explanation");
+    assert.equal(await tab.evaluate(()=>resolvePumpBaselineForDate("2026-07-15").effectiveDateISO),"2026-06-02");await fresh.close();
+  });
+  await check("PRB Daily Log, Edit Logs and separate Pump Notes remain functional",async()=>{
+    await page.locator("#pumpEditAllBtn").click();assert.ok(await page.locator(".pump-log-dialog").isVisible());
+    assert.equal(await page.locator("[data-pump-log-rpm]").first().inputValue(),"3600");await page.locator(".pump-log-edit-cancel").click();
+    const baselineBefore=await page.evaluate(()=>structuredClone(pumpEff.baselineHistory));
+    await page.locator("#pumpNotesBtn").click();assert.ok(await page.getByRole("heading",{name:"Pump notes",exact:true}).isVisible());
+    assert.ok(await page.getByText("No notes yet. Click a chart point to add a note for that day and range.",{exact:true}).isVisible());
+    await page.locator("[data-pump-notes-close]").click();
+    await page.evaluate(()=>pumpOpenNotesModal({view:"edit",dateISO:"2026-07-15",range:"3m",rpm:3600}));
+    await page.locator("#pumpNoteText").fill("Independent Pump Note; not a baseline explanation");await page.locator('#pumpNoteForm button[type="submit"]').click();await save();
+    await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete);
+    await page.locator("#pumpNotesBtn").click();assert.ok(await page.getByText("Independent Pump Note; not a baseline explanation",{exact:true}).isVisible());
+    await page.locator("[data-pump-notes-close]").click();assert.deepEqual(await page.evaluate(()=>pumpEff.baselineHistory),baselineBefore);
+    assert.equal(await page.evaluate(()=>pumpEff.entries.find(row=>row.dateISO==="2026-07-15").rpm),3600);assert.equal(await page.evaluate(()=>isRecoveryMode()),false);
+  });
+  await check("PRB pump-specific header fix preserves dashboard drag, resize and saved layout",async()=>{
+    await page.evaluate(()=>toggleDashboardEditing());const win=page.locator('[data-dashboard-window="pumpLog"]');
+    await win.scrollIntoViewIfNeeded();
+    const original=await win.boundingBox(),drag=await win.locator(".dashboard-drag-handle").boundingBox();
+    await page.mouse.move(drag.x+drag.width/2,drag.y+drag.height/2);await page.mouse.down();await page.mouse.move(drag.x+drag.width/2-45,drag.y+drag.height/2+25,{steps:5});await page.mouse.up();
+    const moved=await win.boundingBox();assert.ok(moved.x<original.x||moved.y>original.y);
+    const resize=await win.locator(".dashboard-resize-se").boundingBox();await page.mouse.move(resize.x+resize.width/2,resize.y+resize.height/2);
+    await page.mouse.down();await page.mouse.move(resize.x+resize.width/2+25,resize.y+resize.height/2+25,{steps:5});await page.mouse.up();
+    const resized=await win.boundingBox();assert.ok(resized.width>moved.width||resized.height>moved.height);
+    await page.evaluate(()=>finishDashboardLayoutEditing());await save();const saved=await page.evaluate(()=>structuredClone(window.cloudDashboardLayout.pumpLog));
+    await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete);assert.deepEqual(await page.evaluate(()=>window.cloudDashboardLayout.pumpLog),saved);
+    await page.locator("#pumpEfficiencyHeading").click();assert.ok(await page.locator("#pumpLogForm").isVisible());assert.ok(await page.locator("#totalInput").isVisible());
+  });
+  const hoverPoint=async(tab,label)=>{
+    const canvas=tab.locator("#pumpChart");await canvas.evaluate(canvas=>canvas.scrollIntoView({block:"center"}));
+    await tab.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    const point=await canvas.evaluate(canvas=>{
+      const target=canvas.__pumpChartTargets.at(-1),box=canvas.getBoundingClientRect(),dpr=devicePixelRatio;
+      // Verify the actual painted backing-store pixel, then map it through
+      // the rendered bitmap bounds. This does not use the hit-test conversion.
+      const px=target.centerX*dpr,py=target.centerY*dpr;
+      const color=Array.from(canvas.getContext("2d").getImageData(Math.round(px),Math.round(py),1,1).data);
+      return {x:box.left+px/canvas.width*box.width,y:box.top+py/canvas.height*box.height,
+        key:target.key,date:target.datasetLabel,color,dpr,offset:Math.max(80,target.hitRadius*4*box.height/(canvas.height/dpr))};
+    });
+    assert.ok(point.color[3]>0&&point.color.slice(0,3).some(value=>value<220),label+" painted dot");
+    await tab.mouse.move(point.x,point.y);
+    const tooltip=tab.locator(".pump-chart-tooltip[data-visible='true']");
+    try{await tooltip.waitFor({state:"visible"});}catch(error){
+      await tab.screenshot({path:path.join(output,"prb-hover-failure.png")});
+      console.log("HOVER DIAGNOSTIC",label,point,await canvas.evaluate((canvas,point)=>({scroll:[scrollY,document.scrollingElement.scrollHeight,innerHeight],box:canvas.getBoundingClientRect().toJSON(),client:[canvas.clientWidth,canvas.clientHeight],backing:[canvas.width,canvas.height],geometry:canvas.__pumpChartGeometry,
+        targets:canvas.__pumpChartTargets.slice(-2),hovered:canvas.__pumpChartHoveredKey,underPointer:document.elementFromPoint(point.x,point.y)?.outerHTML.slice(0,300),tooltip:document.querySelector(".pump-chart-tooltip")?.outerHTML}),point));throw error;
+    }assert.ok((await tooltip.innerText()).includes(point.date),label+" exact date");
+    assert.equal(await canvas.evaluate(canvas=>canvas.__pumpChartHoveredKey),point.key,label+" exact dot");
+    for(const direction of [-1,1]){
+      await tab.mouse.move(point.x,point.y+direction*point.offset);
+      assert.notEqual(await canvas.evaluate(canvas=>canvas.__pumpChartHoveredKey),point.key,label+" off target");
+    }
+  };
+  await check("PRB exact painted-dot hover rejects distant points at DPR 1/2 and after dashboard chart resize",async()=>{
+    await hoverPoint(page,"normal");
+    await page.evaluate(()=>toggleDashboardEditing());const win=page.locator('[data-dashboard-window="pumpChart"]');await win.scrollIntoViewIfNeeded();
+    const handle=await win.locator(".dashboard-resize-se").boundingBox(),before=await page.locator("#pumpChart").boundingBox();
+    await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();
+    await page.mouse.move(handle.x+handle.width/2-120,handle.y+handle.height/2+65,{steps:6});await page.mouse.up();
+    await page.evaluate(()=>finishDashboardLayoutEditing());await save();
+    await page.waitForFunction(width=>Math.abs(document.getElementById("pumpChart").getBoundingClientRect().width-width)>20,before.width);
+    await hoverPoint(page,"dashboard resized");
+    const scaled=await browser.newContext({storageState:await context.storageState({indexedDB:true}),viewport:{width:1440,height:1000},deviceScaleFactor:2}),tab=await scaled.newPage();tab.setDefaultTimeout(8000);observe(tab);
+    try{await tab.goto(url,{waitUntil:"load"});await tab.waitForFunction(()=>window.__initialAdoptComplete);await hoverPoint(tab,"DPR 2 resized");}finally{await scaled.close();}
+  });
+  await check("PRB production-shaped baseline edit validates visibly, verifies B, recalculates and survives fresh DPR 2 context",async()=>{
+    const isolated=await browser.newContext({storageState:await context.storageState({indexedDB:true}),viewport:{width:1440,height:1000},deviceScaleFactor:2}),tab=await isolated.newPage();tab.setDefaultTimeout(8000);observe(tab);
+    try{
+      await tab.goto(url,{waitUntil:"load"});await tab.waitForFunction(()=>window.__initialAdoptComplete);
+      await tab.evaluate(async()=>{
+        if(!OMAXDevSafe.active)throw Error("Disposable backend required");const state=(await FB.docRef.get()).data();
+        state.pumpEff={baselineRPM:1353,baselineDateISO:"2026-10-01",
+          entries:Array.from({length:141},(_,i)=>({dateISO:new Date(Date.UTC(2026,9,14-140+i)).toISOString().slice(0,10),rpm:1400+i,timeISO:"09:00"})),
+          notes:Array.from({length:11},(_,i)=>({dateISO:`2026-09-${String(i+1).padStart(2,"0")}`,text:"Legacy note "+i,range:"all"}))};
+        // The preceding drag test deliberately moves cards. Use the default
+        // layout here so a different floating card cannot cover the test dot.
+        state.dashboardLayout={};localStorage.removeItem("dashboard_layout_windows_v1");
+        state.syncMeta.rev++;await FB.docRef.set(state);
+      });
+      await tab.reload({waitUntil:"load"});await tab.waitForFunction(()=>window.__initialAdoptComplete&&!hasPendingLocalChanges);
+      await tab.evaluate(()=>{window.__prbResults=[];const save=window.savePumpBaseline;window.savePumpBaseline=async action=>{const result=await save(action);window.__prbResults.push(result);return result;};
+        window.__prbLabels=[];const fill=CanvasRenderingContext2D.prototype.fillText;CanvasRenderingContext2D.prototype.fillText=function(text,...args){window.__prbLabels.push(String(text));return fill.call(this,text,...args);};});
+      await tab.locator("#pumpChangeBaselineBtn").click();
+      await tab.locator("#pumpBaselineRPM").fill("1400");await tab.locator("#pumpBaselineDate").fill("2026-10-10");await tab.locator("#pumpBaselineNote").fill("Note A");
+      await tab.getByRole("button",{name:"Add baseline",exact:true}).click();
+      await tab.getByText("Baseline verified and saved",{exact:true}).first().waitFor();
+      const created=await tab.evaluate(async()=>{const state=(await FB.db.runTransaction(tx=>tx.get(FB.docRef))).data();return state.pumpEff.baselineHistory.find(row=>row.effectiveDateISO==="2026-10-10");});
+      assert.ok(created);const id=created.id;
+      await tab.getByRole("button",{name:"Close Change Baseline",exact:true}).click();
+      const before=await tab.evaluate(()=>({percent:pumpPercentChange(1540,"2026-10-14"),details:document.getElementById("pumpChart").__pumpChartTargets.at(-1).detailLines}));
+      await tab.locator("#pumpChangeBaselineBtn").click();await tab.locator(`[data-pump-baseline-edit="${id}"]`).click();
+      await tab.locator("#pumpBaselineRPM").fill("1450");await tab.locator("#pumpBaselineDate").fill("2026-10-11");await tab.locator("#pumpBaselineNote").fill("Note B");
+      await tab.getByRole("button",{name:"Save baseline correction",exact:true}).click();
+      console.log("EDIT VALIDATION DIAGNOSTIC",await tab.evaluate(()=>({saveCalls:window.__prbResults.length,status:document.querySelector("[data-pump-baseline-status]").textContent,missingReason:document.getElementById("pumpBaselineReason").validity.valueMissing})));
+      assert.equal(await tab.locator("[data-pump-baseline-status]").innerText(),"Enter a reason for the baseline correction.");
+      assert.equal(await tab.locator("[data-pump-baseline-status]").isVisible(),true);
+      assert.equal(await tab.locator("#pumpBaselineReason").evaluate(field=>document.activeElement===field&&field.getAttribute("aria-invalid")==="true"),true);
+      assert.equal(await tab.evaluate(()=>window.__prbResults.length),1);assert.equal(await tab.locator("#pumpBaselineRPM").inputValue(),"1450");
+      await tab.screenshot({path:path.join(output,"prb-edit-validation.png")});
+      await tab.locator("#pumpBaselineReason").fill("Correct saved reading");await tab.evaluate(()=>{window.__prbLabels=[];});
+      await tab.getByRole("button",{name:"Save baseline correction",exact:true}).click();
+      await tab.getByText("Baseline correction verified and saved",{exact:true}).first().waitFor();
+      const assertB=async target=>{
+        const state=await target.evaluate(async id=>({cloud:(await FB.db.runTransaction(tx=>tx.get(FB.docRef))).data().pumpEff,
+          record:pumpEff.baselineHistory.find(row=>row.id===id),resolved:resolvePumpBaselineForDate("2026-10-14"),prior:resolvePumpBaselineForDate("2026-10-10"),
+          percent:pumpPercentChange(1540,"2026-10-14"),details:document.getElementById("pumpChart").__pumpChartTargets.at(-1).detailLines,
+          baseline:document.getElementById("pumpChart").__pumpChartTooltipMeta.baselineRPM,recovery:isRecoveryMode()}),id);
+        assert.equal(state.record.id,id);assert.equal(state.record.rpm,1450);assert.equal(state.record.effectiveDateISO,"2026-10-11");assert.equal(state.record.note,"Note B");
+        assert.deepEqual(state.record,state.cloud.baselineHistory.find(row=>row.id===id));assert.deepEqual(state.record.corrections[0].before,{rpm:1400,effectiveDateISO:"2026-10-10",note:"Note A"});
+        assert.deepEqual(state.record.corrections[0].after,{rpm:1450,effectiveDateISO:"2026-10-11",note:"Note B"});assert.equal(state.resolved.id,id);assert.equal(state.prior.rpm,1353);
+        assert.equal(state.baseline,1450);assert.notEqual(state.percent,before.percent);assert.notDeepEqual(state.details,before.details);assert.match(state.details.join(" "),/1,450 RPM/);assert.equal(state.recovery,false);
+        assert.equal(state.cloud.entries.length,141);assert.equal(state.cloud.notes.length,11);return state;
+      };
+      const corrected=await assertB(tab),row=tab.locator(`[data-pump-baseline-row="${id}"]`);assert.match(await row.innerText(),/2026-10-11[\s\S]*1450[\s\S]*Note B/);
+      assert.ok(await tab.evaluate(percent=>window.__prbLabels.includes(percent.toFixed(1)+"%"),corrected.percent));
+      assert.ok(await tab.locator("#pump-log-widget").innerText().then(text=>text.includes(corrected.percent.toFixed(1)+"%")));
+      assert.equal(await tab.evaluate(()=>window.__prbResults.every(result=>result.saved&&result.verificationCompleted)),true);
+      await tab.getByRole("button",{name:"Close Change Baseline",exact:true}).click();
+      await tab.reload({waitUntil:"load"});await tab.waitForFunction(()=>window.__initialAdoptComplete);await assertB(tab);
+      await hoverPoint(tab,"DPR 2");await tab.locator(".pump-expand-btn").click();await hoverPoint(tab,"DPR 2 expanded");await tab.locator(".pump-expand-btn").click();
+      await tab.setViewportSize({width:1000,height:850});await hoverPoint(tab,"DPR 2 responsive");
+      const fresh=await browser.newContext({storageState:await isolated.storageState({indexedDB:true}),deviceScaleFactor:2}),freshTab=await fresh.newPage();observe(freshTab);
+      try{await freshTab.goto(url,{waitUntil:"load"});await freshTab.waitForFunction(()=>window.__initialAdoptComplete);await assertB(freshTab);}finally{await fresh.close();}
+    }finally{await isolated.close();}
+  });
   await check("Create/edit/save fixtures across protected areas",async()=>{
     await page.evaluate(()=>{
       tasksInterval.push({...tasksInterval[0],id:"ph03_task",name:"PH03 Task Edited",manualHistory:[],completedDates:[],interval:40});
