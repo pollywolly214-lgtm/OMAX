@@ -14311,14 +14311,23 @@ function renderCosts(){
       return monday;
     };
     const weekKey = (year, week)=> `${year}-W${String(week).padStart(2, "0")}`;
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const weekOptions = Array.from({ length: 52 }, (_, i)=>{
+    const currentReceiptWeek = ()=>{
+      const today = new Date();
+      // UTC arithmetic represents local calendar parts, never the current UTC day.
+      const day = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+      day.setUTCDate(day.getUTCDate() + 4 - (day.getUTCDay() || 7));
+      const year = day.getUTCFullYear();
+      const week = Math.floor((day - weekStartFromIndex(year, 1)) / 604800000) + 1;
+      return { year, week, key: weekKey(year, week) };
+    };
+    const buildReceiptWeeks = (year)=> Array.from({ length: Math.round((weekStartFromIndex(year + 1, 1) - weekStartFromIndex(year, 1)) / 604800000) }, (_, i)=>{
       const week = i + 1;
       const start = weekStartFromIndex(year, week);
       const end = new Date(start); end.setUTCDate(start.getUTCDate() + 6);
       return { key: weekKey(year, week), year, week, startISO: start.toISOString().slice(0, 10), endISO: end.toISOString().slice(0, 10) };
     });
+    let selectedReceiptYear = currentReceiptWeek().year;
+    let weekOptions = buildReceiptWeeks(selectedReceiptYear);
     if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
     const persistReceiptState = ()=>{
       if (typeof saveCloudDebounced === "function"){
@@ -14390,10 +14399,9 @@ function renderCosts(){
     const getWeekEntry = (key)=>{
       const existing = window.receiptTrackerWeeks.find(entry => String(entry?.key || "") === key);
       if (existing) return existing;
-      const meta = weekOptions.find(item => item.key === key);
-      const created = { key, year: meta?.year || year, week: meta?.week || 1, startISO: meta?.startISO || "", endISO: meta?.endISO || "", rows: [] };
-      window.receiptTrackerWeeks.push(created);
-      return created;
+      const match = /^(\d{4})-W(\d{2})$/.exec(key);
+      const meta = match && buildReceiptWeeks(Number(match[1])).find(item => item.key === key);
+      return { ...(meta || { key, year:selectedReceiptYear, week:1, startISO:"", endISO:"" }), rows:[] };
     };
     const clampDateToWeek = (dateIso, entry)=>{
       const value = toIsoDate(dateIso);
@@ -14454,9 +14462,10 @@ function renderCosts(){
       return { start, end: today };
     };
     const formatDateRangeLabel = (start, end)=> {
-      const endIso = end instanceof Date && !Number.isNaN(end.getTime()) ? end.toISOString().slice(0, 10) : "";
+      const localDate = date=> `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const endIso = end instanceof Date && !Number.isNaN(end.getTime()) ? localDate(end) : "";
       if (!start) return endIso ? `Range: All time through ${endIso}` : "Range: All time";
-      const startIso = start instanceof Date && !Number.isNaN(start.getTime()) ? start.toISOString().slice(0, 10) : "";
+      const startIso = start instanceof Date && !Number.isNaN(start.getTime()) ? localDate(start) : "";
       return startIso && endIso ? `Range: ${startIso} to ${endIso}` : "Range: Date window unavailable";
     };
     const buildRangeRows = (months)=>{
@@ -14478,6 +14487,7 @@ function renderCosts(){
     const modal = document.getElementById("costReceiptModal");
     if (receiptOpenBtn instanceof HTMLElement && modal instanceof HTMLElement){
       const weekSelect = modal.querySelector("[data-receipt-week-select]");
+      const yearSelect = modal.querySelector("[data-receipt-year-select]");
       const weekRangeLabel = modal.querySelector("[data-receipt-week-range]");
       const weekAllocationNote = modal.querySelector("[data-receipt-week-allocation-note]");
       const weekRowsBody = modal.querySelector("[data-receipt-week-rows]");
@@ -14500,7 +14510,9 @@ function renderCosts(){
         purchasedDatalist.id = purchasedDatalistId;
         modal.appendChild(purchasedDatalist);
       }
-      let activeWeekKey = String((window.receiptTrackerWeekSelected || weekOptions[0]?.key || ""));
+      let activeWeekKey = window.costPurchaseHistoryModalOpen && /^\d{4}-W\d{2}$/.test(String(window.receiptTrackerWeekSelected || ""))
+        ? window.receiptTrackerWeekSelected : currentReceiptWeek().key;
+      selectedReceiptYear = Number(activeWeekKey.slice(0, 4));
       let activeRange = String(window.receiptTrackerRangeSelected || "1");
       let hasUnsavedReceiptChanges = false;
       let hasExplicitSaveSinceEdit = false;
@@ -14508,6 +14520,13 @@ function renderCosts(){
       window.receiptTrackerWeekSelected = activeWeekKey;
       window.receiptTrackerRangeSelected = activeRange;
       let saveStatusTimer = null;
+      let receiptEditVersion = 0;
+      // Detached DOM rows retain incomplete/invalid edits during view navigation.
+      const receiptDraftRows = new Map();
+      const receiptRowSources = new WeakMap();
+      const receiptColumns = ["date", "purchased", "partNumber", "qty", "cost", "shipping", "tax"];
+      const readReceiptInputs = tr=> Object.fromEntries(receiptColumns.map(col=> [col, tr.querySelector(`[data-col="${col}"]`)?.value || ""]));
+      const rememberReceiptRow = (tr, original)=> receiptRowSources.set(tr, { original, inputs:readReceiptInputs(tr) });
 
       const ensureSaveStatusChip = ()=>{
         if (!(saveWeekBtn instanceof HTMLElement)) return null;
@@ -14536,8 +14555,17 @@ function renderCosts(){
       };
 
       const renderWeekOptions = ()=>{
+        const current = currentReceiptWeek();
+        weekOptions = buildReceiptWeeks(selectedReceiptYear);
+        if (yearSelect instanceof HTMLSelectElement){
+          const storedYears = (window.receiptTrackerWeeks || []).map(entry=> Number(String(entry?.key || "").slice(0, 4))).filter(value=> Number.isInteger(value) && value >= 1 && value <= 9999);
+          const first = Math.min(current.year - 5, selectedReceiptYear, ...storedYears);
+          const last = Math.max(current.year + 1, selectedReceiptYear, ...storedYears);
+          yearSelect.innerHTML = Array.from({length:last - first + 1}, (_, i)=> `<option value="${first + i}">${first + i}</option>`).join("");
+          yearSelect.value = String(selectedReceiptYear);
+        }
         if (!(weekSelect instanceof HTMLSelectElement)) return;
-        weekSelect.innerHTML = weekOptions.map(opt => `<option value="${escapeHtml(opt.key)}">Week ${escapeHtml(String(opt.week))} (${escapeHtml(opt.startISO)} to ${escapeHtml(opt.endISO)})</option>`).join("");
+        weekSelect.innerHTML = weekOptions.map(opt => `<option value="${escapeHtml(opt.key)}"${opt.key === current.key ? ' data-current-week="true" style="font-weight:bold"' : ""}>Week ${escapeHtml(String(opt.week))}${opt.key === current.key ? " — Current week" : ""} (${escapeHtml(opt.startISO)} to ${escapeHtml(opt.endISO)})</option>`).join("");
         if (!weekOptions.some(item => item.key === activeWeekKey)) activeWeekKey = weekOptions[0]?.key || "";
         weekSelect.value = activeWeekKey;
       };
@@ -14547,24 +14575,55 @@ function renderCosts(){
         const tasks = (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).concat(Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []);
         return tasks.find(task => String(task?.name || "").trim().toLowerCase() === key) || null;
       }
-      const saveWeekRowsFromDom = ()=>{
-        const entry = getWeekEntry(activeWeekKey);
-        if (!(weekRowsBody instanceof HTMLElement)) return entry;
-        const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).map(tr => ({
-          ...(entry.rows || [])[Number(tr.dataset.receiptRowIndex)],
-          date: clampDateToWeek(tr.querySelector('[data-col=\"date\"]')?.value || "", entry),
-          purchased: String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim(),
-          cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
-          qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
-          partNumber: String(tr.querySelector('[data-col=\"partNumber\"]')?.value || "").trim(),
-          taskId: String(findTaskByNameExact(String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim())?.id || ""),
-          shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
-          tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
-        }));
-        entry.rows = normalizeRows(rows);
-        persistReceiptState();
-        renderCentralSpendRows();
-        return entry;
+      const saveWeekRowsFromDom = ({ persist = true, includeDrafts = false, showValidation = false } = {})=>{
+        if (!(weekRowsBody instanceof HTMLElement)) return getWeekEntry(activeWeekKey);
+        const groups = includeDrafts ? new Map(receiptDraftRows) : new Map();
+        groups.set(activeWeekKey, Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")));
+        const pending = [];
+        for (const [key, elements] of groups){
+          const entry = getWeekEntry(key), rows = [], sources = [];
+          for (const tr of elements){
+            const source = receiptRowSources.get(tr) || { inputs:{} };
+            const values = readReceiptInputs(tr);
+            const meaningful = receiptColumns.some(col=> ["qty", "cost", "shipping", "tax"].includes(col) ? Number(values[col]) !== 0 : values[col].trim());
+            if (!source.original && !meaningful) continue;
+            const qtyInput = tr.querySelector('[data-col="qty"]');
+            const qtyChanged = !source.original || values.qty !== source.inputs.qty;
+            const invalidQty = qtyChanged && (!values.qty.trim() || !Number.isSafeInteger(Number(values.qty)) || Number(values.qty) < 0);
+            qtyInput?.setCustomValidity(invalidQty ? "Quantity must be a whole number of 0 or greater." : "");
+            if (invalidQty){
+              if (showValidation){ navigateReceiptWeek(key); qtyInput?.reportValidity(); }
+              return null;
+            }
+            let row = source.original;
+            for (const col of receiptColumns){
+              if (source.original && values[col] === source.inputs[col]) continue;
+              if (row === source.original) row = { ...source.original };
+              if (["qty", "cost", "shipping", "tax"].includes(col)) row[col] = Number(values[col]) || 0;
+              else row[col] = col === "date" ? clampDateToWeek(values[col], entry) : values[col].trim();
+              if (col === "purchased") row.taskId = String(findTaskByNameExact(row.purchased)?.id || "");
+            }
+            rows.push(row);
+            sources.push([tr, row]);
+          }
+          pending.push({ entry, rows, sources });
+        }
+        let changed = false;
+        for (const { entry, rows, sources } of pending){
+          if (rows.length !== entry.rows.length || rows.some((row, index)=> row !== entry.rows[index])){
+            entry.rows = rows;
+            if (!window.receiptTrackerWeeks.includes(entry)) window.receiptTrackerWeeks.push(entry);
+            changed = true;
+          }
+          sources.forEach(([tr, row])=> rememberReceiptRow(tr, row));
+        }
+        if (changed){
+          hasUnsavedReceiptChanges = true;
+          hasExplicitSaveSinceEdit = false;
+          if (persist) persistReceiptState();
+          renderCentralSpendRows();
+        }
+        return getWeekEntry(activeWeekKey);
       };
       const refreshCostDashboard = ({ keepReceiptModalOpen = false } = {})=>{
         if (typeof renderCosts !== "function") return;
@@ -14572,46 +14631,36 @@ function renderCosts(){
           window.costPurchaseHistoryModalOpen = !!keepReceiptModalOpen;
         }
         setTimeout(()=>{
+          if (hasUnsavedReceiptChanges) return;
           try { renderCosts(); } catch (err){ console.warn("Failed to refresh cost view after purchase-history save", err); }
         }, 0);
       };
       const savePurchaseHistoryWeek = async ({ showInlineStatus = false, refreshDashboard = true, keepReceiptModalOpen = true } = {})=>{
-        saveWeekRowsFromDom();
+        if (!saveWeekRowsFromDom({ persist:false, includeDrafts:true, showValidation:true })) return false;
         rebuildPurchaseTemplates();
         renderRangeTable();
         renderCentralSpendRows();
+        const version = receiptEditVersion;
         try {
-          if (typeof saveCloudNow === "function"){
-            const maybePromise = saveCloudNow();
-            if (maybePromise && typeof maybePromise.then === "function"){
-              await maybePromise;
-            }
-            if (typeof saveCloudDebounced === "function"){
-              saveCloudDebounced();
-            }
+          const result = typeof saveCloudNow === "function" ? await saveCloudNow() : null;
+          if (result?.saved !== true || result.stateWriteCompleted !== true || result.blocked || result.indeterminate){
+            if (showInlineStatus) showSaveStatusChip("Save not confirmed", true);
+            if (typeof toast === "function") toast(result?.error || "Purchase history save was not confirmed. Your edits remain available.");
+            return false;
+          }
+          if (version === receiptEditVersion){
             hasUnsavedReceiptChanges = false;
             hasExplicitSaveSinceEdit = true;
-            if (showInlineStatus) showSaveStatusChip("Save complete");
             if (refreshDashboard) refreshCostDashboard({ keepReceiptModalOpen });
-            return true;
           }
-          if (typeof saveCloudDebounced === "function"){
-            saveCloudDebounced();
-            hasUnsavedReceiptChanges = false;
-            hasExplicitSaveSinceEdit = true;
-            if (showInlineStatus) showSaveStatusChip("Save complete");
-            if (refreshDashboard) refreshCostDashboard({ keepReceiptModalOpen });
-            return true;
-          }
-          if (typeof toast === "function") toast("Unable to save purchase history right now.");
+          if (showInlineStatus) showSaveStatusChip(version === receiptEditVersion ? "Save complete" : "Earlier edits saved; newer edits pending");
+          return version === receiptEditVersion;
         } catch (err) {
           console.error("Purchase history save failed:", err);
-          if (typeof toast === "function"){
-            toast("Purchase history save failed. Please try again.");
-          }
+          if (typeof toast === "function") toast("Purchase history save failed. Your edits remain available.");
           if (showInlineStatus) showSaveStatusChip("Save failed", true);
+          return false;
         }
-        return false;
       };
       const setUndoClearEnabled = (enabled)=>{
         if (!(undoClearBtn instanceof HTMLButtonElement)) return;
@@ -14621,7 +14670,7 @@ function renderCosts(){
         return Array.isArray(window.receiptTrackerWeeks)
           ? window.receiptTrackerWeeks.map(week => ({
               ...week,
-              rows: normalizeRows(week?.rows).map(row => ({ ...row }))
+              rows: (Array.isArray(week?.rows) ? week.rows : []).map(row => ({ ...row }))
             }))
           : [];
       };
@@ -14660,7 +14709,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           <td><input type="date" data-col="date" min="${escapeHtml(String(getWeekEntry(activeWeekKey)?.startISO || ""))}" max="${escapeHtml(String(getWeekEntry(activeWeekKey)?.endISO || ""))}"></td>
           <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" placeholder="Select existing item"></td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
-          <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
+          <td class="purchase-number"><input type="number" min="0" step="1" data-col="qty" placeholder="0"></td>
           <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
           <td class="purchase-number" data-col="merchandiseSubtotal">${formatUsd(0)}</td>
           <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00" style="min-width:86px"></td>
@@ -14669,6 +14718,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
           <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>`;
         weekRowsBody.appendChild(tr);
+        rememberReceiptRow(tr, undefined);
         if (focusFirst){
           const first = tr.querySelector("[data-col='date']");
           if (first instanceof HTMLElement) first.focus();
@@ -14696,18 +14746,24 @@ const appendEmptyRow = (focusFirst = false)=>{
       };
       const renderWeekRows = ()=>{
         const entry = getWeekEntry(activeWeekKey);
-        const rows = normalizeRows(entry.rows);
+        const rows = (Array.isArray(entry.rows) ? entry.rows : []).map(row=> normalizeRows([row])[0] || row);
         if (weekAllocationNote) weekAllocationNote.hidden = !rows.some(isHistoricalPurchase);
         if (weekRangeLabel){
           weekRangeLabel.textContent = entry.startISO && entry.endISO ? `Date range: ${entry.startISO} to ${entry.endISO}` : "Date range unavailable";
         }
         if (!(weekRowsBody instanceof HTMLElement)) return;
+        if (receiptDraftRows.has(activeWeekKey)){
+          weekRowsBody.replaceChildren(...receiptDraftRows.get(activeWeekKey));
+          receiptDraftRows.delete(activeWeekKey);
+          recomputeWeekTotals();
+          return;
+        }
         weekRowsBody.innerHTML = rows.map((row, idx) => `
           <tr data-receipt-row="1" data-receipt-row-index="${idx}">
             <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}" min="${escapeHtml(String(entry.startISO || ""))}" max="${escapeHtml(String(entry.endISO || ""))}"></td>
             <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" value="${escapeHtml(row.purchased || "")}"></td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
-            <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
+            <td class="purchase-number"><input type="number" min="0" step="1" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
             <td class="purchase-number" data-col="merchandiseSubtotal">${formatUsd(getPurchaseFinancials(row).merchandiseSubtotal)}</td>
             <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}" style="min-width:86px"></td>
@@ -14716,6 +14772,7 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
             <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>
           </tr>`).join("");
+        Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).forEach((tr, index)=> rememberReceiptRow(tr, entry.rows[index]));
         appendEmptyRow();
         recomputeWeekTotals();
       };
@@ -14855,6 +14912,7 @@ const appendEmptyRow = (focusFirst = false)=>{
             if (next instanceof HTMLElement) next.focus();
           }
           recomputeWeekTotals();
+          receiptEditVersion += 1;
           hasUnsavedReceiptChanges = true;
           hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
@@ -14888,6 +14946,7 @@ const appendEmptyRow = (focusFirst = false)=>{
             }
           }
           recomputeWeekTotals();
+          receiptEditVersion += 1;
           hasUnsavedReceiptChanges = true;
           hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
@@ -14895,6 +14954,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           renderRangeTable();
         });
         weekRowsBody.addEventListener("change", ()=>{
+          receiptEditVersion += 1;
           hasUnsavedReceiptChanges = true;
           hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
@@ -14907,6 +14967,9 @@ const appendEmptyRow = (focusFirst = false)=>{
             const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"));
             if (rows.length <= 1){ if (typeof toast === "function") toast("At least one row is required."); return; }
             target.closest("tr[data-receipt-row]")?.remove();
+            receiptEditVersion += 1;
+            hasUnsavedReceiptChanges = true;
+            hasExplicitSaveSinceEdit = false;
             recomputeWeekTotals(); saveWeekRowsFromDom(); renderRangeTable(); renderCentralSpendRows();
             return;
           }
@@ -14932,18 +14995,26 @@ const appendEmptyRow = (focusFirst = false)=>{
           activeRange = rangeSelect.value || "1";
           window.receiptTrackerRangeSelected = activeRange;
           renderRangeTable();
-          persistReceiptState();
         });
       }
+      const navigateReceiptWeek = (key)=>{
+        if (!(weekRowsBody instanceof HTMLElement)) return;
+        receiptDraftRows.set(activeWeekKey, Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")));
+        activeWeekKey = key;
+        selectedReceiptYear = Number(key.slice(0, 4));
+        window.receiptTrackerWeekSelected = activeWeekKey;
+        renderWeekOptions();
+        renderWeekRows();
+      };
       if (weekSelect instanceof HTMLSelectElement){
-        weekSelect.addEventListener("change", ()=>{
-          saveWeekRowsFromDom();
-          hasUnsavedReceiptChanges = true;
-          hasExplicitSaveSinceEdit = false;
-          activeWeekKey = weekSelect.value;
-          window.receiptTrackerWeekSelected = activeWeekKey;
-          renderWeekRows();
-          renderRangeTable();
+        weekSelect.addEventListener("change", ()=> navigateReceiptWeek(weekSelect.value));
+      }
+      if (yearSelect instanceof HTMLSelectElement){
+        yearSelect.addEventListener("change", ()=>{
+          const year = Number(yearSelect.value), current = currentReceiptWeek();
+          const options = buildReceiptWeeks(year);
+          const week = year === current.year ? current.week : Math.min(Number(activeWeekKey.slice(-2)), options.length);
+          navigateReceiptWeek(weekKey(year, week));
         });
       }
       if (saveWeekBtn instanceof HTMLButtonElement){
@@ -14959,9 +15030,8 @@ const appendEmptyRow = (focusFirst = false)=>{
       const quickAddBtn = modal.querySelector("[data-receipt-quick-add-task]");
       if (quickAddBtn instanceof HTMLButtonElement){
         quickAddBtn.addEventListener("click", ()=>{
+          if (!saveWeekRowsFromDom({ showValidation:true })) return;
           ensureMaintenanceTaskModalAPI();
-          saveWeekRowsFromDom();
-          persistReceiptState();
           const focusRowIndex = Math.max(0, (weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelectorAll("tr[data-receipt-row]").length : 1) - 1);
           const opener = typeof window.__openMaintenanceTaskModal === "function" ? window.__openMaintenanceTaskModal : null;
           if (opener){
@@ -14992,7 +15062,9 @@ const appendEmptyRow = (focusFirst = false)=>{
       }
       if (clearAllBtn instanceof HTMLButtonElement){
         clearAllBtn.addEventListener("click", async ()=>{
+          receiptEditVersion += 1;
           purchaseHistoryUndoSnapshot = snapshotPurchaseHistory();
+          receiptDraftRows.clear();
           setUndoClearEnabled(Array.isArray(purchaseHistoryUndoSnapshot) && purchaseHistoryUndoSnapshot.length > 0);
           if (Array.isArray(window.receiptTrackerWeeks)){
             window.receiptTrackerWeeks = window.receiptTrackerWeeks.map(week => ({ ...week, rows: [] }));
@@ -15006,16 +15078,17 @@ const appendEmptyRow = (focusFirst = false)=>{
           renderWeekRows();
           renderRangeTable();
           renderCentralSpendRows();
-          await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true });
-          if (typeof toast === "function") toast("Purchase history cleared. Use Undo clear to restore.");
+          if (await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true }) && typeof toast === "function") toast("Purchase history cleared. Use Undo clear to restore.");
         });
       }
       if (undoClearBtn instanceof HTMLButtonElement){
         undoClearBtn.addEventListener("click", async ()=>{
           if (!Array.isArray(purchaseHistoryUndoSnapshot)) return;
+          receiptEditVersion += 1;
+          receiptDraftRows.clear();
           window.receiptTrackerWeeks = purchaseHistoryUndoSnapshot.map(week => ({
             ...week,
-            rows: normalizeRows(week?.rows).map(row => ({ ...row }))
+            rows: (Array.isArray(week?.rows) ? week.rows : []).map(row => ({ ...row }))
           }));
           purchaseHistoryUndoSnapshot = null;
           setUndoClearEnabled(false);
@@ -15027,14 +15100,14 @@ const appendEmptyRow = (focusFirst = false)=>{
           renderWeekRows();
           renderRangeTable();
           renderCentralSpendRows();
-          await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true });
-          if (typeof toast === "function") toast("Purchase history restore complete.");
+          if (await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true }) && typeof toast === "function") toast("Purchase history restore complete.");
         });
       }
       setUndoClearEnabled(false);
       if (exportWeekBtn instanceof HTMLElement){
         exportWeekBtn.addEventListener("click", ()=>{
-          const entry = saveWeekRowsFromDom();
+          const entry = saveWeekRowsFromDom({ showValidation:true });
+          if (!entry) return;
           const rows = normalizeRows(entry.rows);
           const subtotal = rows.reduce((sum, row) => sum + computeRowTotal(row), 0);
           const weekRange = entry.startISO && entry.endISO
@@ -15234,7 +15307,8 @@ const appendEmptyRow = (focusFirst = false)=>{
           downloadWorkbook(`receipt-range-${activeRange}.xls`, workbook);
         });
       }
-      const openModal = ()=>{
+      const openModal = ({ preserveTarget = false } = {})=>{
+        if (!preserveTarget) navigateReceiptWeek(currentReceiptWeek().key);
         modal.hidden = false;
         modal.setAttribute("aria-hidden", "false");
         document.body.classList.add("cost-receipt-modal-open");
@@ -15259,10 +15333,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         const rowIndex = Number(target.rowIndex);
         if (!weekKey) return false;
         if (weekSelect.value !== weekKey){
-          weekSelect.value = weekKey;
-          activeWeekKey = weekKey;
-          window.receiptTrackerWeekSelected = activeWeekKey;
-          renderWeekRows();
+          navigateReceiptWeek(weekKey);
         }
         if (!Number.isFinite(rowIndex) || rowIndex < 0) return false;
         const row = weekRowsBody.querySelector(`[data-receipt-row-index="${rowIndex}"]`);
@@ -15271,9 +15342,8 @@ const appendEmptyRow = (focusFirst = false)=>{
         return true;
       };
       const closeModal = async ()=>{
-        saveWeekRowsFromDom();
         if (hasUnsavedReceiptChanges && !hasExplicitSaveSinceEdit){
-          await savePurchaseHistoryWeek({ refreshDashboard: false, keepReceiptModalOpen: false });
+          if (!await savePurchaseHistoryWeek({ refreshDashboard: false, keepReceiptModalOpen: false })) return;
           if (typeof toast === "function") toast("Saved");
           refreshCostDashboard({ keepReceiptModalOpen: false });
         }
@@ -15288,15 +15358,17 @@ const appendEmptyRow = (focusFirst = false)=>{
       };
       if (typeof window !== "undefined"){
         window.__openPurchaseHistoryModalAtEntry = (target = {})=>{
-          openModal();
+          openModal({ preserveTarget:true });
           setTimeout(()=>{ focusReceiptWeekRow(target); }, 10);
           return true;
         };
       }
-      receiptOpenBtn.addEventListener("click", openModal);
+      receiptOpenBtn.addEventListener("click", ()=> openModal());
       closeControls.forEach(control => control.addEventListener("click", closeModal));
       if (window.costPurchaseHistoryModalOpen){
-        openModal();
+        const selected = String(window.receiptTrackerWeekSelected || "");
+        if (/^\d{4}-W\d{2}$/.test(selected)) navigateReceiptWeek(selected);
+        openModal({ preserveTarget:true });
       }
     }
 

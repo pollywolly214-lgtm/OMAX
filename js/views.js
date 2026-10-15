@@ -1978,6 +1978,10 @@ function viewCosts(model){
           <h3 id="costReceiptTitle">Purchase History</h3>
           <div class="cost-receipt-controls">
             <label>
+              <span>ISO week-year</span>
+              <select data-receipt-year-select aria-label="Select purchase history year"></select>
+            </label>
+            <label>
               <span>Week of year</span>
               <select data-receipt-week-select aria-label="Select purchase history week"></select>
             </label>

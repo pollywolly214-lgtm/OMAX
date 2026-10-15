@@ -12,11 +12,12 @@ function recovered(){
 }
 function freeze(value){ if (value && typeof value === "object") { Object.freeze(value); Object.values(value).forEach(freeze); } return value; }
 function renderPurchase(row){
-  class Element { constructor(){ this.innerHTML=""; this.hidden=true; } }
+  class Element { constructor(){ this.innerHTML=""; this.hidden=true; } querySelectorAll(){ return []; } }
   const rangeRowsBody = new Element(), weekRowsBody = new Element(), spendBody = new Element();
   const rangeAllocationNote = new Element(), weekAllocationNote = new Element(), weekSubtotal = new Element();
   const week = {key:"2025-W01",week:1,startISO:"2024-12-30",endISO:"2025-01-05",rows:[row]};
   const context = vm.createContext({ ...api, HTMLElement:Element, document:{ querySelector:()=>spendBody }, window:{receiptTrackerWeeks:[week]}, escapeHtml, formatUsd:usd, toIsoDate:value=>String(value || "").slice(0,10), normalizeRows:rows=>rows || [], getWeekEntry:()=>week, activeWeekKey:week.key, getRangeWindow:()=>({start:null,end:null}), buildRangeRows:()=>[{...row,total:api.getPurchaseFinancials(row).totalSpend}], activeRange:"all", rangeRowsBody, weekRowsBody, rangeAllocationNote, weekAllocationNote, weekSubtotal, rangeSubtotal:{}, weekRangeLabel:{}, rangeLabel:{}, formatDateRangeLabel:()=>"All time", findInventoryByPartNumber:()=>null, purchasedDatalistId:"fixture", appendEmptyRow:()=>{}, recomputeWeekTotals:()=>{} });
+  Object.assign(context, { receiptDraftRows:new Map(), rememberReceiptRow:()=>{} });
   vm.runInContext(extract("    const formatUsd", "    const toIsoDate") + extract("    const computeRowTotal", "    const escWorkbookHtml") + extract("    const renderCentralSpendRows", "    const getWeekEntry") + extract("      const renderWeekRows", "      const findInventoryByPartNumber") + extract("      const renderRangeTable", "      const bindRowEvents") + ";renderWeekRows();renderRangeTable();renderCentralSpendRows();", context);
   return { range:rangeRowsBody.innerHTML, week:weekRowsBody.innerHTML, spend:spendBody.innerHTML, rangeAllocationNote, weekAllocationNote };
 }
