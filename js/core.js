@@ -2650,7 +2650,7 @@ async function initFirebase(){
   }
 
 
-  // Ctrl/Cmd+S uses the normal form, including browser-filled credentials.
+  // Ctrl/Cmd+S only opens the normal Sign In window.
   const handleLoginShortcut = (event)=>{
     if (event.defaultPrevented || event.repeat || event.altKey || event.shiftKey) return;
     if (!(event.ctrlKey || event.metaKey) || String(event.key || "").toLowerCase() !== "s") return;
@@ -2659,13 +2659,8 @@ async function initFirebase(){
     event.preventDefault();
     if (authSubmitting) return;
     showModal();
-    if ((emailEl?.value || "").trim() && passEl?.value && typeof form?.requestSubmit === "function"){
-      form.requestSubmit(); // Native validation and the ordinary Firebase submit handler.
-      return;
-    }
-    const focusField = (emailEl?.value || "").trim() ? passEl : emailEl;
-    focusField?.focus();
-    if (focusField === emailEl) emailEl?.select();
+    emailEl?.focus();
+    emailEl?.select();
   };
   window.addEventListener("keydown", handleLoginShortcut);
 

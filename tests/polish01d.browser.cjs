@@ -164,15 +164,29 @@ test("POLISH-01D cutting-job corrections against disposable local state",{timeou
     }finally{await h.context.close();}
   });
 
-  await t.test("Actions trigger stays in its cell at narrow widths/DPR and popup still opens",async()=>{
+  await t.test("Actions trigger stays within visible History bounds at default zoom and narrow widths; popup still opens",async()=>{
     for(const dpr of [1,1.25,1.5]){
       const h=await fixture(dpr);try{
-        for(const width of [1280,1024,800,390]){
+        for(const width of [1920,1280,1024,800,390]){
           await h.page.setViewportSize({width,height:800});
           for(const kind of ['job','history']){
             const id=kind==='job'?'polish-other':'polish-source',button=h.page.locator(`[data-${kind}-actions-toggle="${id}"]`);
+            if(kind==='history'&&width===1920){
+              const initial=await button.evaluate(el=>{const card=el.closest('#pastJobs');card.scrollLeft=0;return{right:el.getBoundingClientRect().right,visibleRight:card.getBoundingClientRect().left+card.clientLeft+card.clientWidth,scrollWidth:card.scrollWidth,clientWidth:card.clientWidth};});
+              assert.ok(initial.right<=initial.visibleRight&&initial.scrollWidth<=initial.clientWidth+1,JSON.stringify({dpr,width,initial}));
+            }
             await button.scrollIntoViewIfNeeded();
-            const rects=await button.evaluate(el=>{const b=el.getBoundingClientRect(),cell=el.closest('td'),c=cell.getBoundingClientRect(),caret=el.querySelector('.job-actions-trigger-caret').getBoundingClientRect();return{contentRight:c.right-parseFloat(getComputedStyle(cell).paddingRight),caretRight:caret.right,left:b.left,right:b.right,top:b.top,bottom:b.bottom,cellLeft:c.left,cellRight:c.right,cellTop:c.top,cellBottom:c.bottom};});
+            const rects=await button.evaluate(el=>{
+              const b=el.getBoundingClientRect(),cell=el.closest('td'),c=cell.getBoundingClientRect(),caret=el.querySelector('.job-actions-trigger-caret').getBoundingClientRect();
+              let visibleLeft=0,visibleRight=innerWidth;
+              for(let ancestor=el.parentElement;ancestor;ancestor=ancestor.parentElement){
+                if(!['auto','scroll','hidden','clip'].includes(getComputedStyle(ancestor).overflowX))continue;
+                const a=ancestor.getBoundingClientRect(),left=a.left+ancestor.clientLeft;
+                visibleLeft=Math.max(visibleLeft,left);visibleRight=Math.min(visibleRight,left+ancestor.clientWidth);
+              }
+              return{visibleLeft,visibleRight,contentRight:c.right-parseFloat(getComputedStyle(cell).paddingRight),caretRight:caret.right,left:b.left,right:b.right,top:b.top,bottom:b.bottom,cellLeft:c.left,cellRight:c.right,cellTop:c.top,cellBottom:c.bottom};
+            });
+            assert.ok(rects.left>=rects.visibleLeft-.5&&rects.right<=rects.visibleRight+.5,JSON.stringify({dpr,width,kind,rects}));
             assert.ok(rects.right<=rects.contentRight-1.5&&rects.caretRight<=rects.right&&rects.left>=rects.cellLeft&&rects.right<=rects.cellRight+.5&&rects.top>=rects.cellTop&&rects.bottom<=rects.cellBottom+.5,JSON.stringify({dpr,width,kind,rects}));
             await button.focus();assert.equal(await button.evaluate(el=>document.activeElement===el),true);await h.page.keyboard.press('Enter');
             const menu=h.page.locator(`[data-${kind}-actions-menu="${id}"]`),rect=await menu.boundingBox();

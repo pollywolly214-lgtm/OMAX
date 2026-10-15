@@ -13,27 +13,32 @@ function harness(){
   vm.createContext(env);vm.runInContext(editable+"\n"+handlers+"\nthis.handle=handleLoginShortcut;",env);
   return{env,calls,form,button,fill(){emailEl.value=generatedEmail;passEl.value=generatedSecret;},emailOnly(){emailEl.value=generatedEmail;},run:extra=>env.handle({key:"s",ctrlKey:true,target:{tagName:"BODY"},preventDefault:()=>calls.prevented++,...extra})};
 }
-test("empty credentials open the normal form and focus email; partial autofill focuses password",()=>{
-  for(const modifiers of [{ctrlKey:true,metaKey:false},{ctrlKey:false,metaKey:true}]){const h=harness();h.run(modifiers);assert.equal(h.calls.open,1);assert.equal(h.calls.emailFocus,1);assert.equal(h.calls.submit,0);assert.equal(h.calls.firebase,0);}
-  const h=harness();h.emailOnly();h.run();assert.equal(h.calls.passFocus,1);assert.equal(h.calls.submit,0);
+test("Ctrl/Cmd+S only opens the normal form regardless of empty, partial or populated credentials",()=>{
+  for(const modifiers of [{ctrlKey:true,metaKey:false},{ctrlKey:false,metaKey:true}]){
+    for(const fields of ["empty","emailOnly","fill"]){
+      const h=harness();if(fields!=="empty")h[fields]();h.run(modifiers);
+      assert.equal(h.calls.open,1);assert.equal(h.calls.emailFocus,1);assert.equal(h.calls.passFocus,0);assert.equal(h.calls.select,1);assert.equal(h.calls.submit,0);assert.equal(h.calls.firebase,0);assert.equal(h.calls.hide,0);
+    }
+  }
 });
-test("populated fields request the normal form submit and Firebase email/password handler",async()=>{
-  const h=harness();h.fill();h.run();await h.form.pending;assert.equal(h.calls.submit,1);assert.equal(h.calls.firebase,1);assert.equal(h.calls.correctPath,true);assert.equal(h.calls.hide,1);
+
+test("manual submission still uses the normal Firebase email/password handler",async()=>{
+  const h=harness();h.fill();await h.form.onsubmit({preventDefault(){}});assert.equal(h.calls.firebase,1);assert.equal(h.calls.correctPath,true);assert.equal(h.calls.hide,1);
 });
-test("pending manual and shortcut submits share one in-flight lock",async()=>{
+test("manual sign-in keeps its in-flight lock and blocks the shortcut while pending",async()=>{
   const h=harness();let release;h.fill();h.env.FB.auth.signInWithEmailAndPassword=()=>{h.calls.firebase++;return new Promise(resolve=>{release=()=>resolve({user:{uid:"fixture"}});});};
-  h.run();h.run();await h.form.onsubmit({preventDefault(){}});assert.equal(h.calls.firebase,1);assert.equal(h.button.disabled,true);release();await h.form.pending;assert.equal(h.button.disabled,false);
+  const pending=h.form.onsubmit({preventDefault(){}});h.run();await h.form.onsubmit({preventDefault(){}});assert.equal(h.calls.open,0);assert.equal(h.calls.firebase,1);assert.equal(h.button.disabled,true);release();await pending;assert.equal(h.button.disabled,false);
 });
 test("normal auth errors remain visible and a later manual retry can succeed; sign-out unchanged",async()=>{
-  const h=harness();h.fill();h.env.FB.auth.signInWithEmailAndPassword=async()=>{throw Error("Fixture authentication rejected");};h.run();await h.form.pending;assert.deepEqual(h.calls.alerts,["Fixture authentication rejected"]);assert.equal(h.calls.hide,0);assert.equal(h.button.disabled,false);
+  const h=harness();h.fill();h.env.FB.auth.signInWithEmailAndPassword=async()=>{throw Error("Fixture authentication rejected");};await h.form.onsubmit({preventDefault(){}});assert.deepEqual(h.calls.alerts,["Fixture authentication rejected"]);assert.equal(h.calls.hide,0);assert.equal(h.button.disabled,false);
   h.env.FB.auth.signInWithEmailAndPassword=async()=>({user:{uid:"fixture"}});await h.form.onsubmit({preventDefault(){}});assert.equal(h.calls.hide,1);await h.env.btnOut.onclick();assert.equal(h.calls.signOut,1);
 });
 test("editable-focus, signed-in, modifier and repeat guards remain effective even with filled fields",()=>{
   const blocked=[{target:{tagName:"INPUT"}},{target:{tagName:"TEXTAREA"}},{target:{tagName:"SELECT"}},{target:{isContentEditable:true}},{target:{tagName:"SPAN",closest:()=>({})}},{defaultPrevented:true},{repeat:true},{altKey:true},{shiftKey:true},{key:"x"},{ctrlKey:false}];
   for(const extra of blocked){const h=harness();h.fill();h.run(extra);assert.equal(h.calls.open,0);assert.equal(h.calls.submit,0);assert.equal(h.calls.prevented,0);}
-  for(const active of [{tagName:"INPUT"},{tagName:"TEXTAREA"},{tagName:"SELECT"},{isContentEditable:true}]){const h=harness();h.fill();h.env.document.activeElement=active;h.run();assert.equal(h.calls.submit,0);}
-  const h=harness();h.fill();h.env.FB.user={uid:"fixture"};h.run();assert.equal(h.calls.submit,0);assert.equal(h.calls.firebase,0);
-  const sdk=harness();sdk.fill();sdk.env.FB.auth.currentUser={uid:"fixture"};sdk.run();assert.equal(sdk.calls.submit,0);assert.equal(sdk.calls.firebase,0);
+  for(const active of [{tagName:"INPUT"},{tagName:"TEXTAREA"},{tagName:"SELECT"},{isContentEditable:true}]){const h=harness();h.fill();h.env.document.activeElement=active;h.run();assert.equal(h.calls.open,0);assert.equal(h.calls.submit,0);}
+  const h=harness();h.fill();h.env.FB.user={uid:"fixture"};h.run();assert.equal(h.calls.open,0);assert.equal(h.calls.submit,0);assert.equal(h.calls.firebase,0);
+  const sdk=harness();sdk.fill();sdk.env.FB.auth.currentUser={uid:"fixture"};sdk.run();assert.equal(sdk.calls.open,0);assert.equal(sdk.calls.submit,0);assert.equal(sdk.calls.firebase,0);
 });
 test("password-manager attributes and existing Firebase LOCAL persistence are retained",()=>{
   assert.match(html,/<form id="authForm"[^>]*autocomplete="on"/);assert.match(html,/<input id="authEmail"[^>]*name="email"[^>]*autocomplete="username"/);assert.match(html,/<input id="authPass"[^>]*type="password"[^>]*autocomplete="current-password"/);

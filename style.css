@@ -4256,7 +4256,7 @@ body.job-naming-open {
   font-weight: 600;
 }
 .past-jobs-table td:last-child {
-  min-width: 160px;
+  min-width: 88px;
   color: #1f3252;
   font-size: 13px;
   line-height: 1.4;
