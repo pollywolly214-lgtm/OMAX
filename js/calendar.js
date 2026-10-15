@@ -2493,7 +2493,11 @@ function wireCalendarBubbles(){
     if (typeof isCalendarHoursEditing === "function" && isCalendarHoursEditing()) return;
     const el = e.target.closest("[data-cal-job], [data-cal-task], [data-cal-v2-one-time], [data-cal-garnet]");
     if (!el) return;
-    if (el.dataset.calJob)  showJobBubble(el.dataset.calJob, el);
+    if (el.dataset.calJob){
+      e.preventDefault();
+      redirectToCuttingJobPage(el.dataset.calJob);
+      return;
+    }
     if (el.dataset.calTask) showTaskBubble(el.dataset.calTask, el, extractTaskOptions(el));
     if (el.dataset.calV2OneTime) showV2OneTimeBubble(el.dataset.calV2OneTime, el);
     if (el.dataset.calGarnet) showGarnetBubble(el.dataset.calGarnet, el);

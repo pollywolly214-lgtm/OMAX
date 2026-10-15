@@ -324,7 +324,20 @@ function renderTolerance(){
 
   if (resetBtn && !resetBtn.dataset.wired){
     resetBtn.dataset.wired = "1";
-    resetBtn.addEventListener("click", ()=>{
+    resetBtn.addEventListener("click", async ()=>{
+      const confirmed = await showConfirmModal({
+        title: "Reset tolerance tables?",
+        message: "This removes all tolerance tables saved in this browser, including unsaved changes.",
+        confirmText: "Reset tables",
+        renderExtra: el=>{ el.innerHTML = '<label><input type="checkbox" data-tolerance-reset-confirm> I understand that all tolerance tables will be removed.</label>'; },
+        onShow: ({ root, state })=>{
+          const checkbox = root.querySelector("[data-tolerance-reset-confirm]");
+          state.confirmBtn.disabled = true;
+          checkbox.addEventListener("change", ()=>{ state.confirmBtn.disabled = !checkbox.checked; });
+        },
+        onConfirm: ({ root })=> root.querySelector("[data-tolerance-reset-confirm]")?.checked === true ? true : false
+      });
+      if (!confirmed) return;
       try {
         localStorage.removeItem(storageKey);
         localStorage.removeItem(legacyStorageKey);
@@ -5892,6 +5905,23 @@ function openLogHistoryModal(){
 function redirectToCuttingJobPage(jobId){
   const id = String(jobId || "").trim();
   if (!id) return;
+  const active = (window.cuttingJobs || []).filter(job=>String(job?.id) === id);
+  const past = (window.completedCuttingJobs || []).filter(job=>String(job?.id) === id);
+  if (active.length + past.length !== 1){
+    const deleted = (window.deletedItems || []).some(item=>["job","completed-job"].includes(item?.type) && String(item?.payload?.id) === id);
+    toast(deleted ? "This cutting job has been deleted." : "This cutting job is unavailable. Reload and try again.");
+    return;
+  }
+  const job = active[0] || past[0];
+  const root = String(window.JOB_ROOT_FOLDER_ID || "jobs_root");
+  // Reveal the exact identity before the view applies its category/search filters.
+  const category = (window.jobFolders || []).some(folder=>String(folder.id) === String(job.cat)) ? String(job.cat) : root;
+  if (past.length){
+    jobHistorySearchTerm = "";
+    window.jobHistorySearchTerm = "";
+    window.jobHistoryCategoryFilter = category;
+  } else window.jobCategoryFilter = category;
+  ensureJobCategoryFolderOpen(category);
   if (typeof window !== "undefined"){
     window.pendingJobFocus = { type: "jobRow", id };
     window.pendingJobRowHighlight = { id, untilMs: Date.now() + 5000 };
@@ -5903,16 +5933,36 @@ function redirectToCuttingJobPage(jobId){
   }
 }
 
-function promptCreateCategory(parentId){
-  const name = window.prompt("New category name?");
-  if (!name) return null;
-  const project = window.prompt("Project number for this category (1–8 digits, ALAMO, or XXXX)?", window.CuttingJobHistory.leadingProject(name) || window.CuttingJobHistory.reversedProject(name));
-  if (project == null) return null;
-  try {
-    const folder = addJobFolder(name, parentId, undefined, project);
-    saveCloudDebounced();
-    return folder;
-  } catch (err){ toast(err.message || "Unable to create category."); return null; }
+async function promptCreateCategory(parentId){
+  const result = await showConfirmModal({
+    title: "Create cutting-job category",
+    message: "Choose a name, project number, and color for the new category.",
+    confirmText: "Create category", confirmVariant: "primary", focusSelector: "[data-category-name]",
+    renderExtra: el=>{ el.innerHTML = `<div class="mini-form">
+      <label>Name <input data-category-name required maxlength="150" autocomplete="off"></label>
+      <label>Project number <input data-category-project required placeholder="1–8 digits, ALAMO, or XXXX" autocomplete="off"></label>
+      <label>Color <input type="color" data-category-create-color value="#2563eb"></label>
+      <p role="alert" data-category-error></p></div>`; },
+    onShow: ({ root })=>{
+      const name = root.querySelector("[data-category-name]");
+      name.addEventListener("blur", ()=>{
+        const project = root.querySelector("[data-category-project]");
+        if (!project.value) project.value = window.CuttingJobHistory.leadingProject(name.value) || window.CuttingJobHistory.reversedProject(name.value) || "";
+      });
+    },
+    onConfirm: ({ root })=>{
+      const name = root.querySelector("[data-category-name]").value.trim();
+      const project = root.querySelector("[data-category-project]").value.trim();
+      const color = root.querySelector("[data-category-create-color]").value;
+      try {
+        if (!name) throw Error("Enter a category name.");
+        const folder = addJobFolder(name, parentId, color, project);
+        saveCloudDebounced();
+        return folder;
+      } catch (err){ root.querySelector("[data-category-error]").textContent = err.message || "Unable to create category."; return false; }
+    }
+  });
+  return result || null;
 }
 
 function selectManualJobCategory(select, folder){
@@ -5924,6 +5974,9 @@ function selectManualJobCategory(select, folder){
   }
   select.value = id;
   select.dataset.prevValue = id;
+  if (select.id === "jobCategory"){
+    window.jobAddDraft = { ...(window.jobAddDraft || {}), category:id };
+  }
 }
 
 function syncManualJobProjectControl(select, input, original = null){
@@ -5969,7 +6022,6 @@ function renderDashboard(){
   const globalSuggestions = document.getElementById("dashboardGlobalSearchSuggestions");
   const centralModel = (typeof computeCostModel === "function") ? computeCostModel() : null;
   const maintenanceRows = Array.isArray(centralModel?.maintenanceDataTable) ? centralModel.maintenanceDataTable : [];
-  const cuttingRows = Array.isArray(centralModel?.cuttingJobsDataTable) ? centralModel.cuttingJobsDataTable : [];
   const allCutJobsForLabels = ([]).concat(Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [], Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []).filter(Boolean);
   const cutJobsById = new Map(allCutJobsForLabels.map(job=>[String(job?.id || ""), job]));
   const maintenanceByTask = new Map();
@@ -5981,7 +6033,7 @@ function renderDashboard(){
     maintenanceByTask.get(taskId).rows.push(row);
   });
   const cuttingByJob = new Map();
-  cuttingRows.forEach(row=>{
+  allCutJobsForLabels.forEach(row=>{
     const jobId = String(row?.id || "").trim();
     const name = String(row?.name || "").trim();
     if (!jobId || !name) return;
@@ -7960,7 +8012,7 @@ function renderDashboard(){
     if (!categoryId){ toast("Choose a category."); return; }
     if (categoryId === "__new__"){
       const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
-      const folder = promptCreateCategory(parent);
+      const folder = await promptCreateCategory(parent);
       if (!folder){ toast("Category not created."); return; }
       categoryId = String(folder.id);
       selectManualJobCategory(jobCategoryInput, folder);
@@ -7990,10 +8042,10 @@ function renderDashboard(){
   if (jobCategoryInput){
     jobCategoryInput.dataset.prevValue = jobCategoryInput.value;
     jobCategoryInput.addEventListener("focus", ()=>{ jobCategoryInput.dataset.prevValue = jobCategoryInput.value; });
-    jobCategoryInput.addEventListener("change", ()=>{
+    jobCategoryInput.addEventListener("change", async ()=>{
       if (jobCategoryInput.value === "__new__"){
         const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
-        const folder = promptCreateCategory(parent);
+        const folder = await promptCreateCategory(parent);
         if (folder){
           const newOption = document.createElement("option");
           newOption.value = String(folder.id);
@@ -8805,6 +8857,7 @@ function showConfirmModal(options){
     state.secondaryBtn.setAttribute("hidden", "");
   }
   if (state.confirmBtn){
+    state.confirmBtn.disabled = false;
     state.confirmBtn.textContent = opts.confirmText || "Confirm";
     const variant = opts.confirmVariant;
     state.confirmBtn.classList.remove("danger", "primary", "secondary");
@@ -8819,6 +8872,7 @@ function showConfirmModal(options){
       root.setAttribute("hidden", "");
       document.body?.classList.remove("modal-open");
       if (state.confirmBtn) state.confirmBtn.removeEventListener("click", onConfirm);
+      if (state.confirmBtn) state.confirmBtn.disabled = false;
       if (state.secondaryBtn) state.secondaryBtn.removeEventListener("click", onSecondary);
       if (state.cancelBtn) state.cancelBtn.removeEventListener("click", onCancel);
       if (state.closeBtn) state.closeBtn.removeEventListener("click", onCancel);
@@ -8864,7 +8918,7 @@ function showConfirmModal(options){
     root.removeAttribute("hidden");
     document.body?.classList.add("modal-open");
 
-    const focusTarget = state.confirmBtn || state.cancelBtn;
+    const focusTarget = (opts.focusSelector && root.querySelector(opts.focusSelector)) || state.confirmBtn || state.cancelBtn;
     if (focusTarget && typeof focusTarget.focus === "function"){
       requestAnimationFrame(()=> focusTarget.focus());
     }
@@ -20638,6 +20692,7 @@ function renderJobs(){
           window.scrollTo({ top: Math.max(0, targetY), behavior: "auto" });
         };
         const focusJobRowWithRetry = (attempt = 0)=>{
+          if (location.hash !== "#/jobs"){ clearTimeout(releaseTimer); safeUnlock(); return; }
           const targetSelectorId = (typeof escapeForSelector === "function")
             ? escapeForSelector(targetId)
             : ((typeof CSS !== "undefined" && typeof CSS.escape === "function") ? CSS.escape(targetId) : targetId);
@@ -20664,7 +20719,7 @@ function renderJobs(){
             setTimeout(()=>{ clearInterval(pinTimer); clearTimeout(releaseTimer); safeUnlock(); }, pinMs + 120);
             return;
           }
-          if (attempt >= maxAttempts){ clearTimeout(releaseTimer); safeUnlock(); return; }
+          if (attempt >= maxAttempts){ clearTimeout(releaseTimer); safeUnlock(); toast("The cutting job could not be displayed. Reload and try again."); return; }
           setTimeout(()=> focusJobRowWithRetry(attempt + 1), retryDelayMs);
         };
         focusJobRowWithRetry(0);
@@ -22284,8 +22339,8 @@ function renderJobs(){
   });
 
   const addRootCategoryBtn = content.querySelector("[data-job-folder-add-root]");
-  addRootCategoryBtn?.addEventListener("click", ()=>{
-    const folder = promptCreateCategory(typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
+  addRootCategoryBtn?.addEventListener("click", async ()=>{
+    const folder = await promptCreateCategory(typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
     if (folder){
       const openSet = readOpenFolderSet();
       openSet.add(String(folder.id));
@@ -22297,12 +22352,12 @@ function renderJobs(){
 
   if (!content.dataset.jobFolderEvents){
     content.dataset.jobFolderEvents = "1";
-    content.addEventListener("click", (event)=>{
+    content.addEventListener("click", async (event)=>{
       const addBtn = event.target.closest("[data-job-folder-add]");
       if (addBtn){
         event.preventDefault();
         const parentId = addBtn.getAttribute("data-job-folder-add");
-        const folder = promptCreateCategory(parentId);
+        const folder = await promptCreateCategory(parentId);
         if (folder){
           const openSet = readOpenFolderSet();
           openSet.add(String(folder.id));
@@ -22450,12 +22505,13 @@ function renderJobs(){
     jobCategorySelect.dataset.prevValue = jobCategorySelect.value;
     updateJobCategoryHint();
     jobCategorySelect.addEventListener("focus", ()=>{ jobCategorySelect.dataset.prevValue = jobCategorySelect.value; });
-    jobCategorySelect.addEventListener("change", (event)=>{
+    jobCategorySelect.addEventListener("change", async (event)=>{
+      event.stopPropagation();
       const select = event.target;
       if (!select) return;
       if (select.value === "__new__"){
         const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
-        const folder = promptCreateCategory(parent);
+        const folder = await promptCreateCategory(parent);
         if (folder){
           selectManualJobCategory(select, folder);
           const openSet = readOpenFolderSet();
@@ -22471,6 +22527,7 @@ function renderJobs(){
       }
       updateJobCategoryHint();
       syncManualJobProjectControl(select, document.getElementById("jobProjectNumber"));
+      syncAddJobDraftFromForm();
     });
   }
 
@@ -22533,7 +22590,7 @@ function renderJobs(){
 
   if (!content.dataset.jobCategorySelectEvents){
     content.dataset.jobCategorySelectEvents = "1";
-    content.addEventListener("change", (event)=>{
+    content.addEventListener("change", async (event)=>{
       const select = event.target.closest("[data-job-category-select]");
       if (!(select instanceof HTMLSelectElement)) return;
       const inlineIdRaw = select.getAttribute("data-job-category-inline");
@@ -22544,7 +22601,7 @@ function renderJobs(){
 
       if (select.value === "__new__"){
         const parent = window.jobCategoryFilter || rootId;
-        const folder = promptCreateCategory(parent);
+        const folder = await promptCreateCategory(parent);
         if (folder){
           const nextId = String(folder.id);
           selectManualJobCategory(select, folder);
@@ -23017,7 +23074,7 @@ function renderJobs(){
     if (!categoryId){ toast("Choose a category."); return; }
     if (categoryId === "__new__"){
       const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
-      const folder = promptCreateCategory(parent);
+      const folder = await promptCreateCategory(parent);
       if (!folder){ toast("Category not created."); return; }
       categoryId = String(folder.id);
       selectManualJobCategory(categorySelect, folder);

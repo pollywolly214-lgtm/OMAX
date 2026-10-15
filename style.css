@@ -6142,7 +6142,7 @@ tr.row-editing {
 .tolerance-container .tolerance-header h3{margin:0}
 .tolerance-actions{margin-left:auto;display:flex;gap:8px}
 .tolerance-actions .primary{background:#0a63c2;color:#fff;border:0;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer}
-.tolerance-actions button{border:1px solid #cfd8e3;background:#f4f7fb;border-radius:8px;padding:8px 12px;font-weight:600;cursor:pointer}
+.tolerance-actions button{border:1px solid #cfd8e3;background:#f4f7fb;color:#172b46;border-radius:8px;padding:8px 12px;font-weight:600;cursor:pointer}
 .tolerance-actions button:hover{background:#e7edf7}
 .tolerance-builder{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin:12px 0 20px;padding:12px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fbff}
 .tolerance-builder-field{display:flex;flex-direction:column;gap:6px;min-width:180px}

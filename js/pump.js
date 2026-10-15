@@ -69,6 +69,33 @@ function preparePumpBaselineChange(pump, action, metadata){
 }
 Object.assign(window,{resolvePumpBaselineForDate,preparePumpBaselineChange});
 /* End PRB baseline model. */
+
+/* POLISHv2: one exact measurement change; never rebuild baseline or other logs. */
+function preparePumpLogChange(pump, action){
+  if (!pump || !Array.isArray(pump.entries)) throw Error("Pump logs are unavailable. Reload before editing.");
+  if (!pumpValidBaselineDate(action?.dateISO) || !Number.isFinite(action.rpm) || action.rpm < 1)
+    throw Error("Enter a valid date and a positive RPM.");
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(action.timeISO || "")) throw Error("Enter a valid log time.");
+  const next = JSON.parse(JSON.stringify(pump));
+  if (action.kind === "create"){
+    if (next.entries.some(entry=>entry.dateISO === action.dateISO)) throw Error("A log already exists on this date. Edit that log instead.");
+    if (typeof action.id !== "string" || !action.id || next.entries.some(entry=>entry.id === action.id)) throw Error("Pump log identity is invalid.");
+    next.entries.push({id:action.id,dateISO:action.dateISO,rpm:action.rpm,timeISO:action.timeISO});
+  } else if (action.kind === "edit"){
+    const original = action.original;
+    if (!original || typeof original !== "object") throw Error("Select a saved pump log first.");
+    const matches = next.entries.map((entry,index)=>({entry,index})).filter(({entry})=>
+      original.id != null ? entry.id === original.id : entry.dateISO === original.dateISO);
+    if (matches.length !== 1 || stableStringifyForIntegrity(matches[0].entry) !== stableStringifyForIntegrity(original))
+      throw Error("This pump log changed or is ambiguous. Reload and review before editing.");
+    const {entry,index} = matches[0];
+    if (next.entries.some((other,i)=>i !== index && other.dateISO === action.dateISO)) throw Error("A log already exists on this date. Choose another date.");
+    next.entries[index] = {...entry,dateISO:action.dateISO,rpm:action.rpm,timeISO:action.timeISO};
+  } else throw Error("Unsupported pump log action.");
+  return next;
+}
+window.preparePumpLogChange = preparePumpLogChange;
+/* End POLISHv2 measurement model. */
 let pumpBaselineEditingId = null;
 let pumpBaselineModalNode = null;
 let pumpBaselineModalDialog = null;
@@ -143,14 +170,12 @@ function pumpEnsureEntriesArray(){
     window.pumpEff = { baselineRPM:null, baselineDateISO:null, entries:[], notes:[] };
   }
   if (!Array.isArray(window.pumpEff.entries)) window.pumpEff.entries = [];
-  window.pumpEff.entries.forEach(pumpEnsureEntryTime);
   return window.pumpEff.entries;
 }
 
 function pumpGetEntryTimeISO(entry){
   if (!entry || typeof entry !== "object") return "";
-  pumpEnsureEntryTime(entry);
-  return entry.timeISO || "";
+  return pumpNormalizeTimeValue(entry.timeISO ?? entry.time ?? entry.loggedTime, PUMP_DEFAULT_MEASUREMENT_TIME);
 }
 
 function pumpCompareEntriesDesc(a, b){
@@ -617,7 +642,7 @@ function upsertPumpEntry(dateISO, rpm, timeValue){
   pumpEff.entries.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
   return true;
 }
-function pumpLatest(){ return pumpEff.entries.length ? pumpEff.entries[pumpEff.entries.length-1] : null; }
+function pumpLatest(){ return pumpEff.entries.slice().sort(pumpCompareEntriesDesc)[0] || null; }
 function pumpPercentChange(latestRPM, measurementDateISO){
   const baseline = resolvePumpBaselineForDate(measurementDateISO);
   if (!baseline || !Number.isFinite(Number(latestRPM))) return null;
@@ -938,7 +963,7 @@ function viewPumpLogWidget(){
   const pct    = latest ? pumpPercentChange(latest.rpm, latest.dateISO) : null;
   const col    = pumpColorFor(pct);
   const applicable = resolvePumpBaselineForDate(latest?.dateISO || new Date().toLocaleDateString("en-CA"));
-  const busy = !!window.__pumpBaselineMutationPending;
+  const busy = !!(window.__pumpBaselineMutationPending || window.__pumpLogMutationPending);
   const todayISO    = new Date().toISOString().slice(0,10);
   const nowTime     = pumpFormatTimeForInput(new Date());
   const logDateValue = todayISO;
@@ -1158,16 +1183,16 @@ function renderPumpWidget(){
   pumpEnsureNotesArray();
   if (!logHost && !chartHost) return;
   document.getElementById("pumpChangeBaselineBtn")?.addEventListener("click",pumpOpenBaselineModal);
-  document.getElementById("pumpLogForm")?.addEventListener("submit",(e)=>{
+  document.getElementById("pumpLogForm")?.addEventListener("submit",async (e)=>{
     e.preventDefault();
-    const d   = document.getElementById("pumpLogDate").value;
-    const t   = document.getElementById("pumpLogTime")?.value;
-    const rpm = Number(document.getElementById("pumpLogRPM").value);
-    if (!d || !isFinite(rpm) || rpm <= 0) { toast("Enter date and valid RPM."); return; }
-    const saved = upsertPumpEntry(d, rpm, t);
-    if (!saved){ toast("Enter date and valid RPM."); return; }
-    pumpSetEditingDate(null);
-    pumpApplyEntryUpdates("Log saved");
+    const form = e.currentTarget;
+    const dateISO = form.querySelector("#pumpLogDate").value;
+    const rpm = Number(form.querySelector("#pumpLogRPM").value);
+    const timeISO = form.querySelector("#pumpLogTime").value;
+    const matches = pumpEnsureEntriesArray().filter(entry=>entry.dateISO === dateISO);
+    const action = matches.length ? {kind:"edit",original:JSON.parse(JSON.stringify(matches[0])),dateISO,rpm,timeISO}
+      : {kind:"create",id:genId("pump_log"),dateISO,rpm,timeISO};
+    await pumpSaveLogForm(form,action);
   });
   const editAllBtn = document.getElementById("pumpEditAllBtn");
   if (editAllBtn){
@@ -1267,6 +1292,48 @@ function pumpHideChartTooltip(canvas, tooltip){
   }
 }
 
+async function pumpSaveLogForm(form, action){
+  if (window.__pumpLogMutationPending || form.dataset.saving === "true") return;
+  if (!form.reportValidity()) return;
+  let status = form.querySelector("[data-pump-log-status]");
+  if (!status){
+    status = document.createElement("p");
+    status.setAttribute("data-pump-log-status", "");
+    status.setAttribute("role", "status");
+    form.appendChild(status);
+  }
+  const controls = Array.from((pumpLogModalDialog?.contains(form) ? pumpLogModalDialog : form).querySelectorAll("button,input"));
+  form.dataset.saving = "true";
+  controls.forEach(control=>control.disabled = true);
+  form.setAttribute("aria-busy", "true");
+  status.textContent = "Saving and verifying RPM log…";
+  let result;
+  try { result = await window.savePumpLogChange(action); }
+  catch (error){ result = {saved:false,error:String(error?.message || error)}; }
+  controls.forEach(control=>control.disabled = false);
+  form.dataset.saving = "false";
+  form.setAttribute("aria-busy", "false");
+  if (result?.saved === true && result.verificationCompleted === true && result.stateWriteCompleted === true){
+    pumpSetEditingDate(null);
+    renderPumpWidget();
+    if (typeof renderCalendar === "function") renderCalendar();
+    if (pumpLogModalDialog){
+      pumpLogModalState = {view:"table"};
+      pumpRenderLogModal();
+      pumpLogModalDialog.querySelector("[data-pump-log-status]").textContent = "RPM log verified and saved.";
+    }
+    toast("RPM log verified and saved");
+  } else {
+    status.setAttribute("role", "alert");
+    status.textContent = result?.error || "RPM log was not verified. Your corrections have not been reported as saved.";
+    if (result?.indeterminate){
+      status.textContent += " Reload and verify before retrying.";
+      form.querySelector('[type="submit"]')?.setAttribute("disabled", "");
+    }
+  }
+  return result;
+}
+
 function pumpEnsureLogModal(){
   if (pumpLogModalNode) return;
   const overlay = document.createElement("div");
@@ -1289,6 +1356,7 @@ function pumpEnsureLogModal(){
 }
 
 function pumpCloseLogModal(){
+  if (window.__pumpLogMutationPending) return;
   pumpSetEditingDate(null);
   document.body.classList.remove("pump-log-edit-open");
   if (pumpLogModalNode){
@@ -1307,7 +1375,8 @@ function pumpOpenLogEditModal(state){
   const view = base.view || (base.dateISO ? "single" : "table");
   const dateISO = base.dateISO || "";
   pumpEnsureLogModal();
-  pumpLogModalState = { view, dateISO };
+  const matches = pumpEnsureEntriesArray().filter(entry=>base.id != null ? entry.id === base.id : entry.dateISO === dateISO);
+  pumpLogModalState = { view, dateISO, original:base.original || (matches.length === 1 ? JSON.parse(JSON.stringify(matches[0])) : null) };
   pumpRenderLogModal();
   if (!pumpLogEscHandler){
     pumpLogEscHandler = (event)=>{
@@ -1335,98 +1404,22 @@ function pumpRenderLogModal(){
   pumpLogModalDialog.classList.toggle("pump-log-dialog-wide", view === "table");
   if (view === "table"){
     const entries = pumpEnsureEntriesArray().slice().sort(pumpCompareEntriesDesc);
-    const headingId = "pumpLogTableHeading";
-    const rows = entries.map((entry, idx)=>{
-      const timeISO = pumpNormalizeTimeValue(pumpGetEntryTimeISO(entry), PUMP_DEFAULT_MEASUREMENT_TIME) || PUMP_DEFAULT_MEASUREMENT_TIME;
-      const rpmVal = Number.isFinite(entry.rpm) ? entry.rpm : "";
-      return `
-        <tr data-pump-log-row data-original-date="${pumpEscapeTooltipValue(entry.dateISO)}">
-          <td><input type="date" data-pump-log-date value="${pumpEscapeTooltipValue(entry.dateISO)}" required aria-label="Date for row ${idx+1}"></td>
-          <td><input type="time" data-pump-log-time value="${pumpEscapeTooltipValue(timeISO)}" required aria-label="Time for row ${idx+1}"></td>
-          <td><input type="number" data-pump-log-rpm min="1" step="1" value="${pumpEscapeTooltipValue(rpmVal)}" required aria-label="RPM for row ${idx+1}"></td>
-          <td class="pump-log-row-actions"><button type="button" class="pump-log-delete-btn" data-pump-log-delete aria-label="Delete row ${idx+1}">Delete</button></td>
-        </tr>
-      `;
-    }).join("");
-    pumpLogModalDialog.innerHTML = `
-      <header class="pump-log-edit-header">
-        <div class="pump-log-edit-title-group">
-          <h3 id="${headingId}">Edit pump logs</h3>
-          <p class="pump-log-edit-subtitle">Update saved RPMs and times in one place to keep the calendar and efficiency chart aligned.</p>
-        </div>
-        <button type="button" class="pump-log-edit-close" aria-label="Close pump log editor">×</button>
-      </header>
-      <form class="pump-log-table-form" data-pump-log-table-form aria-labelledby="${headingId}">
-        <div class="pump-log-table-wrap">
-          <table class="pump-log-table">
-            <thead>
-              <tr><th>Date</th><th>Time</th><th>RPM @ 49 ksi</th><th class="pump-log-actions-col">Delete</th></tr>
-            </thead>
-            <tbody>
-              ${rows || `<tr class="pump-log-table-empty"><td colspan="4">No pump logs yet.</td></tr>`}
-            </tbody>
-          </table>
-        </div>
-        <div class="pump-log-table-foot">
-          ${entries.length ? `<p class="small muted">Adjust any incorrect day or time so the calendar and chart both stay accurate.</p>` : ""}
-          <div class="pump-log-edit-actions">
-            <button type="button" class="pump-log-edit-cancel">Cancel</button>
-            <div class="pump-log-edit-actions-spacer"></div>
-            <button type="submit" class="pump-log-edit-save" ${entries.length ? "" : "disabled"}>Apply changes</button>
-          </div>
-        </div>
-      </form>
-    `;
-      pumpLogModalDialog.querySelector(".pump-log-edit-close")?.addEventListener("click", pumpCloseLogModal);
-      pumpLogModalDialog.querySelector(".pump-log-edit-cancel")?.addEventListener("click", pumpCloseLogModal);
-      const form = pumpLogModalDialog.querySelector("[data-pump-log-table-form]");
-      form?.addEventListener("submit", (event)=>{
-        event.preventDefault();
-        const rows = Array.from(form.querySelectorAll("[data-pump-log-row]"));
-        if (!rows.length){ toast("No pump logs to update yet."); pumpCloseLogModal(); return; }
-        const updates = [];
-        const seenDates = new Set();
-        for (const row of rows){
-          const dateVal = row.querySelector("[data-pump-log-date]")?.value;
-          const timeVal = row.querySelector("[data-pump-log-time]")?.value;
-          const rpmVal = Number(row.querySelector("[data-pump-log-rpm]")?.value);
-          if (!dateVal || !isFinite(rpmVal) || rpmVal <= 0){ toast("Enter date, time, and valid RPM for each row."); return; }
-          const normalizedTime = pumpNormalizeTimeValue(timeVal, PUMP_DEFAULT_MEASUREMENT_TIME) || PUMP_DEFAULT_MEASUREMENT_TIME;
-          if (seenDates.has(dateVal)){ toast("Use unique dates for each pump log."); return; }
-          seenDates.add(dateVal);
-          updates.push({ dateISO: dateVal, rpm: rpmVal, timeISO: normalizedTime });
-        }
-        const normalizedUpdates = updates.map(item => pumpEnsureEntryTime({ ...item }));
-        normalizedUpdates.sort((a,b)=> a.dateISO.localeCompare(b.dateISO));
-        const serializeEntries = (arr)=> JSON.stringify(arr.map(entry => ({
-          dateISO: entry.dateISO,
-          rpm: Number(entry.rpm),
-          timeISO: pumpGetEntryTimeISO(entry)
-        })));
-        const previousSnapshot = serializeEntries(pumpEnsureEntriesArray());
-        const nextSnapshot = serializeEntries(normalizedUpdates);
-        if (previousSnapshot === nextSnapshot){ toast("No changes to save."); pumpCloseLogModal(); return; }
-        pumpEff.entries = normalizedUpdates;
-        pumpCloseLogModal();
-        pumpApplyEntryUpdates("Pump logs updated");
-      });
-      pumpLogModalDialog.querySelector(".pump-log-table")?.addEventListener("click", (event)=>{
-        const btn = event.target.closest("[data-pump-log-delete]");
-        if (!btn) return;
-        const row = btn.closest("[data-pump-log-row]");
-        if (!row) return;
-        row.remove();
-        const remainingRows = pumpLogModalDialog.querySelectorAll("[data-pump-log-row]");
-        if (!remainingRows.length){
-          const tbody = pumpLogModalDialog.querySelector(".pump-log-table tbody");
-          if (tbody) tbody.innerHTML = `<tr class="pump-log-table-empty"><td colspan="4">No pump logs yet.</td></tr>`;
-          pumpLogModalDialog.querySelector(".pump-log-edit-save")?.setAttribute("disabled", "true");
-        }
-      });
-      return;
-    }
+    pumpLogModalDialog.setAttribute("aria-labelledby", "pumpLogTableHeading");
+    pumpLogModalDialog.innerHTML = `<header class="pump-log-edit-header"><h3 id="pumpLogTableHeading">Pump RPM logs</h3>
+      <button type="button" class="pump-log-edit-close" aria-label="Close pump log editor">×</button></header>
+      <div class="pump-log-table-wrap"><table class="pump-log-table"><thead><tr><th>Date</th><th>Time</th><th>RPM @ 49 ksi</th><th>Actions</th></tr></thead><tbody>
+      ${entries.map((entry,index)=>`<tr data-pump-saved-log="${index}"><td>${pumpEscapeTooltipValue(entry.dateISO)}</td><td>${pumpEscapeTooltipValue(pumpGetEntryTimeISO(entry))}</td><td>${pumpEscapeTooltipValue(entry.rpm)}</td>
+        <td><button type="button" class="pump-note-edit-btn" data-pump-log-edit="${index}">Edit</button></td></tr>`).join("") || '<tr><td colspan="4">No pump logs yet.</td></tr>'}
+      </tbody></table></div><p role="status" data-pump-log-status></p>`;
+    pumpLogModalDialog.querySelector(".pump-log-edit-close").addEventListener("click",pumpCloseLogModal);
+    pumpLogModalDialog.querySelectorAll("[data-pump-log-edit]").forEach(button=>button.addEventListener("click",()=>{
+      const original = entries[Number(button.dataset.pumpLogEdit)];
+      pumpOpenLogEditModal({view:"single",dateISO:original.dateISO,original:JSON.parse(JSON.stringify(original))});
+    }));
+    return;
+  }
   const dateISO = state.dateISO || "";
-  const entry = dateISO ? pumpEff.entries.find(e => e && e.dateISO === dateISO) : null;
+  const entry = state.original || null;
   const timeISO = entry ? pumpGetEntryTimeISO(entry) : PUMP_DEFAULT_MEASUREMENT_TIME;
   const timeValue = pumpNormalizeTimeValue(timeISO, PUMP_DEFAULT_MEASUREMENT_TIME) || PUMP_DEFAULT_MEASUREMENT_TIME;
   const rpmValue = entry && Number.isFinite(entry.rpm) ? entry.rpm : "";
@@ -1435,6 +1428,7 @@ function pumpRenderLogModal(){
   const subtitleParts = [dateLabel, timeLabel].filter(Boolean);
   const subtitle = subtitleParts.length ? subtitleParts.join(" · ") : "";
   const headingId = "pumpLogEditHeading";
+  pumpLogModalDialog.setAttribute("aria-labelledby", headingId);
   pumpLogModalDialog.innerHTML = `
     <header class="pump-log-edit-header">
       <div class="pump-log-edit-title-group">
@@ -1450,7 +1444,7 @@ function pumpRenderLogModal(){
         <label class="pump-log-edit-label" for="pumpEditTime">Time</label>
         <input type="time" id="pumpEditTime" value="${pumpEscapeTooltipValue(timeValue)}" required>
         <label class="pump-log-edit-label" for="pumpEditRPM">RPM at 49 ksi</label>
-        <input type="number" id="pumpEditRPM" min="1" step="1" value="${pumpEscapeTooltipValue(rpmValue)}" required>
+        <input type="number" id="pumpEditRPM" min="1" step="any" value="${pumpEscapeTooltipValue(rpmValue)}" required>
         <div class="pump-log-edit-actions">
           <button type="button" class="pump-log-edit-cancel">Cancel</button>
           <button type="button" class="pump-log-delete-btn" data-pump-log-delete-single>Delete</button>
@@ -1463,23 +1457,17 @@ function pumpRenderLogModal(){
   pumpLogModalDialog.querySelector(".pump-log-edit-close")?.addEventListener("click", pumpCloseLogModal);
   pumpLogModalDialog.querySelector(".pump-log-edit-cancel")?.addEventListener("click", pumpCloseLogModal);
   const form = pumpLogModalDialog.querySelector("[data-pump-log-edit-form]");
-  form?.addEventListener("submit", (event)=>{
+  form?.addEventListener("submit",async (event)=>{
     event.preventDefault();
-    const dateInput = form.querySelector("#pumpEditDate");
-    const timeInput = form.querySelector("#pumpEditTime");
-    const rpmInput  = form.querySelector("#pumpEditRPM");
-    const dateVal = dateInput?.value;
-    const timeVal = timeInput?.value;
-    const rpmVal  = Number(rpmInput?.value);
-    if (!dateVal || !isFinite(rpmVal) || rpmVal <= 0){ toast("Enter date and valid RPM."); return; }
-    const saved = upsertPumpEntry(dateVal, rpmVal, timeVal);
-    if (!saved){ toast("Enter date and valid RPM."); return; }
-    pumpCloseLogModal();
-    pumpApplyEntryUpdates("Log updated");
+    await pumpSaveLogForm(form,{kind:"edit",original:state.original,
+      dateISO:form.querySelector("#pumpEditDate").value,
+      timeISO:form.querySelector("#pumpEditTime").value,
+      rpm:Number(form.querySelector("#pumpEditRPM").value)});
   });
   const deleteBtn = pumpLogModalDialog.querySelector("[data-pump-log-delete-single]");
   if (deleteBtn){
     deleteBtn.addEventListener("click", ()=>{
+      if (window.__pumpLogMutationPending) return;
       if (!entry){ pumpCloseLogModal(); return; }
       const label = subtitle || pumpFormatShortDate(entry.dateISO) || entry.dateISO || "this entry";
       const confirmed = typeof window.confirm === "function"
@@ -2057,7 +2045,7 @@ function drawPumpChart(canvas, rangeValue){
   }
   const range = rangeValue || window.pumpChartRange || "3m";
   pumpEnsureNotesArray();
-  const dataAll = pumpEff.entries.slice();
+  const dataAll = pumpEff.entries.slice().sort((a,b)=>a.dateISO.localeCompare(b.dateISO));
   const rangeLabel = pumpRangeLabel(range);
   const filtered = pumpFilterEntriesByRange(dataAll, range);
   const usingFiltered = filtered.length > 0;
