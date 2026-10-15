@@ -34,7 +34,7 @@ function harness(active=[],completed=[]){
   c.createCuttingJob=async job=>{calls.save++;window.cuttingJobs.push(job);return{saved:true,verified:true};};
   c.saveCuttingJobEdit=async(id,updates)=>{calls.save++;Object.assign([...window.cuttingJobs,...window.completedCuttingJobs].find(job=>job.id===id),updates);return{saved:true,verified:true};};
   for(const name of ["validateManualJobProjectCategory","applyManualJobProjectCategory","addJobFolder"])vm.runInContext(fn(core,name),c);
-  for(const name of ["parseCuttingJobDimension","promptCreateCategory","selectManualJobCategory","syncManualJobProjectControl","syncManualJobProjectControls"])vm.runInContext(fn(renderers,name),c);
+  for(const name of ["parseCuttingJobDimension","promptCreateCategory","selectManualJobCategory","existingJobCategoryEditMessage","validateExistingJobCategoryEdit","syncManualJobProjectControl","syncManualJobProjectControls"])vm.runInContext(fn(renderers,name),c);
   window.uploadCfr05CuttingFile=async()=>{calls.upload++;return{stage:"completed"};};
   function dashboard(cat="blanco",project="1254"){
     const defaults={jobNameInput:"Part",jobEstimateInput:"2",jobChargeInput:"200",jobCostRateInput:"45",jobMaterialInput:"Steel",jobMaterialCostInput:"9",jobMaterialQtyInput:"1",jobStartInput:"2026-10-06",jobDueInput:"2026-10-07",jobProjectInput:project};
@@ -97,6 +97,42 @@ test("active and history category edits update both fields after validation",asy
     const original=job(),h=harness(past?[]:[original],past?[original]:[]);
     await h.edit(past,{cat:"mesquite",projectNumber:"1242",materialCost:"9",materialQty:"1"});assert.equal(original.cat,"mesquite");assert.equal(original.projectNumber,"1242");assert.equal(h.calls.save,1);
   }
+});
+
+test("active and history Save exclude the live edited job from conflicting ownership evidence",async()=>{
+  for(const past of [false,true]){
+    const original=job({projectNumber:"1242"}),h=harness(past?[]:[original],past?[original]:[]);
+    await h.edit(past,{cat:"blanco",projectNumber:"1254",materialCost:"9",materialQty:"1"});
+    assert.equal(h.calls.save,1);assert.equal(original.projectNumber,"1254");assert.equal(original.cat,"blanco");
+  }
+});
+
+test("existing-job edits explain missing/conflicting ownership and preserve all drafts and records",async()=>{
+  for(const past of [false,true])for(const missing of [false,true]){
+    const original=job(),h=harness(past?[]:[original],past?[original]:[]),before=structuredClone(original);
+    const cat=missing?"unknown":"mesquite";
+    if(!missing)h.window.jobFolders.find(folder=>folder.id===cat).projectNumber="1254";
+    const foldersBefore=structuredClone(h.window.jobFolders);
+    await h.edit(past,{cat,projectNumber:"",name:"Keep this draft",materialCost:"9",materialQty:"1"});
+    assert.equal(h.calls.save,0);assert.deepEqual(original,before);assert.deepEqual(h.window.jobFolders,foldersBefore);
+    assert.match(h.messages.at(-1),/Choose a category with verified project ownership/);assert.match(h.messages.at(-1),/reviewed and corrected first/);assert.match(h.messages.at(-1),/nothing was saved/);assert.equal(h.fields.name.value,"Keep this draft");
+  }
+});
+
+test("excluding the edited job never hides another job's conflicting project claim",async()=>{
+  for(const past of [false,true]){
+    const original=job({projectNumber:"1242"}),other=job({id:"other",projectNumber:"1251"});
+    const h=harness(past?[other]:[original,other],past?[original]:[]),before=structuredClone([original,other]);
+    await h.edit(past,{cat:"blanco",projectNumber:"1254",materialCost:"9",materialQty:"1"});
+    assert.equal(h.calls.save,0);assert.deepEqual([original,other],before);assert.match(h.messages.at(-1),/1251/);
+  }
+});
+
+test("explicit category reselection loads verified project ownership without mutating the stored pair",()=>{
+  const original=job({projectNumber:"1242"}),h=harness([original]),before=structuredClone(original),select=new Select("blanco"),input={value:"1242",parentElement:{querySelector:()=>null}};
+  h.c.syncManualJobProjectControl(select,input,original);assert.equal(input.value,"1242");
+  h.c.syncManualJobProjectControl(select,input,original,true);assert.equal(input.value,"1254");
+  h.c.syncManualJobProjectControl(select,input,original);assert.equal(input.value,"1254");assert.deepEqual(original,before);
 });
 test("inline Category updates both fields and rolls the control back when blocked",()=>{
   const original=job(),h=harness([original]);h.inline("mesquite");assert.equal(original.projectNumber,"1242");assert.equal(original.cat,"mesquite");assert.equal(h.calls.save,1);

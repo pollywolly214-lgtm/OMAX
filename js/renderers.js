@@ -5979,32 +5979,54 @@ function selectManualJobCategory(select, folder){
   }
 }
 
-function syncManualJobProjectControl(select, input, original = null){
+function existingJobCategoryEditMessage(cat, result, original){
+  const folders = window.jobFolders || [];
+  const jobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])].filter(job=>job!==original);
+  const resolved = window.CuttingJobHistory.resolveCategoryProject(cat, folders, jobs);
+  if (resolved.ok){
+    return `${result.reason} Reselect the category to load Project # ${resolved.projectNumber}, then Save. Your edits remain open; nothing was saved.`;
+  }
+  const selected = folders.filter(folder=>String(folder.id)===String(cat));
+  const linkedProjects = [...new Set(jobs.filter(job=>String(job.cat)===String(cat)).map(job=>String(job.projectNumber ?? "").trim()).filter(Boolean))];
+  const details = selected.length===1
+    ? `Selected category: ${selected[0].name}. Category Project #: ${String(selected[0].projectNumber ?? "").trim() || "not set"}; linked-job Project # values: ${linkedProjects.join(", ") || "not set"}. `
+    : "";
+  return `${result.reason} ${details}Choose a category with verified project ownership. To use this category, have its project label, stored Project # and linked-job assignments reviewed and corrected first. This editor will not rewrite those records. Your edits remain open; nothing was saved.`;
+}
+
+function validateExistingJobCategoryEdit(cat, project, original){
+  const result = window.CuttingJobHistory.validateManualProjectCategory(cat, project, window.jobFolders || [], [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])], original);
+  if (!result.ok) toast(existingJobCategoryEditMessage(cat, result, original));
+  return result;
+}
+
+function syncManualJobProjectControl(select, input, original = null, categoryChanged = false){
   if (!select || !input) return;
   input.readOnly = true;
   let message;
-  if (original && String(select.value) === String(original.cat ?? "")){
+  if (original && !categoryChanged && String(select.value) === String(original.cat ?? "")
+      && (input.value == null || input.value === String(original.projectNumber ?? ""))){
     input.value = String(original.projectNumber ?? "");
     message = "Stored pair is preserved until Category changes.";
   } else {
     const jobs = [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])].filter(job=>job!==original);
     const pair = window.CuttingJobHistory.resolveCategoryProject(select.value, window.jobFolders || [], jobs);
     input.value = pair.ok ? pair.projectNumber : "";
-    message = pair.ok ? "Project Number follows Category." : pair.reason;
+    message = pair.ok ? "Project Number follows Category." : original ? existingJobCategoryEditMessage(select.value, pair, original) : pair.reason;
   }
   input.title = message;
   const status = input.parentElement?.querySelector("[data-project-category-status]");
   if (status) status.textContent = message;
 }
 
-function syncManualJobProjectControls(root){
+function syncManualJobProjectControls(root, changedSelect = null){
   syncManualJobProjectControl(root.querySelector("#jobCategory"), root.querySelector("#jobProjectNumber"));
   root.querySelectorAll("[data-j='cat'], [data-history-field='cat']").forEach(select=>{
     const history = select.hasAttribute("data-history-id");
     const id = select.getAttribute(history ? "data-history-id" : "data-id");
     const job = (history ? window.completedCuttingJobs : window.cuttingJobs)?.find(job=>String(job.id)===id);
     const input = select.closest(".job-edit-card")?.querySelector(history ? "[data-history-field='projectNumber']" : "[data-j='projectNumber']");
-    syncManualJobProjectControl(select, input, job);
+    syncManualJobProjectControl(select, input, job, select === changedSelect);
   });
 }
 
@@ -22644,13 +22666,10 @@ function renderJobs(){
         saveCloudDebounced();
         const currentFilter = typeof window.jobCategoryFilter === "string" ? window.jobCategoryFilter : rootId;
         rerenderPreservingState(currentFilter);
-      } else if (select.hasAttribute("data-history-id")){
-        // Keep the history draft in place: rebuilding it restores the saved
+      } else if (select.hasAttribute("data-history-id") || select.hasAttribute("data-id")){
+        // Keep the edit draft in place: rebuilding it restores the saved
         // category until the next frame, so an immediate Save can lose the edit.
-        syncManualJobProjectControls(content);
-      } else if (select.hasAttribute("data-id")){
-        syncManualJobProjectControls(content);
-        rerenderPreservingState(currentCategoryFilter());
+        syncManualJobProjectControls(content, select);
       }
     });
   }
@@ -23863,7 +23882,7 @@ function renderJobs(){
       const entry = structuredClone(originalEntry);
       const filesBeforeSave = Array.isArray(entry.files) ? entry.files.slice() : [];
       const field = (key)=> content.querySelector(`[data-history-field="${key}"][data-history-id="${id}"]`);
-      const pair = validateManualJobProjectCategory(field("cat")?.value, field("projectNumber")?.value, entry);
+      const pair = validateExistingJobCategoryEdit(field("cat")?.value, field("projectNumber")?.value, originalEntry);
       if (!pair.ok) return;
       const nameInput = field("name");
       const estimateInput = field("estimateHours");
@@ -24135,7 +24154,7 @@ function renderJobs(){
       const j = structuredClone(originalJob);
       const filesBeforeSave = Array.isArray(j.files) ? j.files.slice() : [];
       const qs = (k)=> content.querySelector(`[data-j="${k}"][data-id="${idStr}"]`)?.value;
-      const pair = validateManualJobProjectCategory(qs("cat"), qs("projectNumber"), j);
+      const pair = validateExistingJobCategoryEdit(qs("cat"), qs("projectNumber"), originalJob);
       if (!pair.ok) return;
       const chargeRaw = qs("chargeRate");
       const chargeVal = chargeRaw === "" || chargeRaw == null ? null : Number(chargeRaw);
