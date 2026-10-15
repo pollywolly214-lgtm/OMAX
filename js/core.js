@@ -105,6 +105,7 @@ function canWriteCloud(reason = "cloud save"){
   if (isRecoveryMode()) return blockCloudSave(`${reason}; Recovery Mode is read-only, cloud saves disabled.`);
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
   if (window.__pumpBaselineMutationPending && reason !== "pump baseline commit") return blockCloudSave(`${reason}; a pump baseline is being verified.`);
+  if (window.__pumpLogMutationPending && reason !== "pump log commit") return blockCloudSave(`${reason}; a pump log is being verified.`);
   if (!window.__cloudLoadAttemptComplete || !window.__initialAdoptComplete){
     return blockCloudSave(`${reason}; cloud load/adoption is not complete.`);
   }
@@ -2764,7 +2765,7 @@ function startWorkspaceStateListener(){
     if (!snap || !snap.exists){ enterMissingStateRecovery(); return; }
     if (isRecoveryMode()) return;
     // The isolated material writer owns adoption until SERVER verification.
-    if (window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending) return;
+    if (window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending || window.__pumpLogMutationPending) return;
     if (snap.metadata && snap.metadata.hasPendingWrites) return;
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
@@ -4594,7 +4595,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
   const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
     &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
-  if (!identityAuthorized && !canWriteCloud(options.pumpBaselineMutation ? "pump baseline commit" : "authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
+  if (!identityAuthorized && !canWriteCloud(options.pumpLogMutation ? "pump log commit" : options.pumpBaselineMutation ? "pump baseline commit" : "authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
   const deletionProof = options.cuttingJobDeletionProof;
   if (deletionProof){
     if (!cuttingJobDeletionProofs.has(deletionProof) || cuttingJobDeletionTransactions.has(deletionProof)) return cuttingJobDeletionFailure("Cutting-job deletion transaction authorization is invalid or already used.");
@@ -4673,7 +4674,14 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
           ? pending[field] : merge(pending[field],remote[field],baseline);
         pending.totalHistory = mergeUnlessIdentical("totalHistory",mergeTotalHistoryForSave,totalHistoryBaseline);
         pending.dailyCutHours = mergeUnlessIdentical("dailyCutHours",mergeDailyCutHoursForSave);
-        pending.pumpEff = mergeUnlessIdentical("pumpEff",mergePumpEffForSave);
+        if (options.pumpLogMutation){
+          // Date-keyed merging would resurrect the original day after a correction.
+          // Only the exact single-record operation can retain its prepared pump field.
+          const expectedPump = window.preparePumpLogChange(remote.pumpEff, options.pumpLogMutation);
+          if (!options.validateSourceState || !options.validatePreparedState
+            || stableStringifyForIntegrity(pending.pumpEff) !== stableStringifyForIntegrity(expectedPump))
+            throw Object.assign(Error("Pump log change differs from the selected record."), {definite:true,code:"pump_log_mutation_rejected"});
+        } else pending.pumpEff = mergeUnlessIdentical("pumpEff",mergePumpEffForSave);
       }
       if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
       // Additional restriction after all existing protected merges. Validation
@@ -6976,7 +6984,7 @@ function cloudSaveNoWriteFailure(errorCode, error){
 }
 
 async function performCloudSave(saveOptions = {}){
-  if (window.__pumpBaselineMutationPending) return cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump baseline is being verified; other edits remain pending.");
+  if (window.__pumpBaselineMutationPending || window.__pumpLogMutationPending) return cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump change is being verified; other edits remain pending.");
   if (window.__inventoryMaterialMutationPending) return cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending.");
   let authoritativeStateWriteAttempted = false;
   let authoritativeStateWriteCompleted = false;
@@ -7568,9 +7576,9 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
-  if (window.__pumpBaselineMutationPending){
+  if (window.__pumpBaselineMutationPending || window.__pumpLogMutationPending){
     hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
-    return cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump baseline is being verified; other edits remain pending.");
+    return cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump change is being verified; other edits remain pending.");
   }
   if (window.__inventoryMaterialMutationPending){
     hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
@@ -7597,9 +7605,9 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(saveOptions = {}){
-  if (window.__pumpBaselineMutationPending){
+  if (window.__pumpBaselineMutationPending || window.__pumpLogMutationPending){
     hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
-    return Promise.resolve(cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump baseline is being verified; other edits remain pending."));
+    return Promise.resolve(cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump change is being verified; other edits remain pending."));
   }
   if (window.__inventoryMaterialMutationPending){
     hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
@@ -7736,6 +7744,97 @@ window.addEventListener?.("beforeunload",event=>{
   event.preventDefault(); event.returnValue = "";
 });
 /* End PRB verified baseline action. */
+
+/* POLISHv2 verified measurement action; baseline editing remains separate. */
+async function savePumpLogChange(action){
+  const failure = error=>({saved:false,error:String(error?.message || error)});
+  if (window.__pumpLogMutationPending || window.__pumpBaselineMutationPending || window.__inventoryMaterialMutationPending
+    || !canWriteCloud("pump log commit") || !FB.ready || !FB.user || isVercelPreviewRuntime()) return failure("Pump log editing is unavailable while writes are blocked or another verified action is pending.");
+  action = cloneStructured(action);
+  window.__pumpLogMutationPending = true;
+  const targetDoc=FB.docRef,targetDb=FB.db,targetActor=FB.user.uid;
+  const targetMatches=()=>FB.ready && FB.docRef===targetDoc && FB.db===targetDb && FB.user?.uid===targetActor;
+  let writeStarted = false, acknowledged = false;
+  const evidence = {action:cloneStructured(action)};
+  const key = stableStringifyForIntegrity;
+  const business = state=>Object.fromEntries(Object.entries(state || {}).filter(([field])=>!["syncMeta","saveMeta","syncProcessLog"].includes(field)));
+  const read = async()=>{
+    // Reuse main's independent transaction.get backend lookup. It never queues
+    // a write and cannot reuse Firebase v8's active/cached snapshot view.
+    const envelope = await readInventoryMaterialAuthoritativeState();
+    const state = envelope?.state;
+    if (!targetMatches() || envelope?.path !== targetDoc?.path || !state || typeof state !== "object" || Array.isArray(state) || !state.pumpEff || typeof state.pumpEff !== "object"
+      || !Number.isSafeInteger(envelope.revision) || envelope.revision !== state.syncMeta?.rev) throw Error("Independent authoritative pump read is incomplete or has an invalid revision.");
+    return cloneStructured(state);
+  };
+  const suspend = error=>{
+    const result = {...failure(error),indeterminate:true,verificationCompleted:false,stateWriteAttempted:writeStarted,stateWriteCompleted:acknowledged};
+    window.__autosaveDisabled = true; window.__recoveryInspectMode = true;
+    window.__lastPumpLogMutationEvidence = {...evidence,result};
+    window.__lastIndeterminateSave = result;
+    try { renderRecoveryDiagnosticsPanel(); } catch (diagnosticError){ console.warn("Pump verification diagnostics unavailable",diagnosticError); }
+    return result;
+  };
+  try {
+    await cloudSaveQueue;
+    if (hasPendingLocalChanges) throw Error("Other changes are still pending. Wait for their save or reload before editing a pump log.");
+    const source = await read(); evidence.source = source;
+    const sourceKey = key(source), version = lastLocalMutationAt, revision = source.syncMeta.rev;
+    // Ordinary saves intentionally compact syncProcessLog out of their cached
+    // snapshot while Firestore merge writes may retain an older server log.
+    // Exclude only that non-business log from loaded-cache agreement. The CAS
+    // source validator and committed/readback verification still compare it.
+    const loadedEvidence = state=>Object.fromEntries(Object.entries(state || {}).filter(([field])=>field !== "syncProcessLog"));
+    const localMatches = ()=>targetMatches() && !hasPendingLocalChanges && lastLocalMutationAt === version
+      && window.__loadedCloudRevisionForSaveGuard === revision && key(loadedEvidence(window.__lastLoadedCloudState)) === key(loadedEvidence(source))
+      && key(business(getInventoryIdentityRepairLocalState())) === key(business(source));
+    if (!localMatches() || !checkAuthoritativeIdentityIntegrity(source).valid) throw Error("The authoritative pump source or local revision changed. Reload and review before saving.");
+    const intendedPump = window.preparePumpLogChange(source.pumpEff,action);
+    const intended = {...cloneStructured(source),pumpEff:intendedPump};
+    const frozenIntended = cloneStructured(intended); evidence.intended = frozenIntended;
+    const retention = validatePumpBaselineRetention(source.pumpEff,intendedPump);
+    if (!retention.valid) throw Error(retention.error);
+    if (!checkAuthoritativeIdentityIntegrity(intended).valid) throw Error("Pump log identities require recovery review; no write was attempted.");
+    const expected = key(intended), client = getCloudSyncClientId();
+    const queued = cloudSaveQueue.then(()=>{
+      if (!localMatches()) return cloudSaveNoWriteFailure("pump_source_changed","Local state changed before the pump transaction.");
+      writeStarted = true;
+      return writeAuthoritativeStateSnapshot(intended,{mergeFields:["pumpEff","syncMeta"]},{expectedRevision:revision,pumpLogMutation:cloneStructured(action),
+        validateSourceState:remote=>key(remote) === sourceKey && localMatches(),
+        validatePreparedState:pending=>key(pending) === expected && localMatches()});
+    });
+    cloudSaveQueue = queued.catch(()=>{});
+    const written = await queued; evidence.writeResult = written;
+    acknowledged = written?.saved === true && written.stateWriteCompleted === true;
+    if (!acknowledged){
+      if (written?.indeterminate || (written?.stateWriteAttempted && !written.definiteFailure)) return suspend(written?.error || "Pump write outcome is uncertain. Reload and verify before retrying.");
+      writeStarted = false;
+      return failure(written?.error || "The guarded pump log save was rejected.");
+    }
+    const committed = written.committedState, sync = committed?.syncMeta;
+    const retainedSync = meta=>Object.fromEntries(Object.entries(meta || {}).filter(([field])=>!["rev","updatedAtISO","updatedBy"].includes(field)));
+    if (!committed || !Number.isSafeInteger(sync?.rev) || sync.rev <= revision || sync.updatedBy !== client
+      || typeof sync.updatedAtISO !== "string" || !Number.isFinite(Date.parse(sync.updatedAtISO))
+      || key(retainedSync(sync)) !== key(retainedSync(source.syncMeta))
+      || key(committed) !== key({...frozenIntended,syncMeta:sync})) return suspend("Pump writer acknowledgement differs from the intended protected state.");
+    const verified = await read(); evidence.readback = verified;
+    if (verified.syncMeta.rev !== sync.rev || key(verified) !== key(committed) || !checkAuthoritativeIdentityIntegrity(verified).valid)
+      return suspend("Authoritative pump verification failed: pump log, revision or unrelated data differs. Do not retry before recovery review.");
+    if (!localMatches() || !canWriteCloud("pump log commit")) return suspend("Local evidence changed during pump verification; confirmed server evidence was preserved for recovery review.");
+    const adopted = adoptIdentityCheckedAuthoritativeState(verified);
+    if (!adopted?.loaded || adopted.recovery) return suspend("Verified pump state could not pass authoritative adoption checks.");
+    persistLocalStateBackup(verified);
+    return {saved:true,verificationCompleted:true,stateWriteAttempted:true,stateWriteCompleted:true,revision:verified.syncMeta.rev};
+  } catch (error){
+    return writeStarted || acknowledged ? suspend(error) : failure(error);
+  } finally {
+    window.__pumpLogMutationPending = false;
+  }
+}
+window.savePumpLogChange = savePumpLogChange;
+window.addEventListener?.("beforeunload",event=>{if(window.__pumpLogMutationPending){event.preventDefault();event.returnValue="";}});
+/* End POLISHv2 verified measurement action. */
+
 async function persistMaintenanceV2CollectionsNow(){
   if (typeof saveCloudNow !== "function") return { saved:false, error:"Authoritative cloud save helper is unavailable." };
   return await saveCloudNow();

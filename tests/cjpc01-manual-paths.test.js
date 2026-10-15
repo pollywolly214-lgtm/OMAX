@@ -4,7 +4,7 @@ const chronology=require("../js/cuttingJobChronology");
 const history=require("../js/cuttingJobHistory");
 const renderers=fs.readFileSync("js/renderers.js","utf8").replace(/\r\n/g,"\n"),core=fs.readFileSync("js/core.js","utf8"),views=fs.readFileSync("js/views.js","utf8");
 const folders=[{id:"jobs_root",name:"All Jobs"},{id:"blanco",name:"1254 Blanco"},{id:"mesquite",name:"1242 Mesquite"},{id:"unknown",name:"Smith County"}];
-function fn(source,name){const start=source.indexOf(`function ${name}(`);assert.ok(start>=0,name);return source.slice(start,source.indexOf("\n}",start)+2);}
+function fn(source,name){const start=source.indexOf(`function ${name}(`);assert.ok(start>=0,name);return source.slice(source.slice(start-6,start)==="async "?start-6:start,source.indexOf("\n}",start)+2);}
 function between(startToken,endToken){const start=renderers.indexOf(startToken),end=renderers.indexOf(endToken,start);assert.ok(start>=0&&end>start,startToken);return renderers.slice(start,end);}
 class Select{
   constructor(value){this.value=value;this.dataset={};this.options=[{value}];}
@@ -27,10 +27,14 @@ function harness(active=[],completed=[]){
     refreshCfr05CloudPresentation:async()=>{},JOB_ROOT_FOLDER_ID:"jobs_root",ensureJobFolderState:()=>window.jobFolders,setJobFolders:value=>{window.jobFolders=value;},normalizeHexColor:()=>null,
     ensureJobCategories:()=>{throw Error("Manual flow must not normalize historical jobs");}});
   c.structuredClone=structuredClone;
+  c.showConfirmModal=async options=>{
+    const values={"[data-category-name]":{value:window.prompt("name")},"[data-category-project]":{value:window.prompt("project")},"[data-category-create-color]":{value:"#2563eb"},"[data-category-error]":{textContent:""}};
+    return options.onConfirm({root:{querySelector:key=>values[key]}});
+  };
   c.createCuttingJob=async job=>{calls.save++;window.cuttingJobs.push(job);return{saved:true,verified:true};};
   c.saveCuttingJobEdit=async(id,updates)=>{calls.save++;Object.assign([...window.cuttingJobs,...window.completedCuttingJobs].find(job=>job.id===id),updates);return{saved:true,verified:true};};
   for(const name of ["validateManualJobProjectCategory","applyManualJobProjectCategory","addJobFolder"])vm.runInContext(fn(core,name),c);
-  for(const name of ["parseCuttingJobDimension","promptCreateCategory","selectManualJobCategory","syncManualJobProjectControl","syncManualJobProjectControls"])vm.runInContext(fn(renderers,name),c);
+  for(const name of ["parseCuttingJobDimension","promptCreateCategory","selectManualJobCategory","existingJobCategoryEditMessage","validateExistingJobCategoryEdit","syncManualJobProjectControl","syncManualJobProjectControls"])vm.runInContext(fn(renderers,name),c);
   window.uploadCfr05CuttingFile=async()=>{calls.upload++;return{stage:"completed"};};
   function dashboard(cat="blanco",project="1254"){
     const defaults={jobNameInput:"Part",jobEstimateInput:"2",jobChargeInput:"200",jobCostRateInput:"45",jobMaterialInput:"Steel",jobMaterialCostInput:"9",jobMaterialQtyInput:"1",jobStartInput:"2026-10-06",jobDueInput:"2026-10-07",jobProjectInput:project};
@@ -94,6 +98,42 @@ test("active and history category edits update both fields after validation",asy
     await h.edit(past,{cat:"mesquite",projectNumber:"1242",materialCost:"9",materialQty:"1"});assert.equal(original.cat,"mesquite");assert.equal(original.projectNumber,"1242");assert.equal(h.calls.save,1);
   }
 });
+
+test("active and history Save exclude the live edited job from conflicting ownership evidence",async()=>{
+  for(const past of [false,true]){
+    const original=job({projectNumber:"1242"}),h=harness(past?[]:[original],past?[original]:[]);
+    await h.edit(past,{cat:"blanco",projectNumber:"1254",materialCost:"9",materialQty:"1"});
+    assert.equal(h.calls.save,1);assert.equal(original.projectNumber,"1254");assert.equal(original.cat,"blanco");
+  }
+});
+
+test("existing-job edits explain missing/conflicting ownership and preserve all drafts and records",async()=>{
+  for(const past of [false,true])for(const missing of [false,true]){
+    const original=job(),h=harness(past?[]:[original],past?[original]:[]),before=structuredClone(original);
+    const cat=missing?"unknown":"mesquite";
+    if(!missing)h.window.jobFolders.find(folder=>folder.id===cat).projectNumber="1254";
+    const foldersBefore=structuredClone(h.window.jobFolders);
+    await h.edit(past,{cat,projectNumber:"",name:"Keep this draft",materialCost:"9",materialQty:"1"});
+    assert.equal(h.calls.save,0);assert.deepEqual(original,before);assert.deepEqual(h.window.jobFolders,foldersBefore);
+    assert.match(h.messages.at(-1),/Choose a category with verified project ownership/);assert.match(h.messages.at(-1),/reviewed and corrected first/);assert.match(h.messages.at(-1),/nothing was saved/);assert.equal(h.fields.name.value,"Keep this draft");
+  }
+});
+
+test("excluding the edited job never hides another job's conflicting project claim",async()=>{
+  for(const past of [false,true]){
+    const original=job({projectNumber:"1242"}),other=job({id:"other",projectNumber:"1251"});
+    const h=harness(past?[other]:[original,other],past?[original]:[]),before=structuredClone([original,other]);
+    await h.edit(past,{cat:"blanco",projectNumber:"1254",materialCost:"9",materialQty:"1"});
+    assert.equal(h.calls.save,0);assert.deepEqual([original,other],before);assert.match(h.messages.at(-1),/1251/);
+  }
+});
+
+test("explicit category reselection loads verified project ownership without mutating the stored pair",()=>{
+  const original=job({projectNumber:"1242"}),h=harness([original]),before=structuredClone(original),select=new Select("blanco"),input={value:"1242",parentElement:{querySelector:()=>null}};
+  h.c.syncManualJobProjectControl(select,input,original);assert.equal(input.value,"1242");
+  h.c.syncManualJobProjectControl(select,input,original,true);assert.equal(input.value,"1254");
+  h.c.syncManualJobProjectControl(select,input,original);assert.equal(input.value,"1254");assert.deepEqual(original,before);
+});
 test("inline Category updates both fields and rolls the control back when blocked",()=>{
   const original=job(),h=harness([original]);h.inline("mesquite");assert.equal(original.projectNumber,"1242");assert.equal(original.cat,"mesquite");assert.equal(h.calls.save,1);
   const badOriginal=job(),before=structuredClone(badOriginal),bad=harness([badOriginal]),select=bad.inline("unknown");assert.deepEqual(badOriginal,before);assert.equal(bad.calls.save,0);assert.equal(select.value,"blanco");
@@ -113,8 +153,8 @@ test("project control follows Category, while unchanged legacy displays remain e
   select.value="mesquite";h.c.syncManualJobProjectControl(select,input,original);assert.equal(input.value,"1242");
   select.value="unknown";h.c.syncManualJobProjectControl(select,input,original);assert.equal(input.value,"");assert.match(input.title,/project-number review/);
 });
-test("Dashboard and Jobs share one category creator with validated metadata",()=>{
-  const h=harness(),answers=["Future Project","0012"];h.window.prompt=()=>answers.shift();const made=h.c.promptCreateCategory("jobs_root");
+test("Dashboard and Jobs share one category creator with validated metadata",async()=>{
+  const h=harness(),answers=["Future Project","0012"];h.window.prompt=()=>answers.shift();const made=await h.c.promptCreateCategory("jobs_root");
   assert.equal(made.projectNumber,"0012");assert.equal(made.name,"0012 Future Project");assert.equal(h.calls.save,1);
   assert.equal((renderers.match(/function promptCreateCategory\(/g)||[]).length,1);assert.equal(renderers.includes("const promptCreateCategory ="),false);
   const select=new Select("__new__");h.c.selectManualJobCategory(select,made);assert.equal(select.value,made.id);assert.ok(select.options.some(option=>option.value===made.id));
@@ -123,7 +163,7 @@ test("Dashboard and Add Job can create a category and its project-bearing job",a
   for(const dashboard of [false,true]){
     const h=harness(),answers=["Future Project","0012"];let serial=0;
     h.window.prompt=()=>answers.shift();h.c.genId=()=>`native-${++serial}`;
-    if(dashboard)h.dashboard("__new__","");else await h.add("__new__","");
+    if(dashboard)await h.dashboard("__new__","");else await h.add("__new__","");
     const made=h.window.jobFolders.find(folder=>folder.projectNumber==="0012");
     assert.ok(made);assert.equal(h.window.cuttingJobs[0].projectNumber,"0012");assert.equal(h.window.cuttingJobs[0].cat,made.id);assert.equal(h.calls.save,2);
   }
@@ -131,7 +171,7 @@ test("Dashboard and Add Job can create a category and its project-bearing job",a
 test("invalid new category ownership leaves folders and jobs unchanged",async()=>{
   for(const dashboard of [false,true]){
     const h=harness(),before=structuredClone(h.window.jobFolders),answers=["ATM","1254"];h.window.prompt=()=>answers.shift();
-    if(dashboard)h.dashboard("__new__","");else await h.add("__new__","");
+    if(dashboard)await h.dashboard("__new__","");else await h.add("__new__","");
     assert.deepEqual(h.window.jobFolders,before);assert.equal(h.window.cuttingJobs.length,0);assert.equal(h.calls.save,0);
   }
 });

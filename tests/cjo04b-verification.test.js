@@ -75,7 +75,8 @@ test("CJO-04B bounded mismatch evidence contains paths/revisions, no records or 
 });
 function copyUi(h,{cancel=false,changed=false}={}){
   const c=h.context,renderers=fs.readFileSync("js/renderers.js","utf8"),a=renderers.indexOf("    if (histActivate){"),b=renderers.indexOf("    if (histEdit){",a);const messages=[];
-  Object.assign(c,{histActivate:{getAttribute:()=>"one"},completedCuttingJobs:h.live.completedCuttingJobs,cuttingJobs:h.live.cuttingJobs,closeHistoryActionMenu(){},closeFileMenu(){},getSchedulingDailyHours:()=>8,todayISO:"2026-10-06",parseJobDate:value=>new Date(value),toDateInputValue:date=>date.toISOString().slice(0,10),JOB_DAY_MS:86400000,genId:()=>"active-copy",validateManualJobProjectCategory:()=>({ok:true,cat:"lady",projectNumber:"1241"}),showMakeActiveCopyModal:async()=>{if(changed)c.completedCuttingJobs[0].notes="changed";return cancel?null:{startISO:"2026-10-07",dueISO:"2026-10-08"};},toast:message=>messages.push(message),renderCalendarPreservingScroll(){},renderJobs(){}});
+  Object.assign(c,{histActivate:{getAttribute:()=>"one"},completedCuttingJobs:h.live.completedCuttingJobs,cuttingJobs:h.live.cuttingJobs,closeHistoryActionMenu(){},closeFileMenu(){},getSchedulingDailyHours:()=>8,todayISO:"2026-10-06",parseJobDate:value=>new Date(value),toDateInputValue:date=>date.toISOString().slice(0,10),JOB_DAY_MS:86400000,genId:()=>"active-copy",validateManualJobProjectCategory:()=>({ok:true,cat:"lady",projectNumber:"1241"}),showMakeActiveCopyModal:async options=>{if(changed)c.completedCuttingJobs[0].notes="changed";if(cancel)return null;const selection={startISO:"2026-10-07",dueISO:"2026-10-08"};const result=await options.onConfirm(selection);if(result?.error)messages.push(result.error);return result?.saved&&result.verified&&!result.requiresReload?selection:null;},toast:message=>messages.push(message),renderCalendarPreservingScroll(){},renderJobs(){}});
+  c.structuredClone=structuredClone;c.document={querySelector:()=>null};c.ensureJobCategoryFolderOpen=()=>{};c.window.jobFolders=h.live.jobFolders;c.window.CuttingJobHistory=require("../js/cuttingJobHistory");
   c.window.CuttingJobChronology=model;c.window.cuttingJobs=c.cuttingJobs;c.window.completedCuttingJobs=c.completedCuttingJobs;
   return {promise:vm.runInContext("(async()=>{"+renderers.slice(a,b)+"})()",c),messages};
 }
@@ -94,7 +95,7 @@ test("CJO-04B nonfinite/null cost mismatch remains strict rather than JSON-norma
   assert.notEqual(model.durableStateKey(model.durableStateProjection({cost:null})),model.durableStateKey(model.durableStateProjection({cost:NaN})));
 });
 test("CJO-04B source changes during copy date selection stop before creation",async()=>{
-  const h=harness(fixture()),action=copyUi(h,{changed:true});await action.promise;assert.equal(h.counts.writes,0);assert.equal(h.live.cuttingJobs.some(job=>job.id==="active-copy"),false);assert.ok(action.messages.some(message=>message.includes("completed job changed")));
+  const h=harness(fixture()),action=copyUi(h,{changed:true});await action.promise;assert.equal(h.counts.writes,0);assert.equal(h.live.cuttingJobs.some(job=>job.id==="active-copy"),false);assert.ok(action.messages.some(message=>message.includes("historical job changed")));
 });
 
 test("CJO-04B missing-array-element diagnostics stop at the traversal budget",()=>{
