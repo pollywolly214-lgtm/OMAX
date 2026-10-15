@@ -22644,7 +22644,11 @@ function renderJobs(){
         saveCloudDebounced();
         const currentFilter = typeof window.jobCategoryFilter === "string" ? window.jobCategoryFilter : rootId;
         rerenderPreservingState(currentFilter);
-      } else if (select.hasAttribute("data-id") || select.hasAttribute("data-history-id")){
+      } else if (select.hasAttribute("data-history-id")){
+        // Keep the history draft in place: rebuilding it restores the saved
+        // category until the next frame, so an immediate Save can lose the edit.
+        syncManualJobProjectControls(content);
+      } else if (select.hasAttribute("data-id")){
         syncManualJobProjectControls(content);
         rerenderPreservingState(currentCategoryFilter());
       }

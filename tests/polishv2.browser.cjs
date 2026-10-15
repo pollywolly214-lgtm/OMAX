@@ -2,6 +2,9 @@
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs/promises"),path=require("node:path"),http=require("node:http");
 const {chromium}=require(process.env.OMAX_PLAYWRIGHT_PATH||"playwright");
 const root=path.resolve(__dirname,"..");
+// File previews are generated locally on render; durable attachment fields are
+// checked separately against the fixture backend without this normalization.
+const withoutPreview=value=>{const copy=structuredClone(value);for(const job of [copy].flat())for(const file of job.files||[])delete file.preview;return copy;};
 test("POLISHv2 isolated forms, verified RPM edits and shared job navigation",{timeout:120000},async t=>{
  const server=http.createServer(async(req,res)=>{const url=new URL(req.url,"http://localhost"),file=path.resolve(root,"."+url.pathname+(url.pathname.endsWith("/")?"index.html":""));if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}try{res.writeHead(200,{"Content-Type":({".html":"text/html",".js":"text/javascript",".css":"text/css",".svg":"image/svg+xml"})[path.extname(file)]||"text/plain"}).end(await fs.readFile(file));}catch{res.writeHead(404).end();}});
  await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
@@ -21,15 +24,60 @@ test("POLISHv2 isolated forms, verified RPM edits and shared job navigation",{ti
     notes:[{dateISO:"2026-10-10",range:"all",text:" keep note ",updatedISO:"2026-10-10T08:00:00Z"}],extraPump:{keep:true}};
    state.jobFolders=[{id:"jobs_root",name:"All Jobs",parent:null,order:1},{id:"a",name:"1254 Blanco",projectNumber:"1254",parent:"jobs_root",order:2},{id:"b",name:"1242 Mesquite",projectNumber:"1242",parent:"jobs_root",order:3}];
    const base={name:"Identical job",estimateHours:1,startISO:"2026-10-14",dueISO:"2026-10-15",material:"Steel",materialCost:0,materialQty:1,chargeRate:200,costRate:45,priority:1,files:[],manualLogs:[],notes:""};
-   state.cuttingJobs=[{...base,id:"job-active",cat:"a",projectNumber:"1254"}];
-   state.completedCuttingJobs=[{...base,id:"job-past",cat:"a",projectNumber:"1254",completedAtISO:"2026-10-14"},{...base,id:"job-same-name",cat:"b",projectNumber:"1242",completedAtISO:"2026-10-14"}];
+   state.cuttingJobs=[{...base,id:"job-active",cat:"a",projectNumber:"1254",cutNumber:"C001"}];
+   state.completedCuttingJobs=[{...base,id:"job-past",cat:"a",projectNumber:"1254",cutNumber:"C002",completedAtISO:"2026-10-14T15:00:00Z",actualHours:1,notes:"Preserve historical notes",files:[{id:"fixture-file",name:"reference.dxf",source:"wj_cuts_reference",relativePath:"fixture/reference.dxf"}],manualLogs:[{dateISO:"2026-10-14",hours:1}],customHistory:{keep:true},efficiency:{rate:155,chargeRate:200,costRate:45,netRate:155,expectedHours:1,actualHours:1,expectedRemaining:0,actualRemaining:0,deltaHours:0,gainLoss:0}},{...base,id:"job-same-name",cat:"b",projectNumber:"1242",cutNumber:"C003",completedAtISO:"2026-10-14"}];
    await ref.set(state);
   });await load();
   const cloud=()=>page.evaluate(async()=>(await OMAXDevSafe.db.doc(FB.docRef.path).get()).data());
   const edit=async(date="2026-10-10")=>{await page.locator("#pumpEditAllBtn").click();await page.locator("[data-pump-saved-log]").filter({hasText:date}).locator("[data-pump-log-edit]").click();};
   const done=async()=>{assert.deepEqual(errors,[]);await context.close();};
-  return{context,page,load,cloud,edit,done,errors};
+  const editHistory=async()=>{await load("#/jobs");if(!await page.locator('[data-history-save="job-past"]').count()){await page.locator('[data-history-actions-toggle="job-past"]').click();await page.locator('[data-history-edit="job-past"]').click();}};
+  return{context,page,load,cloud,edit,editHistory,done,errors};
  }
+ await t.test("historical category selection reaches verified save and survives reload",async()=>{
+  const h=await fixture(),p=h.page,before=await h.cloud();await h.editHistory();
+  await p.evaluate(()=>{window.__historyToasts=[];const original=toast;window.toast=msg=>{window.__historyToasts.push(msg);original(msg);};const ref=FB.docRef,read=ref.get.bind(ref);ref.get=async(...args)=>{const snapshot=await read(...args);if(snapshot.data().completedCuttingJobs.find(j=>j.id==="job-past").cat==="b")await new Promise(resolve=>window.__releaseHistory=resolve);return snapshot;};});
+  const category=p.locator('[data-history-field="cat"][data-history-id="job-past"]');
+  const immediate=await category.evaluate(select=>{select.value="b";select.dispatchEvent(new Event("change",{bubbles:true}));return document.querySelector('[data-history-field="cat"][data-history-id="job-past"]').value;});
+  assert.equal(immediate,"b","category must not revert while waiting for the next animation frame");
+  assert.equal(await category.inputValue(),"b");assert.equal(await p.locator('[data-history-field="projectNumber"][data-history-id="job-past"]').inputValue(),"1242");
+  await p.locator('[data-history-save="job-past"]').click();await p.waitForFunction(()=>!!window.__releaseHistory);
+  assert.equal(await p.locator('[data-history-save="job-past"]').isDisabled(),true);assert.equal(await p.evaluate(()=>window.completedCuttingJobs.find(j=>j.id==="job-past").cat),"a");assert.equal(await p.evaluate(()=>window.__historyToasts.includes("History updated")),false);
+  await p.evaluate(()=>window.__releaseHistory());await p.waitForFunction(()=>window.__historyToasts.includes("History updated"));
+  const job=(await h.cloud()).completedCuttingJobs.find(j=>j.id==="job-past");assert.equal(job.cat,"b");assert.equal(job.projectNumber,"1242");
+  const old=before.completedCuttingJobs.find(j=>j.id==="job-past");for(const key of Object.keys(old).filter(key=>!["cat","projectNumber","cutChronologyHistory"].includes(key)))assert.deepEqual(job[key],old[key],key);
+  const after=await h.cloud();assert.deepEqual(after.cuttingJobs,before.cuttingJobs);assert.deepEqual(after.completedCuttingJobs.filter(j=>j.id!=="job-past"),before.completedCuttingJobs.filter(j=>j.id!=="job-past"));assert.deepEqual(after.jobFolders,before.jobFolders);assert.deepEqual(after.pumpEff,before.pumpEff);assert.equal(after.completedCuttingJobs.filter(j=>j.id==="job-past").length,1);
+  await h.load("#/jobs");assert.deepEqual(withoutPreview(await p.evaluate(()=>window.completedCuttingJobs.find(j=>j.id==="job-past"))),job);assert.match(await p.locator('[data-history-row="job-past"]').innerText(),/1242/);
+  await p.evaluate(()=>{FB.user=null;FB.ready=false;renderSignedOut();});await h.load("#/jobs");assert.deepEqual(withoutPreview(await p.evaluate(()=>window.completedCuttingJobs.find(j=>j.id==="job-past"))),job);
+  const reopened=await h.context.newPage();await reopened.goto(origin+"/?devsafe=1#/jobs");await reopened.waitForFunction(()=>window.__initialAdoptComplete);assert.deepEqual(withoutPreview(await reopened.evaluate(()=>window.completedCuttingJobs.find(j=>j.id==="job-past"))),job);await reopened.close();await h.done();
+ });
+ await t.test("history category rejects failed saves and invalid ownership without success or record changes",async()=>{
+  const h=await fixture(),p=h.page,before=await h.cloud();await h.editHistory();
+  await p.evaluate(()=>{window.__historyToasts=[];const original=toast;window.toast=msg=>{window.__historyToasts.push(msg);original(msg);};window.OMAXAtomicPersistence={...window.OMAXAtomicPersistence,save:async()=>({saved:false,definiteFailure:true,stateWriteAttempted:false,error:"Fixture history save rejected"})};});
+  await p.locator('[data-history-field="cat"]').selectOption("b");await p.locator('[data-history-save="job-past"]').click();await p.waitForFunction(()=>window.__historyToasts.includes("Fixture history save rejected"));
+  assert.equal(await p.locator('[data-history-field="cat"]').inputValue(),"b");assert.equal(await p.locator('[data-history-save="job-past"]').isEnabled(),true);assert.equal(await p.evaluate(()=>window.__historyToasts.includes("History updated")),false);assert.deepEqual((await h.cloud()).completedCuttingJobs,before.completedCuttingJobs);assert.deepEqual(withoutPreview(await p.evaluate(()=>window.completedCuttingJobs)),before.completedCuttingJobs);
+  await h.editHistory();await p.evaluate(()=>{window.__historyToasts=[];const original=toast;window.toast=msg=>{window.__historyToasts.push(msg);original(msg);};});await p.locator('[data-history-field="cat"]').selectOption("b");await p.locator('[data-history-field="projectNumber"]').evaluate(el=>{el.value="1254";});await p.locator('[data-history-save="job-past"]').click();await p.waitForFunction(()=>window.__historyToasts.some(msg=>msg.includes("must agree")));assert.deepEqual((await h.cloud()).completedCuttingJobs,before.completedCuttingJobs);assert.equal(await p.locator('[data-history-save="job-past"]').count(),1);await h.load("#/jobs");assert.deepEqual(withoutPreview(await p.evaluate(()=>window.completedCuttingJobs)),before.completedCuttingJobs);await h.done();
+ });
+ await t.test("history category mismatched readback keeps recovery protections and never reports success",async()=>{
+  const h=await fixture(),p=h.page;await h.editHistory();
+  await p.evaluate(()=>{window.__historyToasts=[];const original=toast;window.toast=msg=>{window.__historyToasts.push(msg);original(msg);};const ref=FB.docRef,read=ref.get.bind(ref);ref.get=async(...args)=>{const snapshot=await read(...args),state=snapshot.data(),job=state.completedCuttingJobs.find(j=>j.id==="job-past");if(job.cat==="b"){job.cat="a";job.projectNumber="1254";return{...snapshot,data:()=>state};}return snapshot;};});
+  await p.locator('[data-history-field="cat"]').selectOption("b");await p.locator('[data-history-save="job-past"]').click();await p.waitForFunction(()=>window.__autosaveDisabled===true&&window.__historyToasts.length>0);assert.equal(await p.evaluate(()=>window.__historyToasts.includes("History updated")),false);assert.equal(await p.evaluate(()=>window.__cuttingJobDisplayUnconfirmed),true);assert.equal(await p.evaluate(()=>window.completedCuttingJobs.find(j=>j.id==="job-past").cat),"a");await h.done();
+ });
+ await t.test("RPM table, header, inputs, focus and text selection remain readable in light and dark preferences",async()=>{
+  const h=await fixture(),p=h.page;
+  const contrast=async(selector,pseudo=null)=>p.locator(selector).first().evaluate((el,pseudo)=>{const style=getComputedStyle(el,pseudo);let background=style.backgroundColor;for(let parent=el.parentElement;parent&&background==="rgba(0, 0, 0, 0)";parent=parent.parentElement)background=getComputedStyle(parent).backgroundColor;const luminance=color=>{const rgb=color.match(/[\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};const a=luminance(style.color),b=luminance(background);return(Math.max(a,b)+.05)/(Math.min(a,b)+.05);},pseudo);
+  for(const colorScheme of ["light","dark"]){
+   await p.emulateMedia({colorScheme});await p.locator("#pumpEditAllBtn").click();
+   for(const selector of [".pump-log-table td",".pump-log-table th",".pump-log-edit-header h3",".pump-log-edit-close"])assert.ok(await contrast(selector)>=4.5,`${colorScheme}: ${selector}`);
+   await p.locator(".pump-log-table tbody tr").first().hover();assert.ok(await contrast(".pump-log-table td")>=4.5);assert.ok(await contrast(".pump-log-table td","::selection")>=4.5);
+   if(process.env.OMAX_POLISH_SCREENSHOTS)await p.locator(".pump-log-dialog").screenshot({path:path.join(process.env.OMAX_POLISH_SCREENSHOTS,`POLISHv2-01E-table-${colorScheme}.png`)});
+   await p.locator("[data-pump-log-edit]").first().click();
+   for(const selector of [".pump-log-edit-subtitle",".pump-log-edit-label","#pumpEditRPM","#pumpEditDate","#pumpEditTime"])assert.ok(await contrast(selector)>=4.5,`${colorScheme}: ${selector}`);
+   await p.locator("#pumpEditRPM").focus();assert.equal(await p.locator("#pumpEditRPM").evaluate(el=>getComputedStyle(el).outlineStyle),"solid");assert.ok(await contrast("#pumpEditRPM","::selection")>=4.5);
+   if(process.env.OMAX_POLISH_SCREENSHOTS)await p.locator(".pump-log-dialog").screenshot({path:path.join(process.env.OMAX_POLISH_SCREENSHOTS,`POLISHv2-01E-inputs-${colorScheme}.png`)});
+   await p.locator(".pump-log-edit-close").click();
+  }await h.done();
+ });
  await t.test("actual create, stable-ID edit, graph update, refresh, signed-out session reset and reopened page",async()=>{
   const h=await fixture(),p=h.page,before=await h.cloud();
   await p.locator("#pumpLogDate").fill("2026-10-14");await p.locator("#pumpLogRPM").fill("1825");await p.locator("#pumpLogTime").fill("11:00");await p.locator('#pumpLogForm [type="submit"]').click();
@@ -71,7 +119,7 @@ test("POLISHv2 isolated forms, verified RPM edits and shared job navigation",{ti
  await t.test("new category name/color stays selected through rerender; cancel and invalid ownership preserve data",async()=>{
   const h=await fixture(),p=h.page;await h.load("#/jobs");await p.locator('[aria-controls="jobAddPanel"]').click();await p.locator("#jobName").fill("Unsaved dimensions");await p.locator("#jobCategory").selectOption("__new__");
   await p.locator("[data-category-name]").fill("New project");await p.locator("[data-category-project]").fill("1432");await p.locator("[data-category-create-color]").fill("#b34567");await p.locator("[data-confirm-confirm]").click();await p.locator("[data-category-name]").waitFor({state:"hidden"}).catch(async error=>{console.log("CATEGORY DIAGNOSTIC",await p.evaluate(()=>({name:document.querySelector("[data-category-name]")?.value,project:document.querySelector("[data-category-project]")?.value,error:document.querySelector("[data-category-error]")?.textContent,folders:window.jobFolders})));throw error;});
-  await p.waitForFunction(()=>window.jobFolders.some(f=>f.projectNumber==="1432"));const made=await p.evaluate(()=>window.jobFolders.find(f=>f.projectNumber==="1432"));assert.equal(made.color,"#B34567");await p.evaluate(()=>renderJobs());assert.equal(await p.locator("#jobCategory").inputValue(),made.id);assert.equal(await p.locator("#jobName").inputValue(),"Unsaved dimensions");
+  await p.waitForFunction(()=>window.jobFolders.some(f=>f.projectNumber==="1432"));const made=await p.evaluate(()=>window.jobFolders.find(f=>f.projectNumber==="1432"));assert.equal(made.color,"#B34567");await p.waitForFunction(()=>document.querySelector("#jobName")?.value==="Unsaved dimensions");await p.evaluate(()=>renderJobs());assert.equal(await p.locator("#jobCategory").inputValue(),made.id);assert.equal(await p.locator("#jobName").inputValue(),"Unsaved dimensions");
   await p.locator("#jobCategory").selectOption("a");await p.evaluate(()=>renderJobs());assert.equal(await p.locator("#jobCategory").inputValue(),"a");assert.equal(await p.locator("#jobProjectNumber").inputValue(),"1254");
   await p.locator("#jobCategory").selectOption(made.id);await p.evaluate(()=>renderJobs());assert.equal(await p.locator("#jobCategory").inputValue(),made.id);
   await p.locator("#jobCategory").selectOption("__new__");await p.locator("[data-confirm-cancel]").click();await p.evaluate(()=>renderJobs());assert.equal(await p.locator("#jobCategory").inputValue(),made.id);
