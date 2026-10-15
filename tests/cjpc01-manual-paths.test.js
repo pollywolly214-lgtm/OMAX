@@ -14,15 +14,15 @@ class Select{
 }
 function harness(active=[],completed=[]){
   const calls={save:0,upload:0,resequence:0},messages=[],elements={},fields={};
-  const window={CuttingJobChronology:chronology,CuttingJobHistory:{...history,resequence:(active,completed)=>{calls.resequence++;return history.planDirectResequence(active,completed);}},cuttingJobs:active,completedCuttingJobs:completed,jobFolders:structuredClone(folders)};
+  const window={CuttingJobChronology:chronology,CuttingJobDimensions:require("../js/cuttingJobDimensions"),CuttingJobHistory:{...history,resequence:(active,completed)=>{calls.resequence++;return history.planDirectResequence(active,completed);}},cuttingJobs:active,completedCuttingJobs:completed,jobFolders:structuredClone(folders)};
   const noop=()=>{},content={dataset:{},querySelector:selector=>fields[/data-(?:j|history-field)="([^"]+)"/.exec(selector)?.[1]]||null,querySelectorAll:()=>[],addEventListener:(_,handler)=>{c.handler=handler;}};
-  const c=vm.createContext({window,Date,console,content,document:{getElementById:id=>elements[id]||null,createElement:()=>({})},HTMLSelectElement:Select,
+  const c=vm.createContext({window,Date,console,content,document:{getElementById:id=>elements[id]||null,querySelector:()=>null,createElement:()=>({})},HTMLSelectElement:Select,
     cuttingJobs:active,completedCuttingJobs:completed,toast:message=>messages.push(message),genId:()=>"new-job",editingJobs:new Set(["j"]),editingCompletedJobsSet:()=>new Set(["j"]),
     saveCloudDebounced:()=>calls.save++,saveCloudNow:async()=>{calls.save++;return{saved:true,stateWriteCompleted:true};},persistJobChanges:()=>calls.save++,
     reorderPriorities:noop,closeModal:noop,closeHistoryActionMenu:noop,closeFileMenu:noop,closeActionMenu:noop,renderDashboard:noop,renderJobs:noop,renderCalendarPreservingScroll:noop,
     updateDashJobCategoryHint:noop,ensureJobCategoryFolderOpen:noop,rerenderPreservingState:noop,readOpenFolderSet:()=>new Set(),writeOpenFolderSet:noop,currentCategoryFilter:()=>"jobs_root",
     mergeJobFileReferences:(before,after)=>after||before,JOB_RATE_PER_HOUR:200,JOB_BASE_COST_PER_HOUR:45,JOB_DAY_MS:86400000,todayISO:"2026-10-06",
-    parseJobDate:value=>value?new Date(value):null,toDateInputValue:date=>date?.toISOString().slice(0,10)||"",showMakeActiveCopyModal:async()=>({startISO:"2026-10-06",dueISO:"2026-10-07"}),
+    parseJobDate:value=>value?new Date(value):null,toDateInputValue:date=>date?.toISOString().slice(0,10)||"",showMakeActiveCopyModal:async options=>{const selection={startISO:"2026-10-06",dueISO:"2026-10-07"};const result=await options.onConfirm(selection);return result?.saved&&result.verified&&!result.requiresReload?selection:null;},
     materialSettings:{materials:[]},pendingNewJobFiles:[],pendingSecureCloudJobFiles:[],recalcMaterialTotals:noop,applyMinutesToHours:noop,fractionToNumber:()=>.25,
     refreshCfr05CloudPresentation:async()=>{},JOB_ROOT_FOLDER_ID:"jobs_root",ensureJobFolderState:()=>window.jobFolders,setJobFolders:value=>{window.jobFolders=value;},normalizeHexColor:()=>null,
     ensureJobCategories:()=>{throw Error("Manual flow must not normalize historical jobs");}});

@@ -25,6 +25,7 @@ test("POLISH-01 local forms, layout and menus with external network blocked", { 
   const page = await context.newPage(), errors = [];
   page.on("pageerror", error => errors.push(error.message));
   page.setDefaultTimeout(8000);
+  await page.clock.setFixedTime(new Date("2026-10-15T02:30:00Z"));
   await page.goto(origin + "/?devsafe=1");
   await page.waitForFunction(() => window.OMAXDevSafe?.active && window.__initialAdoptComplete);
   assert.equal(await page.evaluate(() => typeof firebase), "undefined");
@@ -44,15 +45,15 @@ test("POLISH-01 local forms, layout and menus with external network blocked", { 
   });
 
   await t.test("copy dates update immediately, and an intentionally earlier due date remains invalid", async () => {
-    await page.evaluate(() => { window.__copyResult = null; showMakeActiveCopyModal({defaultStart:"2026-09-01",defaultEnd:"2026-09-02"}).then(result => window.__copyResult = result); });
-    await page.locator("[data-active-copy-start]").fill("2026-10-14");
-    assert.equal(await page.locator("[data-active-copy-due]").inputValue(), "2026-10-14");
+    await page.evaluate(() => { window.__copyResult = null; showMakeActiveCopyModal({defaultEnd:"2026-09-02",categories:[{id:"test",name:"1254 Blanco"}],categoryId:"test",onConfirm:async()=>({saved:true,verified:true})}).then(result => window.__copyResult = result); });
+    await page.locator("[data-active-copy-start]").fill("2026-10-15");
+    assert.equal(await page.locator("[data-active-copy-due]").inputValue(), "2026-10-15");
     assert.equal(await page.locator("[data-active-copy-due]").evaluate(input => input.validity.valid), true);
-    await page.locator("[data-active-copy-due]").fill("2026-10-13");
-    assert.equal(await page.locator("[data-active-copy-due]").evaluate(input => input.validity.rangeUnderflow), true);
     await page.locator("[data-active-copy-due]").fill("2026-10-14");
+    assert.equal(await page.locator("[data-active-copy-due]").evaluate(input => input.validity.rangeUnderflow), true);
+    await page.locator("[data-active-copy-due]").fill("2026-10-15");
     await page.locator("[data-active-copy-submit]").click();
-    assert.deepEqual(await page.evaluate(() => window.__copyResult), {startISO:"2026-10-14",dueISO:"2026-10-14"});
+    assert.deepEqual(await page.evaluate(() => window.__copyResult), {startISO:"2026-10-15",dueISO:"2026-10-15",cat:"test"});
   });
 
   await t.test("fraction dimensions preserve decimals and reject unsafe expressions", async () => {

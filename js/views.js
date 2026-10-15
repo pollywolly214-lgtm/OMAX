@@ -4642,10 +4642,12 @@ function viewJobs(){
             <input type="text" id="jobMaterialThickness" placeholder="1/4" inputmode="decimal" value="${esc(addJobDraftField("materialThickness"))}">
           </label>
           <label>Path length (ft)
-            <input type="text" id="jobMaterialLengthFt" placeholder="10 or 3/12" title="Feet: enter a decimal or a fraction such as 3/12 for 3 inches" value="${esc(addJobDraftField("materialLengthFt"))}">
+            <input type="text" id="jobMaterialLengthFt" placeholder="10 or 3/12" title="Enter feet, division in feet, inches, or feet and inches" aria-describedby="jobMaterialLengthPreview" value="${esc(addJobDraftField("materialLengthFt"))}">
+            <output id="jobMaterialLengthPreview" class="job-dimension-preview" aria-live="polite"></output>
           </label>
           <label>Path width (ft)
-            <input type="text" id="jobMaterialWidthFt" placeholder="4 or 3/12" title="Feet: enter a decimal or a fraction such as 3/12 for 3 inches" value="${esc(addJobDraftField("materialWidthFt"))}">
+            <input type="text" id="jobMaterialWidthFt" placeholder="4 or 3/12" title="Enter feet, division in feet, inches, or feet and inches" aria-describedby="jobMaterialWidthPreview" value="${esc(addJobDraftField("materialWidthFt"))}">
+            <output id="jobMaterialWidthPreview" class="job-dimension-preview" aria-live="polite"></output>
           </label>
           <label>Material cost ($)
             <input type="number" id="jobMaterialCost" placeholder="0.00" min="0" step="0.01" value="${esc(addJobDraftField("materialCost"))}" readonly aria-readonly="true">

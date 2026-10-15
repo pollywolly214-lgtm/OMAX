@@ -6537,3 +6537,13 @@ button.job-cloud-preview-button { display: block; width: min(100%, 340px); margi
   z-index:10050; box-shadow:0 12px 28px rgba(19, 41, 75, 0.18);
 }
 .job-actions-menu[popover] button { white-space:normal; overflow-wrap:anywhere; }
+
+/* Keep the trigger's intrinsic label/padding from expanding a fixed table cell. */
+.job-col-actions .job-actions { min-width:0; max-width:100%; }
+.job-col-actions .job-actions-trigger {
+  min-width:0; max-width:100%; padding:6px; gap:4px; box-sizing:border-box;
+}
+.job-actions-trigger-label { min-width:0; overflow-wrap:anywhere; white-space:normal; }
+.job-actions-trigger-caret { flex:0 0 auto; }
+.job-dimension-preview { display:block; font-size:12px; color:var(--brand-blue-800); }
+[data-active-copy-status] { overflow-wrap:anywhere; }

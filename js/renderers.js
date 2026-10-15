@@ -8976,6 +8976,11 @@ const makeActiveCopyModalState = {
   cancelBtn: null,
   closeBtn: null,
   submitBtn: null,
+  categoryInput: null,
+  statusEl: null,
+  onConfirm: null,
+  submitting: false,
+  retryBlocked: false,
   resolver: null,
   keydownHandler: null,
   listenersBound: false,
@@ -8987,15 +8992,7 @@ const JOB_DAY_MS = 24 * 60 * 60 * 1000;
 
 // Local form parser: decimal/scientific number or a single numeric division.
 function parseCuttingJobDimension(value){
-  const text = String(value ?? "").trim();
-  const number = "[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?";
-  const match = text.match(new RegExp(`^(${number})(?:\\s*/\\s*(${number}))?$`));
-  if (!match) return NaN;
-  const numerator = Number(match[1]);
-  const denominator = match[2] == null ? 1 : Number(match[2]);
-  const result = numerator / denominator;
-  return Number.isFinite(numerator) && Number.isFinite(denominator) && denominator !== 0 && Number.isFinite(result)
-    ? result : NaN;
+  return window.CuttingJobDimensions.parseFeet(value);
 }
 
 function parseJobDate(value){
@@ -9048,6 +9045,9 @@ function ensureMakeActiveCopyModal(){
       <h4 data-active-copy-title>Make active copy</h4>
       <p class="confirm-modal-copy" data-active-copy-message></p>
       <form data-active-copy-form>
+        <label>Category for the active copy
+          <select data-active-copy-category required aria-label="Category for the active copy"></select>
+        </label>
         <div class="modal-grid">
           <label>Start date
             <input type="date" data-active-copy-start required>
@@ -9057,6 +9057,7 @@ function ensureMakeActiveCopyModal(){
           </label>
         </div>
         <p class="confirm-modal-copy" data-active-copy-duration hidden aria-live="polite"></p>
+        <p class="confirm-modal-copy" data-active-copy-status role="alert"></p>
         <div class="modal-actions">
           <button type="button" class="secondary" data-active-copy-cancel>Cancel</button>
           <button type="submit" class="primary" data-active-copy-submit>Make active copy</button>
@@ -9098,6 +9099,8 @@ function ensureMakeActiveCopyModal(){
     makeActiveCopyModalState.cancelBtn = host.querySelector("[data-active-copy-cancel]");
     makeActiveCopyModalState.closeBtn = host.querySelector("[data-active-copy-close]");
     makeActiveCopyModalState.submitBtn = host.querySelector("[data-active-copy-submit]");
+    makeActiveCopyModalState.categoryInput = host.querySelector("[data-active-copy-category]");
+    makeActiveCopyModalState.statusEl = host.querySelector("[data-active-copy-status]");
   };
 
   ensureStructure();
@@ -9141,9 +9144,9 @@ function ensureMakeActiveCopyModal(){
     state.dueInput.addEventListener("change", updateDuration);
     state.dueInput.addEventListener("input", updateDuration);
 
-    state.form.addEventListener("submit", (event) => {
+    state.form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (!state.startInput || !state.dueInput) return;
+      if (state.submitting || state.retryBlocked || !state.startInput || !state.dueInput) return;
       const startISO = state.startInput.value;
       const dueISO = state.dueInput.value;
       if (!startISO){ toast("Choose a start date."); return; }
@@ -9152,7 +9155,29 @@ function ensureMakeActiveCopyModal(){
       const dueDate = parseJobDate(dueISO);
       if (!startDate || !dueDate){ toast("Enter valid dates."); return; }
       if (dueDate < startDate){ toast("Due date cannot be before the start date."); return; }
-      closeMakeActiveCopyModal({ startISO, dueISO });
+      const selection = { startISO, dueISO, cat: state.categoryInput?.value || "" };
+      if (!selection.cat){ state.statusEl.textContent = "Choose a project category for the active copy."; return; }
+      state.submitting = true;
+      setMakeActiveCopyBusy(state);
+      state.statusEl.textContent = "Saving active copy and verifying…";
+      let result;
+      try {
+        result = await state.onConfirm?.(selection);
+      } catch (error){
+        result = { saved:false, verified:false, indeterminate:true, requiresReload:true, error:String(error?.message || error) };
+      } finally {
+        state.submitting = false;
+      }
+      if (result?.saved && result.verified && !result.requiresReload){
+        setMakeActiveCopyBusy(state);
+        closeMakeActiveCopyModal(selection);
+        return;
+      }
+      state.retryBlocked = !result || Boolean(result.indeterminate || result.requiresReload || result.stateWriteCompleted || result.saved);
+      state.statusEl.textContent = (result?.error || "Active copy was not confirmed.") + (state.retryBlocked
+        ? " Reload and verify the active list before trying again; this copy may already exist."
+        : " No copy was confirmed. Review the fields and retry after resolving the reported problem.");
+      setMakeActiveCopyBusy(state);
     });
 
     const cancel = () => closeMakeActiveCopyModal(null);
@@ -9171,8 +9196,16 @@ function ensureMakeActiveCopyModal(){
   return makeActiveCopyModalState;
 }
 
+function setMakeActiveCopyBusy(state){
+  const locked = state.submitting || state.retryBlocked;
+  [state.submitBtn, state.startInput, state.dueInput, state.categoryInput].forEach(input => { if (input) input.disabled = locked; });
+  [state.cancelBtn, state.closeBtn].forEach(button => { if (button) button.disabled = state.submitting; });
+  state.form?.setAttribute("aria-busy", String(state.submitting));
+}
+
 function closeMakeActiveCopyModal(result){
   const state = makeActiveCopyModalState;
+  if (state.submitting) return;
   const root = state.root;
   if (root){
     root.classList.remove("is-visible");
@@ -9198,11 +9231,27 @@ function showMakeActiveCopyModal(options){
   }
 
   const opts = options || {};
-  const { jobName, defaultStart, defaultEnd } = opts;
+  const { jobName, defaultEnd } = opts;
 
-  if (state.resolver){
-    closeMakeActiveCopyModal(null);
+  if (state.resolver) return Promise.resolve(null);
+  state.onConfirm = opts.onConfirm;
+  state.submitting = false;
+  state.retryBlocked = false;
+  setMakeActiveCopyBusy(state);
+  state.statusEl.textContent = "";
+  state.categoryInput.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Choose a project category";
+  state.categoryInput.appendChild(placeholder);
+  for (const category of opts.categories || []){
+    const option = document.createElement("option");
+    option.value = String(category.id);
+    option.textContent = category.name;
+    state.categoryInput.appendChild(option);
   }
+  state.categoryInput.value = opts.categoryId || "";
+  if (!state.categoryInput.value) state.statusEl.textContent = "The historical category needs review. Choose an existing project category for this new copy; the historical job will be preserved.";
 
   state.titleEl && (state.titleEl.textContent = "Make active copy");
   if (state.messageEl){
@@ -9211,8 +9260,10 @@ function showMakeActiveCopyModal(options){
       : "Select the start and due dates for the new active job.";
   }
 
-  state.startInput.value = toDateInputValue(parseJobDate(defaultStart));
-  state.dueInput.value = toDateInputValue(parseJobDate(defaultEnd));
+  state.startInput.value = toDateInputValue(new Date());
+  const dueDate = parseJobDate(defaultEnd);
+  const startDate = parseJobDate(state.startInput.value);
+  state.dueInput.value = toDateInputValue(dueDate && dueDate >= startDate ? dueDate : startDate);
   if (state.startInput.value){
     state.dueInput.min = state.startInput.value;
   }else{
@@ -22730,8 +22781,8 @@ function renderJobs(){
       costRate: getVal("jobCostRate"),
       material: getVal("jobMaterial"),
       materialThickness: getVal("jobMaterialThickness"),
-      materialLengthFt: getVal("jobMaterialLengthFt"),
-      materialWidthFt: getVal("jobMaterialWidthFt"),
+      materialLengthFt: window.CuttingJobDimensions.draftValue(document.getElementById("jobMaterialLengthFt")),
+      materialWidthFt: window.CuttingJobDimensions.draftValue(document.getElementById("jobMaterialWidthFt")),
       materialCost: getVal("jobMaterialCost"),
       materialQty: getVal("jobMaterialQty"),
       start: getVal("jobStart"),
@@ -22792,12 +22843,8 @@ function renderJobs(){
     if (!(matEl && tEl && lengthEl && widthEl && costEl && qtyEl)) return;
     const selected = materialSettings.materials.find(m => m.name === matEl.value);
     const thickness = fractionToNumber(tEl.value);
-    const lengthFt = parseCuttingJobDimension(lengthEl.value);
-    const widthFt = parseCuttingJobDimension(widthEl.value);
-    for (const [input, value] of [[lengthEl, lengthFt], [widthEl, widthFt]]){
-      input.setCustomValidity(input.value.trim() && (!Number.isFinite(value) || value <= 0)
-        ? "Enter positive feet as a decimal or fraction, such as 3/12." : "");
-    }
+    const lengthFt = window.CuttingJobDimensions.updateInput(lengthEl, document.getElementById("jobMaterialLengthPreview"));
+    const widthFt = window.CuttingJobDimensions.updateInput(widthEl, document.getElementById("jobMaterialWidthPreview"));
     const areaSqIn = lengthFt * widthFt * 144;
     if (!selected || !Number.isFinite(thickness) || !Number.isFinite(areaSqIn) || thickness <= 0 || areaSqIn <= 0){
       costEl.value = "";
@@ -22830,6 +22877,19 @@ function renderJobs(){
     `).join("");
   };
   const addJobForm = document.getElementById("addJobForm");
+  for (const id of ["jobMaterialLengthFt", "jobMaterialWidthFt"]){
+    const input = document.getElementById(id);
+    input?.addEventListener("input", ()=>{
+      delete input.dataset.dimensionFeet;
+      delete input.dataset.dimensionDisplay;
+    });
+    input?.addEventListener("blur", ()=>{
+      const previewId = id === "jobMaterialLengthFt" ? "jobMaterialLengthPreview" : "jobMaterialWidthPreview";
+      window.CuttingJobDimensions.updateInput(input, document.getElementById(previewId), true);
+      syncAddJobDraftFromForm();
+      recalcMaterialTotals();
+    });
+  }
   addJobForm?.addEventListener("input", syncAddJobDraftFromForm);
   addJobForm?.addEventListener("change", syncAddJobDraftFromForm);
   addJobForm?.addEventListener("input", (e)=>{
@@ -22972,8 +23032,8 @@ function renderJobs(){
     const thickness = fractionToNumber(document.getElementById("jobMaterialThickness")?.value);
     const lengthText = document.getElementById("jobMaterialLengthFt")?.value || "";
     const widthText = document.getElementById("jobMaterialWidthFt")?.value || "";
-    const pathLength = lengthText.trim() ? parseCuttingJobDimension(lengthText) : 0;
-    const pathWidth = widthText.trim() ? parseCuttingJobDimension(widthText) : 0;
+    const pathLength = lengthText.trim() ? window.CuttingJobDimensions.readInput(document.getElementById("jobMaterialLengthFt")) : 0;
+    const pathWidth = widthText.trim() ? window.CuttingJobDimensions.readInput(document.getElementById("jobMaterialWidthFt")) : 0;
     if (![pathLength, pathWidth].every(value => Number.isFinite(value) && value >= 0)){
       toast("Enter valid dimensions in feet, using decimals or fractions."); return;
     }
@@ -23573,7 +23633,7 @@ function renderJobs(){
           ? getConfiguredDailyHours()
           : ((typeof DAILY_HOURS === "number" && isFinite(DAILY_HOURS) && DAILY_HOURS > 0) ? DAILY_HOURS : 8));
       const safeToday = (() => {
-        const parsed = parseJobDate(todayISO) || parseJobDate(new Date());
+        const parsed = parseJobDate(new Date());
         if (parsed){
           return parsed;
         }
@@ -23586,7 +23646,7 @@ function renderJobs(){
       const entryDueDate = parseJobDate(entry.dueISO);
 
       const defaultStartDate = (() => {
-        const source = entryStartDate || safeToday;
+        const source = safeToday;
         if (!source || Number.isNaN(source.getTime())) return null;
         const clone = new Date(source.getTime());
         clone.setHours(0, 0, 0, 0);
@@ -23629,64 +23689,78 @@ function renderJobs(){
       let startISO = defaultStart;
       let dueISO = defaultEnd;
 
+      const categories = (window.jobFolders || []).filter(folder => window.CuttingJobHistory.resolveCategoryProject(folder.id, window.jobFolders || [], [...cuttingJobs, ...completedCuttingJobs]).ok);
+      let copyId = null;
+      let copyCategory = null;
       const selection = await showMakeActiveCopyModal({
         jobName: entry.name || "Cutting job",
         defaultStart,
-        defaultEnd
+        defaultEnd,
+        categories,
+        categoryId: categories.some(folder => String(folder.id) === String(entry.cat)) ? String(entry.cat) : "",
+        onConfirm: async selection=>{
+          const currentSource=(window.completedCuttingJobs || []).find(job=>String(job?.id)===String(id));
+          if(!currentSource||window.CuttingJobChronology.stateKey(currentSource)!==copySourceKey)return {saved:false,blocked:true,error:"The historical job changed. Cancel and reopen Make Active Copy to review it."};
+          const pair = validateManualJobProjectCategory(selection.cat ?? entry.cat, undefined);
+          if (!pair.ok) return {saved:false,blocked:true,error:pair.reason || "Choose a valid project category."};
+          if (selection.startISO) startISO = selection.startISO;
+          if (selection.dueISO) dueISO = selection.dueISO;
+
+          const startDate = parseJobDate(startISO);
+          const dueDate = parseJobDate(dueISO);
+          if (!startDate || !dueDate || dueDate < startDate)return {saved:false,blocked:true,error:"Choose valid dates; Due Date cannot precede Start Date."};
+          const normalizedDays = Math.max(1, Math.round((dueDate.getTime() - startDate.getTime()) / JOB_DAY_MS) + 1);
+
+          let estimateHours = Number(entry.estimateHours);
+          const materialCost = Number(entry.materialCost);
+          const materialQty = Number(entry.materialQty);
+          if (!Number.isFinite(estimateHours) || estimateHours <= 0){
+            estimateHours = normalizedDays * hoursPerDay;
+          }
+          const newJob = {
+            id: copyId || (copyId = genId(entry.name || "job")),
+            name: entry.name || "Cutting job",
+            projectNumber: pair.projectNumber,
+            estimateHours,
+            startISO,
+            dueISO,
+            material: entry.material || "",
+            materialCost: Number.isFinite(materialCost) ? materialCost : 0,
+            materialQty: Number.isFinite(materialQty) ? materialQty : 0,
+            chargeRate: Number.isFinite(Number(entry.chargeRate)) && Number(entry.chargeRate) >= 0
+              ? Number(entry.chargeRate)
+              : JOB_RATE_PER_HOUR,
+            costRate: Number.isFinite(Number(entry.costRate)) && Number(entry.costRate) >= 0
+              ? Number(entry.costRate) : JOB_BASE_COST_PER_HOUR,
+            priority: typeof getJobPriority === "function"
+              ? getJobPriority(entry)
+              : (Number.isFinite(Number(entry.priority)) && Number(entry.priority) > 0
+                ? Math.max(1, Math.floor(Number(entry.priority)))
+                : 1),
+            notes: entry.notes || "",
+            manualLogs: [],
+            files: Array.isArray(entry.files) ? entry.files.map(f => ({ ...f })) : [],
+            cat: pair.cat
+          };
+
+          for (const key of ["thickness", "pathLength", "pathWidth", "materialWeight", "materialCostComplete"]){
+            if (Object.hasOwn(entry, key)) newJob[key] = structuredClone(entry[key]);
+          }
+          const created=await createCuttingJob(newJob);
+          if (!created?.saved || !created.verified || created.requiresReload) return created;
+          if (!(window.cuttingJobs || []).some(job => String(job.id) === copyId))return {saved:false,verified:false,requiresReload:true,error:"Save was verified but the active copy is unavailable in the local list."};
+          copyCategory = pair.cat;
+          return created;
+        }
       });
       if (!selection) return;
-      const currentSource=completedCuttingJobs.find(job=>String(job?.id)===String(id));
-      if(!currentSource||window.CuttingJobChronology.stateKey(currentSource)!==copySourceKey){toast("The completed job changed while choosing dates. Reopen Make Active Copy.");return {saved:false,blocked:true};}
-      const pair = validateManualJobProjectCategory(entry.cat, undefined);
-      if (!pair.ok) return;
-      if (selection.startISO) startISO = selection.startISO;
-      if (selection.dueISO) dueISO = selection.dueISO;
-
-      const startDate = parseJobDate(startISO);
-      const dueDate = parseJobDate(dueISO);
-      if (!startDate || !dueDate){ toast("Enter valid dates."); return; }
-      const normalizedDays = Math.max(1, Math.round((dueDate.getTime() - startDate.getTime()) / JOB_DAY_MS) + 1);
-
-      let estimateHours = Number(entry.estimateHours);
-      const materialCost = Number(entry.materialCost);
-      const materialQty = Number(entry.materialQty);
-      if (!Number.isFinite(estimateHours) || estimateHours <= 0){
-        estimateHours = normalizedDays * hoursPerDay;
-      }
-      const newJob = {
-        id: genId(entry.name || "job"),
-        name: entry.name || "Cutting job",
-        projectNumber: pair.projectNumber,
-        estimateHours,
-        startISO,
-        dueISO,
-        material: entry.material || "",
-        materialCost: Number.isFinite(materialCost) ? materialCost : 0,
-        materialQty: Number.isFinite(materialQty) ? materialQty : 0,
-        chargeRate: Number.isFinite(Number(entry.chargeRate)) && Number(entry.chargeRate) >= 0
-          ? Number(entry.chargeRate)
-          : JOB_RATE_PER_HOUR,
-        costRate: Number.isFinite(Number(entry.costRate)) && Number(entry.costRate) >= 0
-          ? Number(entry.costRate) : JOB_BASE_COST_PER_HOUR,
-        priority: typeof getJobPriority === "function"
-          ? getJobPriority(entry)
-          : (Number.isFinite(Number(entry.priority)) && Number(entry.priority) > 0
-            ? Math.max(1, Math.floor(Number(entry.priority)))
-            : 1),
-        notes: entry.notes || "",
-        manualLogs: [],
-        files: Array.isArray(entry.files) ? entry.files.map(f => ({ ...f })) : [],
-        cat: pair.cat
-      };
-
-      histActivate.disabled=true;
-      const created=await createCuttingJob(newJob);
-      histActivate.disabled=false;
-      if(!created.saved||!created.verified||created.requiresReload){toast(created.error||"Active copy was not saved.");return created;}
       cuttingJobs=window.cuttingJobs;completedCuttingJobs=window.completedCuttingJobs;
-      renderCalendarPreservingScroll();
-      toast("Active cutting job created");
+      window.jobCategoryFilter = copyCategory;
+      ensureJobCategoryFolderOpen(copyCategory);
       renderJobs();
+      document.querySelector(`tr[data-job-row="${copyId}"]`)?.scrollIntoView?.({block:"center"});
+      toast("Active cutting job created");
+      renderCalendarPreservingScroll();
       return;
     }
 
