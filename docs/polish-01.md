@@ -1,6 +1,6 @@
 # POLISH-01: small UI and interaction fixes
 
-Latest targeted follow-up: [POLISH-01F root causes, checks and manual-verification limits](polish-01f.md). Earlier POLISH-01/01D results below record those iterations.
+Latest reconciliation: [POLISH-01H main reconciliation, exact commands and remaining manual checks](polish-01h.md). [POLISH-01F](polish-01f.md) and the results below are historical iteration records; POLISH-01G restored the manual-only sign-in shortcut.
 
 Started from fetched `origin/main` at `a279fbed298c53b8d7206ca02a582efed3e1cdfe` in an isolated checkout on `codex/production-polish-small-bugs`.
 
@@ -11,7 +11,7 @@ Each item was inspected before editing. Changes are limited to existing view mar
 | Item | Files | Inspection and resulting behavior |
 | --- | --- | --- |
 | 1. Next Due empty state | `js/renderers.js` | Empty results previously invoked `buildNextDuePreview()`, which displayed demo maintenance tasks. Replace only that empty branch with a green existing `chip green-better` saying **Caught up!**, followed by **No new tasks are required.** Existing due-task selection is unchanged. |
-| 2. Pump popup and tooltip | `js/pump.js`, `style.css` | Clicked points open the existing notes dialog. Override the inherited site-header colors locally, promote RPM to a large value, and retain date/time/range and notes. Hover positioning now uses a fixed 10px gap, accounts for the canvas position within its wrapper, and retains above/below flipping; remove transform animation that briefly used the previous point's offset. RPM data and calculations are unchanged. |
+| 2. Pump popup and tooltip | `js/pump.js`, `style.css` | Clicked points open the existing notes dialog. Override the inherited site-header colors locally, promote RPM to a large value, and retain date/time/range and notes. POLISH-01H retains current main's point selection, DPR/resize mapping, tooltip positioning and animation styles; obsolete PR positioning is removed. Compatible readable popup/RPM styling remains. RPM business calculations and baseline/history handling follow current main. |
 | 3. Average Cut Hours/Day sizing | `js/views.js`, `style.css` | The banner previously sat outside `dashboardLayout`. Wrap it in the existing dashboard-window system with `averageHours` identity, full width in the default grid, and existing responsive/custom resize behavior. Existing saved layouts add the missing widget through their current layout-entry helper. No calculation or data-source changes. |
 | 4. Maintenance Settings import contrast | `js/renderers.js` | Use existing brand/card variables for the import section, instructional text, inputs, file-picker button, action buttons and readable disabled states. Import handlers remain unchanged. |
 | 7. Export Range CSV placement | `js/views.js` | Move the existing button into `cost-receipt-summary-controls` beside Range. Keep its data attribute and existing export handler. |

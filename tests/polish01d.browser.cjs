@@ -27,7 +27,7 @@ test("POLISH-01D cutting-job corrections against disposable local state",{timeou
       state.jobFolders=[{id:"jobs_root",name:"All Jobs",parent:null,order:1},{id:"blanco",name:"1254 Blanco",projectNumber:"1254",parent:"jobs_root",order:2},{id:"mesquite",name:"1242 Mesquite",projectNumber:"1242",parent:"jobs_root",order:3}];
       state.completedCuttingJobs=[{...base,id:"polish-source",cat:"blanco",projectNumber:"1254",startISO:"2026-10-01",dueISO:"2026-10-01",completedAtISO:"2026-10-01",cutNumber:"C001"}];
       state.cuttingJobs=[{...base,id:"polish-other",cat:"mesquite",projectNumber:"1242",startISO:"2026-10-10",dueISO:"2026-10-10",cutNumber:"C002"}];
-      state.pumpEff={baselineRPM:1700,baselineDateISO:"2026-10-01",baselineTimeISO:"08:00",baselineHistory:[{dateISO:"2026-10-01",rpm:1700}],entries:[{dateISO:"2026-10-10",rpm:1750,timeISO:"10:00"}],notes:[]};
+      state.pumpEff={baselineRPM:1700,baselineDateISO:"2026-10-01",baselineTimeISO:"08:00",baselineHistory:[{id:"polish-baseline",effectiveDateISO:"2026-10-01",rpm:1700,corrections:[],createdAtISO:"2026-10-01T08:00:00Z",createdBy:"fixture"}],entries:[{dateISO:"2026-10-10",rpm:1750,timeISO:"10:00"}],notes:[]};
       await ref.set(state);
     });
     await load();

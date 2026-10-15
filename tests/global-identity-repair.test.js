@@ -100,6 +100,16 @@ function loadHarness(initial,options={}){
   return{context,window,removed,get adoptions(){return adoptions;},replace:value=>cloud=clone(value)};
 }
 const cleanFixture=()=>{const source=fixture();return repair.repairedState(source,repair.preview(source));};
+test("pump baseline/correction IDs survive identity inspection and authoritative logout/login-style reload",async()=>{
+  const source=cleanFixture();source.pumpEff.baselineHistory=[{id:"pump-baseline-keep",effectiveDateISO:"2026-06-02",rpm:3490,
+    rebuildRef:null,createdAtISO:"2026-06-01T12:00:00Z",createdBy:"fixture",unknown:{retain:true},
+    corrections:[{id:"pump-correction-keep",recordedAtISO:"2026-10-14T12:00:00Z",recordedBy:"fixture",reason:"Correct date and RPM",
+      before:{rpm:3480,effectiveDateISO:"2026-06-01"},after:{rpm:3490,effectiveDateISO:"2026-06-02"}}]}];
+  const before=clone(source);assert.equal(repair.integrity(source).valid,true);assert.deepEqual(source,before);
+  const h=loadHarness(source);assert.equal((await h.context.load()).recovery,false);assert.deepEqual(h.window.pumpEff,source.pumpEff);
+  const fresh=loadHarness(source);assert.equal((await fresh.context.load()).recovery,false);assert.deepEqual(fresh.window.pumpEff,source.pumpEff);
+  const duplicate=clone(source);duplicate.pumpEff.baselineHistory.push(clone(duplicate.pumpEff.baselineHistory[0]));assert.equal(repair.integrity(duplicate).valid,false);
+});
 test("Material Inventory __all is allowed only as its selector sentinel",()=>{
   const source=cleanFixture();source.inventoryMaterials={activeType:"__all",types:[{id:"steel",name:"Steel"}],sheets:{steel:{columns:["QTY 4x8"],rows:[{thickness:"0.0625",values:[""]}]}}};
   assert.equal(repair.integrity(source).valid,true);

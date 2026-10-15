@@ -100,30 +100,49 @@ test("POLISH-01 local forms, layout and menus with external network blocked", { 
     }
   });
 
-  await t.test("point popup RPM contrast and hover gap above/below scaled canvas", async () => {
-    await page.evaluate(() => {
-      pumpOpenNotesModal({view:"edit",dateISO:"2026-10-14",rpm:1750,range:"30d",timeISO:"12:00"});
-    });
-    assert.equal(await page.locator(".pump-point-rpm").innerText(), "1,750 RPM");
-    const style = await page.locator(".pump-notes-header").evaluate(el => ({text:getComputedStyle(el).color,bg:getComputedStyle(el).backgroundColor}));
-    assert.equal(style.text, "rgb(3, 19, 54)");
-    await page.locator("[data-pump-notes-close]").click();
-    const positions = await page.evaluate(() => {
-      const host = document.createElement("div"); host.className = "pump-chart-wrap";
-      host.style.cssText = "position:fixed;left:20px;top:20px;width:600px;height:452px;z-index:30000";
-      host.innerHTML = '<canvas width="1200" height="800" style="height:400px"></canvas>';
-      document.body.appendChild(host);
-      const canvas = host.querySelector("canvas"), tooltip = pumpEnsureTooltip(host);
-      return [600,30].map(y => {
-        const target = {rect:{x:600,y,width:20,height:20},datasetLabel:"Oct 14",valueLabel:"1750 RPM",detailLines:["Extra details"]};
-        pumpShowChartTooltip(canvas,tooltip,target,{scaleX:2,scaleY:2});
-        const box = tooltip.getBoundingClientRect(), canvasBox = canvas.getBoundingClientRect();
-        const placement = tooltip.dataset.placement;
-        return {placement,gap:placement === "above" ? canvasBox.top + y/2 - box.bottom : box.top - (canvasBox.top + (y+20)/2)};
-      });
-    });
-    assert.deepEqual(positions.map(x => x.placement), ["above","below"]);
-    for (const value of positions) assert.ok(Math.abs(value.gap - 10) <= 1, JSON.stringify(value));
+  await t.test("readable RPM popup and main's nearest-point selection at DPR 1/2, resized and expanded", async () => {
+    for(const dpr of [1,2]){
+      const isolated=dpr===1?null:await browser.newContext({timezoneId:"America/Chicago",viewport:{width:1280,height:800},deviceScaleFactor:dpr});
+      if(isolated)await isolated.route("**/*",route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
+      const tab=isolated?await isolated.newPage():page;
+      if(isolated){tab.on("pageerror",error=>errors.push(error.message));await tab.clock.setFixedTime(new Date("2026-10-15T02:30:00Z"));await tab.goto(origin+"/?devsafe=1");await tab.waitForFunction(()=>window.OMAXDevSafe?.active&&window.__initialAdoptComplete);}
+      try{
+        await tab.evaluate(()=>{
+          if(!OMAXDevSafe.active||typeof firebase!=="undefined")throw Error("Disposable backend required");
+          window.pumpEff={baselineRPM:1353,baselineDateISO:"2026-01-01",notes:[],entries:Array.from({length:141},(_,i)=>({dateISO:new Date(Date.UTC(2026,9,14-140+i)).toISOString().slice(0,10),rpm:1400+i,timeISO:"09:00"}))};
+          window.pumpChartRange="1y";location.hash="#/dashboard";renderDashboard();
+        });
+        for(const mode of ["normal","resized","expanded"]){
+          if(mode==="resized")await tab.setViewportSize({width:1000,height:850});
+          if(mode==="expanded")await tab.locator(".pump-expand-btn").click();
+          const canvas=tab.locator("#pumpChart");await canvas.evaluate(el=>el.scrollIntoView({block:"center"}));
+          await tab.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+          const points=await canvas.evaluate(canvas=>{
+            const targets=canvas.__pumpChartTargets,box=canvas.getBoundingClientRect(),dpr=devicePixelRatio,pair=targets.slice(-3,-1);
+            const distance=Math.hypot(pair[0].centerX-pair[1].centerX,pair[0].centerY-pair[1].centerY);
+            return pair.map(target=>({key:target.key,dateISO:target.dateISO,rpm:target.rpm,distance,radius:target.hitRadius,
+              x:box.left+target.centerX*dpr/canvas.width*box.width,y:box.top+target.centerY*dpr/canvas.height*box.height,
+              alpha:canvas.getContext("2d").getImageData(Math.round(target.centerX*dpr),Math.round(target.centerY*dpr),1,1).data[3]}));
+          });
+          for(const point of points){
+            assert.ok(point.distance>0&&point.distance<point.radius&&point.alpha>0,JSON.stringify({dpr,mode,point}));
+            await tab.mouse.move(point.x,point.y);
+            const tooltip=tab.locator(".pump-chart-tooltip[data-visible='true']");await tooltip.waitFor({state:"visible"});
+            assert.equal(await canvas.evaluate(el=>el.__pumpChartHoveredKey),point.key,JSON.stringify({dpr,mode,point}));
+            assert.equal(await tooltip.locator(".value").innerText(),point.rpm.toLocaleString("en-US")+" RPM");
+            assert.equal(await tooltip.locator(".value").evaluate(el=>getComputedStyle(el).color),"rgb(255, 255, 255)");
+            await tab.mouse.click(point.x,point.y);
+            assert.equal(await tab.locator(".pump-point-rpm").innerText(),point.rpm.toLocaleString("en-US")+" RPM");
+            assert.equal(await tab.locator(".pump-notes-header").evaluate(el=>getComputedStyle(el).color),"rgb(3, 19, 54)");
+            assert.ok((await tab.locator(".pump-notes-subtitle").innerText()).includes("9:00"));
+            await tab.locator("[data-pump-notes-close]").click();
+          }
+          await tab.mouse.move(0,0);assert.equal(await canvas.evaluate(el=>el.__pumpChartHoveredKey??null),null);
+          if(mode==="expanded")await tab.locator(".pump-expand-btn").click();
+        }
+      }finally{if(isolated)await isolated.close();}
+    }
+    await page.setViewportSize({width:1280,height:800});
   });
 
   await t.test("maintenance import and range export use existing readable controls", async () => {

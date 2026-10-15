@@ -38,6 +38,21 @@ function loadHarness(data){
 test("real load path with missing/empty state blocks autosave, renders diagnostics and preserves local evidence",async()=>{for(const data of [null,{}]){const h=loadHarness(data);await h.context.load();assert.equal(h.writes,0);assert.equal(h.adopts,0);assert.equal(h.context.canWrite(),false);assert.equal(h.context.window.__autosaveDisabled,true);assert.equal(h.context.window.gate.adoptComplete,false);assert.ok(h.diagnostics>0);}});
 test("meaningful authoritative load enables the adoption gate",async()=>{const h=loadHarness({inventory:[{id:"cloud"}],syncMeta:{rev:7}});await h.context.load();assert.equal(h.adopts,1);assert.equal(h.context.window.__loadedCloudRevisionForSaveGuard,7);assert.equal(h.context.canWrite(),true);});
 
+for(const mode of ["valid","mismatched","ambiguous"])test("PRB legacy pump + archived chronology authoritative startup: "+mode,async()=>{
+  const data=require("./fixtures/cjo06-archived-job").archivedState();
+  data.inventory=[{id:"cloud",qtyNew:4}];
+  data.pumpEff={baselineRPM:1353,baselineDateISO:"2026-10-01",
+    entries:Array.from({length:141},(_,i)=>({dateISO:new Date(Date.UTC(2026,4,1+i)).toISOString().slice(0,10),rpm:1400+i,timeISO:"09:00"})),
+    notes:Array.from({length:11},(_,i)=>({dateISO:`2026-09-${String(i+1).padStart(2,"0")}`,text:"Retain legacy note "+i,range:"all"}))};
+  if(mode==="mismatched")data.deletedItems[0].payload.cutChronologyHistory[0].jobId="wrong-owner";
+  if(mode==="ambiguous")data.deletedItems.push({...clone(data.deletedItems[0]),id:"second-trash-owner"});
+  const before=clone(data),h=loadHarness(data);await h.context.load();
+  assert.equal(h.context.canWrite(),mode==="valid");assert.equal(h.context.isRecoveryMode(),mode!=="valid");
+  assert.equal(h.context.window.gate.adoptComplete,true);assert.equal(h.adopts,1);assert.equal(h.writes,0);
+  assert.deepEqual(h.context.window.__lastLoadedCloudState,data);assert.deepEqual(data,before);
+  assert.equal(Object.hasOwn(data.pumpEff,"baselineHistory"),false);
+});
+
 test("legacy inventory identity collisions load read-only without repairing or seeding",async()=>{const data={inventory:[{id:"same",qtyNew:2},{id:"same",qtyNew:4}],syncMeta:{rev:7}},before=JSON.stringify(data),h=loadHarness(data);await h.context.load();assert.equal(h.context.canWrite(),false);assert.equal(h.adopts,1);assert.equal(h.context.window.gate.adoptComplete,true);assert.equal(h.context.window.__loadedCloudRevisionForSaveGuard,7);assert.equal(h.writes,0);assert.equal(JSON.stringify(data),before);assert.equal(h.context.window.__inventoryIdentityIssues.length,1);assert.ok(h.diagnostics);});
 
 test("empty/config-only documents are recovery evidence, not initialized business baselines",()=>{const source=fs.readFileSync("js/core.js","utf8"),start=source.indexOf("function stateHasMeaningfulData"),end=source.indexOf("const JOB_FILE_CACHE_KEY",start),context=vm.createContext({});vm.runInContext(source.slice(start,end)+";this.meaningful=stateHasMeaningfulData",context);for(const state of [{},{schema:72},{inventory:[],tasksInterval:[],pumpEff:{entries:[],notes:[]}},{appConfig:{dailyHours:8}}])assert.equal(context.meaningful(state),false);assert.equal(context.meaningful({pumpEff:{entries:[{dateISO:"2026-01-01",rpm:3500}]}}),true);});

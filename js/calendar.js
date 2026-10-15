@@ -3456,22 +3456,10 @@ const jobsMap = {};
 
   const completedJobs = normalizeJobList(window.completedCuttingJobs);
   completedJobs.forEach(job => {
-    if (!job) return;
-    const { start, end } = resolveJobRange(job);
-    if (start && end){
-      start.setHours(0,0,0,0);
-      end.setHours(0,0,0,0);
-      const from = start.getTime() <= end.getTime() ? start : end;
-      const to = start.getTime() <= end.getTime() ? end : start;
-      const cur = new Date(from.getTime());
-      while (cur <= to){
-        const key = ymd(cur);
-        (jobsMap[key] ||= []).push({ type:"job", id:String(job.id), name:job.name, status:"completed", cat:job.cat });
-        cur.setDate(cur.getDate()+1);
-      }
-      return;
-    }
-    const completionKey = job.completedAtISO ? ymd(job.completedAtISO) : (job.dueISO ? ymd(job.dueISO) : null);
+    // Use the same authoritative business day as Cutting Job History. Completed
+    // records are single events, not the active job's old start/due range.
+    // Undated history stays undated; never infer a cut date from a schedule.
+    const completionKey = window.CuttingJobDateEditing.businessDate(job, true);
     if (!completionKey) return;
     (jobsMap[completionKey] ||= []).push({ type:"job", id:String(job.id), name:job.name, status:"completed", cat:job.cat });
   });
