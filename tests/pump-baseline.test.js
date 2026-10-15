@@ -176,9 +176,9 @@ test("ordinary adoption replaces the complete pump object including nulls and un
 });
 test("popup submit awaits verification, retains rejected input and never reports optimistic success",async()=>{
   const globals={pumpEff:initial().pumpEff,Date,console};globals.window=globals;const c=vm.createContext(globals);vm.runInContext(pump,c);
-  let finish,action;const messages=[],status={textContent:""},controls=[{disabled:false}];
+  let finish,action;const messages=[],status={textContent:"",setAttribute(){}},controls=[{disabled:false}];
   const fields={"#pumpBaselineRPM":{value:"3515"},"#pumpBaselineDate":{value:"2026-09-20"},"#pumpBaselineNote":{value:"  Rebuild\n49 ksi  "}};
-  const form={querySelector:id=>fields[id],setAttribute(){}};
+  const form={querySelector:id=>fields[id],querySelectorAll:()=>[],setAttribute(){}};
   c.dialog={querySelector:id=>id==="#pumpBaselineForm"?form:status,querySelectorAll:()=>controls};
   c.toast=value=>messages.push(value);c.renderPumpWidget=()=>{};c.pumpRenderBaselineModal=()=>{};
   c.savePumpBaseline=value=>{action=value;return new Promise(resolve=>finish=resolve);};
@@ -187,6 +187,20 @@ test("popup submit awaits verification, retains rejected input and never reports
   assert.equal(action.note,fields["#pumpBaselineNote"].value);finish({saved:false,error:"CAS rejected"});await running;
   assert.deepEqual(messages,[]);assert.equal(status.textContent,"CAS rejected");assert.equal(fields["#pumpBaselineNote"].value,"  Rebuild\n49 ksi  ");assert.equal(controls[0].disabled,false);
   const accepted=c.pumpSubmitBaselineForm({preventDefault(){}});assert.equal(messages.length,0);finish({saved:true});await accepted;assert.equal(messages.at(-1),"Baseline verified and saved");
+});
+
+test("blank correction reason shows an inline error and focuses the field without saving or clearing edits",async()=>{
+  for(const value of ["","   "]){
+    const globals={pumpEff:initial().pumpEff,Date,console};globals.window=globals;const c=vm.createContext(globals);vm.runInContext(pump,c);
+    let saves=0,focused=false;const attributes={},status={textContent:"",setAttribute:(key,value)=>attributes[key]=value};
+    const reason={value,setAttribute:(key,value)=>attributes[key]=value,focus:()=>focused=true};
+    const fields={"#pumpBaselineRPM":{value:"1450"},"#pumpBaselineDate":{value:"2026-10-11"},"#pumpBaselineNote":{value:"Note B"},"#pumpBaselineReason":reason};
+    const form={querySelector:key=>fields[key],querySelectorAll:()=>[]};c.dialog={querySelector:key=>key==="#pumpBaselineForm"?form:status};
+    c.savePumpBaseline=()=>saves++;vm.runInContext('pumpBaselineEditingId="saved-id";pumpBaselineModalDialog=dialog;',c);
+    await c.pumpSubmitBaselineForm({preventDefault(){}});
+    assert.equal(saves,0);assert.equal(focused,true);assert.equal(attributes["aria-invalid"],"true");assert.equal(attributes["data-error"],"true");
+    assert.equal(status.textContent,"Enter a reason for the baseline correction.");assert.equal(fields["#pumpBaselineRPM"].value,"1450");assert.equal(fields["#pumpBaselineNote"].value,"Note B");
+  }
 });
 
 test("create and edit durably retain note text and audited RPM/date/note under one stable identity",async()=>{

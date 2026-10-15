@@ -278,6 +278,8 @@ body.pump-notes-open,body.pump-baseline-open { overflow:hidden; }
 .pump-baseline-history table { width:100%; min-width:560px; }
 .pump-baseline-history td { vertical-align:top; }
 .pump-baseline-history-note { white-space:pre-wrap; overflow-wrap:anywhere; max-width:320px; }
+.pump-baseline-dialog [data-pump-baseline-status][data-error="true"] { color:#9d2020; background:#fff1f1; border:1px solid #c74444; border-radius:6px; padding:10px; }
+.pump-baseline-dialog [aria-invalid="true"] { outline:2px solid #c74444; outline-offset:1px; }
 .pump-legend { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
 .pump-legend span:first-child { font-weight:600; }
 

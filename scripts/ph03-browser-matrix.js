@@ -131,6 +131,104 @@ async function main(){
     await page.reload({waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete);assert.deepEqual(await page.evaluate(()=>window.cloudDashboardLayout.pumpLog),saved);
     await page.locator("#pumpEfficiencyHeading").click();assert.ok(await page.locator("#pumpLogForm").isVisible());assert.ok(await page.locator("#totalInput").isVisible());
   });
+  const hoverPoint=async(tab,label)=>{
+    const canvas=tab.locator("#pumpChart");await canvas.evaluate(canvas=>canvas.scrollIntoView({block:"center"}));
+    await tab.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    const point=await canvas.evaluate(canvas=>{
+      const target=canvas.__pumpChartTargets.at(-1),box=canvas.getBoundingClientRect(),dpr=devicePixelRatio;
+      // Verify the actual painted backing-store pixel, then map it through
+      // the rendered bitmap bounds. This does not use the hit-test conversion.
+      const px=target.centerX*dpr,py=target.centerY*dpr;
+      const color=Array.from(canvas.getContext("2d").getImageData(Math.round(px),Math.round(py),1,1).data);
+      return {x:box.left+px/canvas.width*box.width,y:box.top+py/canvas.height*box.height,
+        key:target.key,date:target.datasetLabel,color,dpr,offset:Math.max(80,target.hitRadius*4*box.height/(canvas.height/dpr))};
+    });
+    assert.ok(point.color[3]>0&&point.color.slice(0,3).some(value=>value<220),label+" painted dot");
+    await tab.mouse.move(point.x,point.y);
+    const tooltip=tab.locator(".pump-chart-tooltip[data-visible='true']");
+    try{await tooltip.waitFor({state:"visible"});}catch(error){
+      await tab.screenshot({path:path.join(output,"prb-hover-failure.png")});
+      console.log("HOVER DIAGNOSTIC",label,point,await canvas.evaluate((canvas,point)=>({scroll:[scrollY,document.scrollingElement.scrollHeight,innerHeight],box:canvas.getBoundingClientRect().toJSON(),client:[canvas.clientWidth,canvas.clientHeight],backing:[canvas.width,canvas.height],geometry:canvas.__pumpChartGeometry,
+        targets:canvas.__pumpChartTargets.slice(-2),hovered:canvas.__pumpChartHoveredKey,underPointer:document.elementFromPoint(point.x,point.y)?.outerHTML.slice(0,300),tooltip:document.querySelector(".pump-chart-tooltip")?.outerHTML}),point));throw error;
+    }assert.ok((await tooltip.innerText()).includes(point.date),label+" exact date");
+    assert.equal(await canvas.evaluate(canvas=>canvas.__pumpChartHoveredKey),point.key,label+" exact dot");
+    for(const direction of [-1,1]){
+      await tab.mouse.move(point.x,point.y+direction*point.offset);
+      assert.notEqual(await canvas.evaluate(canvas=>canvas.__pumpChartHoveredKey),point.key,label+" off target");
+    }
+  };
+  await check("PRB exact painted-dot hover rejects distant points at DPR 1/2 and after dashboard chart resize",async()=>{
+    await hoverPoint(page,"normal");
+    await page.evaluate(()=>toggleDashboardEditing());const win=page.locator('[data-dashboard-window="pumpChart"]');await win.scrollIntoViewIfNeeded();
+    const handle=await win.locator(".dashboard-resize-se").boundingBox(),before=await page.locator("#pumpChart").boundingBox();
+    await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();
+    await page.mouse.move(handle.x+handle.width/2-120,handle.y+handle.height/2+65,{steps:6});await page.mouse.up();
+    await page.evaluate(()=>finishDashboardLayoutEditing());await save();
+    await page.waitForFunction(width=>Math.abs(document.getElementById("pumpChart").getBoundingClientRect().width-width)>20,before.width);
+    await hoverPoint(page,"dashboard resized");
+    const scaled=await browser.newContext({storageState:await context.storageState({indexedDB:true}),viewport:{width:1440,height:1000},deviceScaleFactor:2}),tab=await scaled.newPage();tab.setDefaultTimeout(8000);observe(tab);
+    try{await tab.goto(url,{waitUntil:"load"});await tab.waitForFunction(()=>window.__initialAdoptComplete);await hoverPoint(tab,"DPR 2 resized");}finally{await scaled.close();}
+  });
+  await check("PRB production-shaped baseline edit validates visibly, verifies B, recalculates and survives fresh DPR 2 context",async()=>{
+    const isolated=await browser.newContext({storageState:await context.storageState({indexedDB:true}),viewport:{width:1440,height:1000},deviceScaleFactor:2}),tab=await isolated.newPage();tab.setDefaultTimeout(8000);observe(tab);
+    try{
+      await tab.goto(url,{waitUntil:"load"});await tab.waitForFunction(()=>window.__initialAdoptComplete);
+      await tab.evaluate(async()=>{
+        if(!OMAXDevSafe.active)throw Error("Disposable backend required");const state=(await FB.docRef.get()).data();
+        state.pumpEff={baselineRPM:1353,baselineDateISO:"2026-10-01",
+          entries:Array.from({length:141},(_,i)=>({dateISO:new Date(Date.UTC(2026,9,14-140+i)).toISOString().slice(0,10),rpm:1400+i,timeISO:"09:00"})),
+          notes:Array.from({length:11},(_,i)=>({dateISO:`2026-09-${String(i+1).padStart(2,"0")}`,text:"Legacy note "+i,range:"all"}))};
+        // The preceding drag test deliberately moves cards. Use the default
+        // layout here so a different floating card cannot cover the test dot.
+        state.dashboardLayout={};localStorage.removeItem("dashboard_layout_windows_v1");
+        state.syncMeta.rev++;await FB.docRef.set(state);
+      });
+      await tab.reload({waitUntil:"load"});await tab.waitForFunction(()=>window.__initialAdoptComplete&&!hasPendingLocalChanges);
+      await tab.evaluate(()=>{window.__prbResults=[];const save=window.savePumpBaseline;window.savePumpBaseline=async action=>{const result=await save(action);window.__prbResults.push(result);return result;};
+        window.__prbLabels=[];const fill=CanvasRenderingContext2D.prototype.fillText;CanvasRenderingContext2D.prototype.fillText=function(text,...args){window.__prbLabels.push(String(text));return fill.call(this,text,...args);};});
+      await tab.locator("#pumpChangeBaselineBtn").click();
+      await tab.locator("#pumpBaselineRPM").fill("1400");await tab.locator("#pumpBaselineDate").fill("2026-10-10");await tab.locator("#pumpBaselineNote").fill("Note A");
+      await tab.getByRole("button",{name:"Add baseline",exact:true}).click();
+      await tab.getByText("Baseline verified and saved",{exact:true}).first().waitFor();
+      const created=await tab.evaluate(async()=>{const state=(await FB.db.runTransaction(tx=>tx.get(FB.docRef))).data();return state.pumpEff.baselineHistory.find(row=>row.effectiveDateISO==="2026-10-10");});
+      assert.ok(created);const id=created.id;
+      await tab.getByRole("button",{name:"Close Change Baseline",exact:true}).click();
+      const before=await tab.evaluate(()=>({percent:pumpPercentChange(1540,"2026-10-14"),details:document.getElementById("pumpChart").__pumpChartTargets.at(-1).detailLines}));
+      await tab.locator("#pumpChangeBaselineBtn").click();await tab.locator(`[data-pump-baseline-edit="${id}"]`).click();
+      await tab.locator("#pumpBaselineRPM").fill("1450");await tab.locator("#pumpBaselineDate").fill("2026-10-11");await tab.locator("#pumpBaselineNote").fill("Note B");
+      await tab.getByRole("button",{name:"Save baseline correction",exact:true}).click();
+      console.log("EDIT VALIDATION DIAGNOSTIC",await tab.evaluate(()=>({saveCalls:window.__prbResults.length,status:document.querySelector("[data-pump-baseline-status]").textContent,missingReason:document.getElementById("pumpBaselineReason").validity.valueMissing})));
+      assert.equal(await tab.locator("[data-pump-baseline-status]").innerText(),"Enter a reason for the baseline correction.");
+      assert.equal(await tab.locator("[data-pump-baseline-status]").isVisible(),true);
+      assert.equal(await tab.locator("#pumpBaselineReason").evaluate(field=>document.activeElement===field&&field.getAttribute("aria-invalid")==="true"),true);
+      assert.equal(await tab.evaluate(()=>window.__prbResults.length),1);assert.equal(await tab.locator("#pumpBaselineRPM").inputValue(),"1450");
+      await tab.screenshot({path:path.join(output,"prb-edit-validation.png")});
+      await tab.locator("#pumpBaselineReason").fill("Correct saved reading");await tab.evaluate(()=>{window.__prbLabels=[];});
+      await tab.getByRole("button",{name:"Save baseline correction",exact:true}).click();
+      await tab.getByText("Baseline correction verified and saved",{exact:true}).first().waitFor();
+      const assertB=async target=>{
+        const state=await target.evaluate(async id=>({cloud:(await FB.db.runTransaction(tx=>tx.get(FB.docRef))).data().pumpEff,
+          record:pumpEff.baselineHistory.find(row=>row.id===id),resolved:resolvePumpBaselineForDate("2026-10-14"),prior:resolvePumpBaselineForDate("2026-10-10"),
+          percent:pumpPercentChange(1540,"2026-10-14"),details:document.getElementById("pumpChart").__pumpChartTargets.at(-1).detailLines,
+          baseline:document.getElementById("pumpChart").__pumpChartTooltipMeta.baselineRPM,recovery:isRecoveryMode()}),id);
+        assert.equal(state.record.id,id);assert.equal(state.record.rpm,1450);assert.equal(state.record.effectiveDateISO,"2026-10-11");assert.equal(state.record.note,"Note B");
+        assert.deepEqual(state.record,state.cloud.baselineHistory.find(row=>row.id===id));assert.deepEqual(state.record.corrections[0].before,{rpm:1400,effectiveDateISO:"2026-10-10",note:"Note A"});
+        assert.deepEqual(state.record.corrections[0].after,{rpm:1450,effectiveDateISO:"2026-10-11",note:"Note B"});assert.equal(state.resolved.id,id);assert.equal(state.prior.rpm,1353);
+        assert.equal(state.baseline,1450);assert.notEqual(state.percent,before.percent);assert.notDeepEqual(state.details,before.details);assert.match(state.details.join(" "),/1,450 RPM/);assert.equal(state.recovery,false);
+        assert.equal(state.cloud.entries.length,141);assert.equal(state.cloud.notes.length,11);return state;
+      };
+      const corrected=await assertB(tab),row=tab.locator(`[data-pump-baseline-row="${id}"]`);assert.match(await row.innerText(),/2026-10-11[\s\S]*1450[\s\S]*Note B/);
+      assert.ok(await tab.evaluate(percent=>window.__prbLabels.includes(percent.toFixed(1)+"%"),corrected.percent));
+      assert.ok(await tab.locator("#pump-log-widget").innerText().then(text=>text.includes(corrected.percent.toFixed(1)+"%")));
+      assert.equal(await tab.evaluate(()=>window.__prbResults.every(result=>result.saved&&result.verificationCompleted)),true);
+      await tab.getByRole("button",{name:"Close Change Baseline",exact:true}).click();
+      await tab.reload({waitUntil:"load"});await tab.waitForFunction(()=>window.__initialAdoptComplete);await assertB(tab);
+      await hoverPoint(tab,"DPR 2");await tab.locator(".pump-expand-btn").click();await hoverPoint(tab,"DPR 2 expanded");await tab.locator(".pump-expand-btn").click();
+      await tab.setViewportSize({width:1000,height:850});await hoverPoint(tab,"DPR 2 responsive");
+      const fresh=await browser.newContext({storageState:await isolated.storageState({indexedDB:true}),deviceScaleFactor:2}),freshTab=await fresh.newPage();observe(freshTab);
+      try{await freshTab.goto(url,{waitUntil:"load"});await freshTab.waitForFunction(()=>window.__initialAdoptComplete);await assertB(freshTab);}finally{await fresh.close();}
+    }finally{await isolated.close();}
+  });
   await check("Create/edit/save fixtures across protected areas",async()=>{
     await page.evaluate(()=>{
       tasksInterval.push({...tasksInterval[0],id:"ph03_task",name:"PH03 Task Edited",manualHistory:[],completedDates:[],interval:40});

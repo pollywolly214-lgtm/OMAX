@@ -1000,22 +1000,23 @@ function viewPumpBaselineModal(){
     <h3 id="pumpBaselineHeading">Change Baseline</h3>
     <button type="button" class="pump-notes-close" data-pump-baseline-close aria-label="Close Change Baseline">×</button>
   </header>
-  <form id="pumpBaselineForm" class="pump-notes-form" aria-labelledby="pumpBaselineFormHeading">
+  <form id="pumpBaselineForm" class="pump-notes-form" aria-labelledby="pumpBaselineFormHeading" novalidate>
     <h4 id="pumpBaselineFormHeading">${editing ? "Edit baseline" : "Add new baseline"}</h4>
     <div class="pump-baseline-fields">
       <label class="pump-notes-label">Baseline RPM <input type="number" id="pumpBaselineRPM" min="1" step="any" required value="${esc(editing?.rpm ?? "")}"></label>
       <label class="pump-notes-label">Effective / rebuild date <input type="date" id="pumpBaselineDate" required value="${esc(editing?.effectiveDateISO || today)}"></label>
     </div>
-    <label class="pump-notes-label" for="pumpBaselineNote">Note / reason</label>
+    <label class="pump-notes-label" for="pumpBaselineNote">Baseline note</label>
     <p id="pumpBaselineNoteHelp" class="small muted">Describe why the baseline changed. For example: pump rebuild, nozzle body change, other maintenance, or another change that affected the normal operating RPM.</p>
     <textarea id="pumpBaselineNote" class="pump-baseline-note" maxlength="4000" rows="3" aria-describedby="pumpBaselineNoteHelp">${esc(editing?.note ?? "")}</textarea>
-    ${editing ? `<label class="pump-notes-label">Correction reason <input id="pumpBaselineReason" maxlength="500" required placeholder="Explain this correction to the saved record"></label>` : ""}
+    ${editing ? `<label class="pump-notes-label">Correction reason (required) <input id="pumpBaselineReason" maxlength="500" required aria-describedby="pumpBaselineReasonHelp" placeholder="Explain this correction to the saved record"></label>
+      <p id="pumpBaselineReasonHelp" class="small muted">Required for the correction audit, separately from the baseline note.</p>` : ""}
+    <p data-pump-baseline-status role="status" aria-live="polite"></p>
     <div class="pump-notes-actions modal-actions">
       <button type="submit" class="primary">${editing ? "Save baseline correction" : "Add baseline"}</button>
       ${editing ? `<button type="button" class="secondary" id="pumpBaselineCancel">Cancel edit</button>` : ""}
     </div>
   </form>
-  <p data-pump-baseline-status role="status" aria-live="polite"></p>
   <section aria-labelledby="pumpBaselineHistoryHeading">
     <h4 id="pumpBaselineHistoryHeading">Baseline history (${records.length})</h4>
     ${records.length !== saved.length || (pumpEff.baselineHistory !== undefined && !Array.isArray(pumpEff.baselineHistory)) ? `<p class="small muted">Some saved baseline evidence is invalid and needs recovery review. It has been preserved.</p>` : ""}
@@ -1085,8 +1086,17 @@ async function pumpSubmitBaselineForm(event){
   const form = pumpBaselineModalDialog.querySelector("#pumpBaselineForm");
   const rpm = Number(form.querySelector("#pumpBaselineRPM").value);
   const effectiveDateISO = form.querySelector("#pumpBaselineDate").value;
-  const status = message=>{pumpBaselineModalDialog.querySelector("[data-pump-baseline-status]").textContent=message;};
-  if (!Number.isFinite(rpm) || rpm <= 0 || !pumpValidBaselineDate(effectiveDateISO)){status("Enter a valid date and positive RPM.");return;}
+  const status = (message,error=false)=>{
+    const node=pumpBaselineModalDialog.querySelector("[data-pump-baseline-status]");node.textContent=message;node.setAttribute("data-error",String(error));
+  };
+  const invalid = (field,message)=>{status(message,true);field?.setAttribute("aria-invalid","true");field?.focus();return;};
+  form.querySelectorAll("[aria-invalid]").forEach(field=>field.removeAttribute("aria-invalid"));
+  if (!Number.isFinite(rpm) || rpm < 1) return invalid(form.querySelector("#pumpBaselineRPM"),"Enter a valid positive RPM of at least 1.");
+  if (!pumpValidBaselineDate(effectiveDateISO)) return invalid(form.querySelector("#pumpBaselineDate"),"Enter a valid effective date.");
+  const reasonField=form.querySelector("#pumpBaselineReason");
+  if (pumpBaselineEditingId && !reasonField?.value.trim()) return invalid(reasonField,"Enter a reason for the baseline correction.");
+  const invalidField=form.querySelector(":invalid");
+  if (invalidField) return invalid(invalidField,invalidField.validationMessage);
   const action = {kind:pumpBaselineEditingId ? "edit" : "create",id:pumpBaselineEditingId,rpm,effectiveDateISO,
     note:form.querySelector("#pumpBaselineNote").value,reason:form.querySelector("#pumpBaselineReason")?.value || ""};
   const pending = window.savePumpBaseline(action);
@@ -1100,7 +1110,7 @@ async function pumpSubmitBaselineForm(event){
     pumpBaselineEditingId=null;pumpRenderBaselineModal();
     const message=action.kind === "edit" ? "Baseline correction verified and saved" : "Baseline verified and saved";
     status(message);toast(message);
-  }else status(result.error || "Baseline was not saved.");
+  }else status(result.error || "Baseline was not saved.",true);
   renderPumpWidget();
   return result;
 }
@@ -1720,7 +1730,7 @@ function pumpOpenNoteEditorForTarget(canvas, target){
   pumpOpenNotesModal({ view:"edit", dateISO, range: rangeValue, rpm, rangeDisplay, timeISO });
 }
 
-function pumpShowChartTooltip(canvas, tooltip, target, { scaleX, scaleY }){
+function pumpShowChartTooltip(canvas, tooltip, target){
   if (!canvas || !tooltip || !target) return;
   const detailLines = Array.isArray(target.detailLines) ? target.detailLines : [];
   const meta = canvas.__pumpChartTooltipMeta || {};
@@ -1740,8 +1750,9 @@ function pumpShowChartTooltip(canvas, tooltip, target, { scaleX, scaleY }){
   tooltip.style.left = "0px";
   tooltip.style.top = "0px";
 
-  const cssScaleX = scaleX > 0 ? 1 / scaleX : 1;
-  const cssScaleY = scaleY > 0 ? 1 / scaleY : 1;
+  const geometry=canvas.__pumpChartGeometry;
+  const cssScaleX = canvas.clientWidth / geometry.width;
+  const cssScaleY = canvas.clientHeight / geometry.height;
   const centerX = target.rect.x + (target.rect.width / 2);
   const canvasWidth = canvas.clientWidth || canvas.width;
   const canvasHeight = canvas.clientHeight || canvas.height;
@@ -1789,8 +1800,8 @@ function pumpShowChartTooltip(canvas, tooltip, target, { scaleX, scaleY }){
   }
 
   tooltip.dataset.placement = placement;
-  tooltip.style.left = `${anchorXCss}px`;
-  tooltip.style.top = `${anchorYCss}px`;
+  tooltip.style.left = `${canvas.offsetLeft + anchorXCss}px`;
+  tooltip.style.top = `${canvas.offsetTop + anchorYCss}px`;
   tooltip.style.visibility = "";
   tooltip.dataset.visible = "true";
   canvas.style.cursor = "pointer";
@@ -1819,14 +1830,18 @@ function pumpWireChartTooltip(card, canvas){
       return null;
     }
     const rect = canvas.getBoundingClientRect();
-    const clientWidth = canvas.clientWidth || rect.width || canvas.width;
-    const clientHeight = canvas.clientHeight || rect.height || canvas.height;
-    const scaleX = canvas.width / Math.max(1, clientWidth);
-    const scaleY = canvas.height / Math.max(1, clientHeight);
+    const geometry=canvas.__pumpChartGeometry;
+    if (!geometry || rect.width <= 0 || rect.height <= 0){hide();return null;}
+    // Targets use the logical coordinates of the last draw, before its DPR
+    // transform. Map the displayed bitmap back into that same space, including
+    // CSS scaling; backing-store pixels must never enter the hit test.
+    const scaleX = geometry.width / rect.width;
+    const scaleY = geometry.height / rect.height;
     const pointerX = (clientX - rect.left) * scaleX;
     const pointerY = (clientY - rect.top) * scaleY;
     const targets = getTargets();
     let hovered = null;
+    let closestDistance = Infinity;
     for (const target of targets){
       if (!target) continue;
       const radius = Number.isFinite(target.hitRadius) && target.hitRadius > 0
@@ -1836,12 +1851,15 @@ function pumpWireChartTooltip(card, canvas){
       if (hasCenter){
         const dx = pointerX - target.centerX;
         const dy = pointerY - target.centerY;
-        if ((dx * dx) + (dy * dy) <= radius * radius){
+        const distance = (dx * dx) + (dy * dy);
+        // Dense histories have overlapping hit areas. Prefer the actual
+        // nearest dot rather than the first chronological neighbor.
+        if (distance <= radius * radius && distance < closestDistance){
           hovered = target;
-          break;
+          closestDistance = distance;
         }
       }
-      if (!hovered && target.rect){
+      if (!hasCenter && !hovered && target.rect){
         const { x, y, width, height } = target.rect;
         if (pointerX >= x && pointerX <= x + width && pointerY >= y && pointerY <= y + height){
           hovered = target;
@@ -1850,7 +1868,7 @@ function pumpWireChartTooltip(card, canvas){
       }
     }
     if (hovered){
-      pumpShowChartTooltip(canvas, tooltip, hovered, { scaleX, scaleY });
+      pumpShowChartTooltip(canvas, tooltip, hovered);
     }else{
       hide();
     }
@@ -2017,6 +2035,8 @@ function drawPumpChart(canvas, rangeValue){
   const dpr = window.devicePixelRatio || 1;
   const cssWidth = canvas.width / dpr;
   const cssHeight = canvas.height / dpr;
+  canvas.__pumpChartGeometry = {width:cssWidth,height:cssHeight};
+  canvas.__pumpChartTargets = [];
   pumpEnsureEntriesArray();
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

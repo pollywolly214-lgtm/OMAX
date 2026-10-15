@@ -106,3 +106,38 @@ test("CJO-04C recovery notices explicitly mark both existing views unverified",a
 test("CJO-04C verified full adoption clears display notices and preserves every relationship",async()=>{
   const h=harness(fixture(),{readbacks:["stale","exact"]}),before=h.live,nodes=[{hidden:false},{hidden:false}];h.context.window.__cuttingJobDisplayUnconfirmed=true;h.context.document={querySelectorAll:()=>nodes};const result=await save(h);assert.equal(result.verified,true,result.error);assert.deepEqual(nodes.map(node=>node.hidden),[true,true]);const after=h.live.completedCuttingJobs[0],old=before.completedCuttingJobs[0];for(const key of ["id","files","manualLogs","costRate","chargeRate","cat","projectNumber","importProvenance"])assert.deepEqual(after[key],old[key]);assert.deepEqual(h.live.costHistory,before.costHistory);assert.deepEqual(after.cutChronologyHistory[0],old.cutChronologyHistory[0]);
 });
+
+test("CJCD E: all shop-log date corrections survive verified CAS saves, refresh and new-session reload",async()=>{
+  const {jobs}=require("./fixtures/cjcd-shop-log"),{project,identities}=require("./fixtures/cjcd-calendar");
+  const expected=jobs(),source=fixture();
+  source.completedCuttingJobs=expected.map(job=>({...job,completedAtISO:"2026-10-15"}));
+  const before=clone(source),h=harness(source,{readbacks:["stale","exact"]});
+  for(const job of expected){
+    const result=await h.coordinator.save([],{expectedRevision:h.live.syncMeta.rev,businessOperation:{type:"edit",id:job.id,updates:{completedAtISO:job.completedAtISO}}});
+    assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.notEqual(result.requiresReload,true);
+    const rows=identities(project(h.live)).filter(([id])=>id===job.id);
+    assert.deepEqual(rows,[[job.id,job.completedAtISO,"completed"]]);
+    assert.deepEqual(h.live,h.remote);
+  }
+  const correct=identities(project({cuttingJobs:[],completedCuttingJobs:expected}));
+  const refreshed=JSON.parse(JSON.stringify(h.remote)),newSession=harness(refreshed);
+  for(const snapshot of [h.live,h.remote,refreshed,newSession.live])assert.deepEqual(identities(project(snapshot)),correct);
+  assert.equal(project(newSession.live)["2026-10-15"],undefined);
+  assert.equal(h.counts.commits,16);assert.equal(h.counts.writes,16);assert.equal(h.counts.adoptions,16);
+  for(const job of h.remote.completedCuttingJobs){
+    const old=before.completedCuttingJobs.find(row=>row.id===job.id);
+    for(const key of ["id","projectNumber","material","materialQty","files","manualLogs","importProvenance","startISO","dueISO"])assert.deepEqual(job[key],old[key]);
+    assert.ok(job.cutChronologyHistory.length>=1);
+  }
+  for(const key of ["inventory","costHistory","jobFolders","deletedItems"])assert.deepEqual(h.remote[key],before[key]);
+});
+
+test("CJCD E: unverified save cannot project an unconfirmed correction; authoritative reload recovers it",async()=>{
+  const {project,identities}=require("./fixtures/cjcd-calendar"),h=harness(fixture(),{readbacks:["stale","stale","stale"]});
+  const before=identities(project(h.live)),result=await save(h);
+  assert.equal(result.verified,false);assert.equal(result.requiresReload,true);
+  assert.deepEqual(identities(project(h.live)),before);
+  const reloaded=harness(h.remote);
+  assert.deepEqual(identities(project(reloaded.live)),[["tested","2026-10-02","completed"]]);
+  assert.equal(h.counts.writes,1);
+});
