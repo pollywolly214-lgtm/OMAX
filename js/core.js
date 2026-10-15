@@ -2632,16 +2632,42 @@ async function initFirebase(){
   if (btnOut) btnOut.onclick = async ()=>{ await FB.auth.signOut(); };
   if (btnClose) btnClose.onclick = hideModal;
 
+  let authSubmitting = false;
   if (form){
     form.onsubmit = async (e)=>{
       e.preventDefault();
+      if (authSubmitting || FB.user || FB.auth?.currentUser) return;
+      authSubmitting = true;
+      const submitButton = form.querySelector('button[type="submit"]');
+      const wasDisabled = submitButton?.disabled;
+      if (submitButton) submitButton.disabled = true;
+      form.setAttribute("aria-busy", "true");
       try{
         await ensureEmailPassword((emailEl.value||"").trim(), (passEl.value||""));
         hideModal();
-      }catch(err){ console.error(err); alert(err.message || "Sign-in failed"); }
+      }catch(err){ alert(err.message || "Sign-in failed"); }
+      finally {
+        authSubmitting = false;
+        if (submitButton) submitButton.disabled = wasDisabled;
+        form.setAttribute("aria-busy", "false");
+      }
     };
   }
 
+
+  // Ctrl/Cmd+S only opens the normal Sign In window.
+  const handleLoginShortcut = (event)=>{
+    if (event.defaultPrevented || event.repeat || event.altKey || event.shiftKey) return;
+    if (!(event.ctrlKey || event.metaKey) || String(event.key || "").toLowerCase() !== "s") return;
+    if (FB.user || FB.auth?.currentUser || !modal || isEditableTarget(event.target) || isEditableTarget(document.activeElement)) return;
+    if (event.target?.closest?.('[contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
+    event.preventDefault();
+    if (authSubmitting) return;
+    showModal();
+    emailEl?.focus();
+    emailEl?.select();
+  };
+  window.addEventListener("keydown", handleLoginShortcut);
 
   FB.auth.onAuthStateChanged(async (user)=>{
     FB.user = user || null;
@@ -4641,7 +4667,8 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
         // An exact isolated mutation must not normalize unrelated evidence.
         // Only fields proven identical to this transaction's remote snapshot
         // are retained verbatim; differences still use the existing merges.
-        const mergeUnlessIdentical=(field,merge,baseline)=>options.validateSourceState && options.validatePreparedState
+        // Captured-target chronology mutations have the same exact-state contract.
+        const mergeUnlessIdentical=(field,merge,baseline)=>options.validatePreparedState && (options.validateSourceState || target)
           && stableStringifyForIntegrity(pending[field])===stableStringifyForIntegrity(remote[field])
           ? pending[field] : merge(pending[field],remote[field],baseline);
         pending.totalHistory = mergeUnlessIdentical("totalHistory",mergeTotalHistoryForSave,totalHistoryBaseline);

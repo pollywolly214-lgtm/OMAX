@@ -1572,13 +1572,13 @@ function pumpRenderNotesModal(){
     if (dateLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(dateLabel)}</span>`);
     if (timeLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(timeLabel)}</span>`);
     if (rangeDisplay) subtitleParts.push(`<span>${pumpEscapeTooltipValue(rangeDisplay)}</span>`);
-    if (rpmLabel) subtitleParts.push(`<span>${pumpEscapeTooltipValue(rpmLabel)}</span>`);
     const subtitle = subtitleParts.length
       ? `<p class="pump-notes-subtitle">${subtitleParts.join('<span aria-hidden="true">·</span>')}</p>`
       : "";
     pumpNotesModalDialog.innerHTML = `
       <header class="pump-notes-header">
         <div class="pump-notes-title-group">
+          ${rpmLabel ? `<strong class="pump-point-rpm">${pumpEscapeTooltipValue(rpmLabel)}</strong>` : ""}
           <h3 id="${headingId}" data-pump-notes-heading>${note ? "Edit note" : "Add note"}</h3>
           ${subtitle}
         </div>

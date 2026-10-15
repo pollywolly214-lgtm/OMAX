@@ -14,15 +14,15 @@ class Select{
 }
 function harness(active=[],completed=[]){
   const calls={save:0,upload:0,resequence:0},messages=[],elements={},fields={};
-  const window={CuttingJobChronology:chronology,CuttingJobHistory:{...history,resequence:(active,completed)=>{calls.resequence++;return history.planDirectResequence(active,completed);}},cuttingJobs:active,completedCuttingJobs:completed,jobFolders:structuredClone(folders)};
+  const window={CuttingJobChronology:chronology,CuttingJobDimensions:require("../js/cuttingJobDimensions"),CuttingJobHistory:{...history,resequence:(active,completed)=>{calls.resequence++;return history.planDirectResequence(active,completed);}},cuttingJobs:active,completedCuttingJobs:completed,jobFolders:structuredClone(folders)};
   const noop=()=>{},content={dataset:{},querySelector:selector=>fields[/data-(?:j|history-field)="([^"]+)"/.exec(selector)?.[1]]||null,querySelectorAll:()=>[],addEventListener:(_,handler)=>{c.handler=handler;}};
-  const c=vm.createContext({window,Date,console,content,document:{getElementById:id=>elements[id]||null,createElement:()=>({})},HTMLSelectElement:Select,
+  const c=vm.createContext({window,Date,console,content,document:{getElementById:id=>elements[id]||null,querySelector:()=>null,createElement:()=>({})},HTMLSelectElement:Select,
     cuttingJobs:active,completedCuttingJobs:completed,toast:message=>messages.push(message),genId:()=>"new-job",editingJobs:new Set(["j"]),editingCompletedJobsSet:()=>new Set(["j"]),
     saveCloudDebounced:()=>calls.save++,saveCloudNow:async()=>{calls.save++;return{saved:true,stateWriteCompleted:true};},persistJobChanges:()=>calls.save++,
     reorderPriorities:noop,closeModal:noop,closeHistoryActionMenu:noop,closeFileMenu:noop,closeActionMenu:noop,renderDashboard:noop,renderJobs:noop,renderCalendarPreservingScroll:noop,
     updateDashJobCategoryHint:noop,ensureJobCategoryFolderOpen:noop,rerenderPreservingState:noop,readOpenFolderSet:()=>new Set(),writeOpenFolderSet:noop,currentCategoryFilter:()=>"jobs_root",
     mergeJobFileReferences:(before,after)=>after||before,JOB_RATE_PER_HOUR:200,JOB_BASE_COST_PER_HOUR:45,JOB_DAY_MS:86400000,todayISO:"2026-10-06",
-    parseJobDate:value=>value?new Date(value):null,toDateInputValue:date=>date?.toISOString().slice(0,10)||"",showMakeActiveCopyModal:async()=>({startISO:"2026-10-06",dueISO:"2026-10-07"}),
+    parseJobDate:value=>value?new Date(value):null,toDateInputValue:date=>date?.toISOString().slice(0,10)||"",showMakeActiveCopyModal:async options=>{const selection={startISO:"2026-10-06",dueISO:"2026-10-07"};const result=await options.onConfirm(selection);return result?.saved&&result.verified&&!result.requiresReload?selection:null;},
     materialSettings:{materials:[]},pendingNewJobFiles:[],pendingSecureCloudJobFiles:[],recalcMaterialTotals:noop,applyMinutesToHours:noop,fractionToNumber:()=>.25,
     refreshCfr05CloudPresentation:async()=>{},JOB_ROOT_FOLDER_ID:"jobs_root",ensureJobFolderState:()=>window.jobFolders,setJobFolders:value=>{window.jobFolders=value;},normalizeHexColor:()=>null,
     ensureJobCategories:()=>{throw Error("Manual flow must not normalize historical jobs");}});
@@ -30,7 +30,7 @@ function harness(active=[],completed=[]){
   c.createCuttingJob=async job=>{calls.save++;window.cuttingJobs.push(job);return{saved:true,verified:true};};
   c.saveCuttingJobEdit=async(id,updates)=>{calls.save++;Object.assign([...window.cuttingJobs,...window.completedCuttingJobs].find(job=>job.id===id),updates);return{saved:true,verified:true};};
   for(const name of ["validateManualJobProjectCategory","applyManualJobProjectCategory","addJobFolder"])vm.runInContext(fn(core,name),c);
-  for(const name of ["promptCreateCategory","selectManualJobCategory","syncManualJobProjectControl","syncManualJobProjectControls"])vm.runInContext(fn(renderers,name),c);
+  for(const name of ["parseCuttingJobDimension","promptCreateCategory","selectManualJobCategory","syncManualJobProjectControl","syncManualJobProjectControls"])vm.runInContext(fn(renderers,name),c);
   window.uploadCfr05CuttingFile=async()=>{calls.upload++;return{stage:"completed"};};
   function dashboard(cat="blanco",project="1254"){
     const defaults={jobNameInput:"Part",jobEstimateInput:"2",jobChargeInput:"200",jobCostRateInput:"45",jobMaterialInput:"Steel",jobMaterialCostInput:"9",jobMaterialQtyInput:"1",jobStartInput:"2026-10-06",jobDueInput:"2026-10-07",jobProjectInput:project};
@@ -142,4 +142,29 @@ test("views lock project controls and retain unknown legacy category selections"
   assert.match(views,/Stored category \(needs project-number review\)/);
   assert.equal(renderers.slice(renderers.indexOf("function renderJobs(){"),renderers.indexOf("function renderJobs(){")+1000).includes("ensureJobCategories"),false);
   assert.match(renderers,/openJobsEditor\(jobId\)/);
+});
+
+// POLISH-01: existing edit exit must follow verified persistence, never optimism.
+test("active and history edits stay open until verification, including failed/indeterminate saves",async()=>{
+  for(const historyEdit of [false,true]){
+    for(const result of [
+      {saved:false,verified:false,error:"fixture failure"},
+      {saved:true,verified:false,requiresReload:true,error:"fixture indeterminate"},
+      {saved:true,verified:true,requiresReload:true},
+      {saved:true,verified:true}
+    ]){
+      const h=harness(historyEdit?[]:[job()],historyEdit?[job({completedAtISO:"2026-10-07"})]:[]);
+      const editing=new Set(["j"]);let renders=0,release;
+      if(historyEdit)h.c.editingCompletedJobsSet=()=>editing;else h.c.editingJobs=editing;
+      h.c.renderJobs=()=>renders++;
+      h.c.saveCuttingJobEdit=()=>new Promise(resolve=>{release=resolve;});
+      const pending=h.edit(historyEdit,{name:"Updated",cat:"blanco",projectNumber:"1254",materialCost:"9",materialQty:"1"});
+      assert.equal(editing.has("j"),true,"keep edit open while save is pending");
+      assert.equal(renders,0);
+      release(result);await pending;
+      const confirmed=result.saved&&result.verified&&!result.requiresReload;
+      assert.equal(editing.has("j"),!confirmed);
+      assert.equal(renders,confirmed?1:0);
+    }
+  }
 });
