@@ -337,7 +337,7 @@ function viewDashboard(){
             </label>
             <label>Add minutes<input type="number" min="0" step="1" id="dashJobEstimateMinutes" placeholder="e.g. 45"></label>
             <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCharge" value="200"></label>
-            <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCostRate" value="45"></label>
+            <label>Cost rate ($/hr)<input type="number" step="0.01" id="dashJobCostRate" value="45"></label>
             <label>Material<input id="dashJobMaterial" placeholder="Material" list="dashJobMaterialOptions"></label>
             <label>Material cost ($)<input type="number" min="0" step="0.01" id="dashJobMaterialCost" placeholder="optional"></label>
             <label>Material quantity<input type="number" min="0" step="0.01" id="dashJobMaterialQty" placeholder="optional"></label>
@@ -3078,30 +3078,25 @@ function viewJobs(){
       : null;
   };
 
-  const computeJobNetTotal = (job, eff, { preferActual = false } = {}) => {
-    if (!job) return 0;
-    const efficiency = eff || {};
-    const estimateHours = Number(job.estimateHours) || 0;
-    const chargeSource = efficiency.chargeRate != null ? Number(efficiency.chargeRate) : Number(job.chargeRate);
-    const chargeRate = Number.isFinite(chargeSource) && chargeSource >= 0 ? chargeSource : JOB_RATE_PER_HOUR;
-    const materialCost = Number(job.materialCost) || 0;
-    const materialQty = Number(job.materialQty) || 0;
-    const materialTotal = materialCost * materialQty;
-    const actualHours = resolveActualHours(job, efficiency);
-    const hoursFromEstimate = estimateHours > 0 ? estimateHours : 0;
-    const hoursFromActual = Number.isFinite(actualHours) && actualHours > 0 ? actualHours : 0;
-    const hoursForTotal = preferActual
-      ? (hoursFromActual || hoursFromEstimate)
-      : (hoursFromEstimate || hoursFromActual);
-    let costRate;
-    if (efficiency && efficiency.costRate != null && Number.isFinite(Number(efficiency.costRate))){
-      costRate = Number(efficiency.costRate);
-    } else {
-      costRate = JOB_BASE_COST_PER_HOUR;
+  const resolveChargeRate = (job) => {
+    for (const raw of [job?.chargeRate, job?.efficiency?.chargeRate]){
+      if (raw !== undefined && raw !== null && raw !== "" && Number.isFinite(Number(raw)) && Number(raw) >= 0) return Number(raw);
     }
-    const netRate = chargeRate - costRate;
-    const totalHours = hoursForTotal > 0 ? hoursForTotal : 0;
-    return (netRate * totalHours) - materialTotal;
+    return JOB_RATE_PER_HOUR;
+  };
+  const resolveCostRate = (job) => {
+    // Legacy positive amounts and signed negative costs both represent expenses.
+    for (const raw of [job?.costRate, job?.efficiency?.costRate]){
+      if (raw !== undefined && raw !== null && raw !== "" && Number.isFinite(Number(raw))) return -Math.abs(Number(raw));
+    }
+    return -Math.abs(JOB_BASE_COST_PER_HOUR);
+  };
+  const computeJobNetTotal = (job, eff) => {
+    if (!job) return 0;
+    const actualHours = resolveActualHours(job, eff);
+    // Stored and computed actual times are already hours, including explicit zero.
+    const hours = actualHours ?? Math.max(0, Number(job.estimateHours) || 0);
+    return (resolveChargeRate(job) + resolveCostRate(job)) * hours;
   };
 
   const pendingFiles = Array.isArray(window.pendingNewJobFiles) ? window.pendingNewJobFiles : [];
@@ -3144,7 +3139,7 @@ function viewJobs(){
     if (editingCompletedJobsSet.has(String(job.id))) return true;
     const eff = job && job.efficiency ? job.efficiency : {};
     const delta = Number(eff.deltaHours);
-    const netTotal = computeJobNetTotal(job, eff, { preferActual: true });
+    const netTotal = computeJobNetTotal(job, eff);
     const actualHours = resolveActualHours(job, eff);
     const estHours = Number(job.estimateHours);
     const statusLabel = Number.isFinite(delta) && Math.abs(delta) > 0.1
@@ -3607,34 +3602,16 @@ function viewJobs(){
   const completedFiltered = completedForCategory.filter(matchesHistorySearch);
   const totalCompletedJobs = Array.isArray(completedSorted) ? completedSorted.length : 0;
   const hiddenCompletedByCategory = Math.max(0, totalCompletedJobs - completedForCategory.length);
-  const resolveChargeRate = (job) => {
-    const chargeRaw = job?.chargeRate;
-    const chargeNum = Number(chargeRaw);
-    if (Number.isFinite(chargeNum) && chargeNum >= 0) return chargeNum;
-    const efficiencyCharge = Number(job?.efficiency?.chargeRate);
-    return (Number.isFinite(efficiencyCharge) && efficiencyCharge >= 0)
-      ? efficiencyCharge
-      : JOB_RATE_PER_HOUR;
-  };
-  const resolveCostRate = (job, estHours, matTotal) => {
-    const costRaw = job?.costRate;
-    const costNum = Number(costRaw);
-    if (Number.isFinite(costNum) && costNum >= 0) return costNum;
-    const efficiencyCost = Number(job?.efficiency?.costRate);
-    if (Number.isFinite(efficiencyCost) && efficiencyCost >= 0) return efficiencyCost;
-    const hoursVal = Number(estHours);
-    return JOB_BASE_COST_PER_HOUR;
-  };
   const completedStats = completedFiltered.reduce((acc, job)=>{
     const eff = computeJobEfficiency(job);
-    const net = computeJobNetTotal(job, eff, { preferActual: true });
+    const net = computeJobNetTotal(job, eff);
     const estHours = Number(job?.estimateHours);
     const matCost = Number(job?.materialCost || 0);
     const matQty = Number(job?.materialQty || 0);
     const matTotal = (matCost * matQty) || 0;
     const chargeRate = resolveChargeRate(job);
-    const costRate = resolveCostRate(job, estHours, matTotal);
-    const netRate = chargeRate - costRate;
+    const costRate = resolveCostRate(job);
+    const netRate = chargeRate + costRate;
 
     acc.total += Number.isFinite(net) ? net : 0;
     acc.estimate += Number.isFinite(estHours) ? estHours : 0;
@@ -3821,7 +3798,7 @@ function viewJobs(){
   const completedRows = completedFiltered.map(job => {
     const eff = computeJobEfficiency(job);
     const delta = Number(eff.deltaHours);
-    const netTotal = computeJobNetTotal(job, eff, { preferActual: true });
+    const netTotal = computeJobNetTotal(job, eff);
     const actualHours = resolveActualHours(job, eff);
     const hasActualHours = Number.isFinite(actualHours) && actualHours >= 0;
     const estHours = Number(job.estimateHours);
@@ -3865,9 +3842,9 @@ function viewJobs(){
     const matTotal = (matCost * matQty) || 0;
     const chargeRate = resolveChargeRate(job);
     const chargeDisplay = formatRate(chargeRate);
-    const costRate = resolveCostRate(job, estHours, matTotal);
+    const costRate = resolveCostRate(job);
     const costDisplay = formatRate(costRate);
-    const netRate = chargeRate - costRate;
+    const netRate = chargeRate + costRate;
     const netDisplay = formatRate(netRate, { showPlus: true });
     const netClass = netRate >= 0 ? "job-rate-net-positive" : "job-rate-net-negative";
     const netTotalDisplay = formatCurrency(netTotal, { showPlus: true });
@@ -4011,7 +3988,7 @@ function viewJobs(){
                 <label>Material cost<input type="number" min="0" step="0.01" data-history-field="materialCost" data-history-id="${job.id}" value="${materialCostVal}"></label>
                 <label>Material quantity<input type="number" min="0" step="0.01" data-history-field="materialQty" data-history-id="${job.id}" value="${materialQtyVal}"></label>
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-history-field="chargeRate" data-history-id="${job.id}" value="${chargeRateVal}"></label>
-                <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-history-field="costRate" data-history-id="${job.id}" value="${costRateVal}"></label>
+                <label>Cost rate ($/hr)<input type="number" step="0.01" data-history-field="costRate" data-history-id="${job.id}" value="${costRateVal}"></label>
                 <label>Project #<input type="text" data-history-field="projectNumber" data-history-id="${job.id}" readonly value="${esc(String(job.projectNumber ?? ""))}"><span class="small muted" data-project-category-status aria-live="polite"></span></label>
                 <label>Category<select data-history-field="cat" data-history-id="${job.id}" data-job-category-select>
                   ${categoryOptionsMarkup(job.cat, { includeCreateOption: true, preserveLegacySelection: true })}
@@ -4233,15 +4210,14 @@ function viewJobs(){
     const matQty  = Number(j.materialQty||0);
     const matTotal = (matCost * matQty) || 0;
     const estHours = Number(j.estimateHours) || 0;
-    const chargeRateRaw = Number(j.chargeRate);
-    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-    const costRate = resolveCostRate(j, estHours, matTotal);
-    const netRate = chargeRate - costRate;
+    const chargeRate = resolveChargeRate(j);
+    const costRate = resolveCostRate(j);
+    const netRate = chargeRate + costRate;
     const chargeDisplay = formatRate(chargeRate);
     const costDisplay = formatRate(costRate);
     const netDisplay = formatRate(netRate, { showPlus: true });
     const netClass = netRate >= 0 ? "job-rate-net-positive" : "job-rate-net-negative";
-    const netTotal = computeJobNetTotal(j, eff, { preferActual: false });
+    const netTotal = computeJobNetTotal(j, eff);
     const netTotalDisplay = formatCurrency(netTotal, { showPlus: true });
     const impactClass = netTotal > 0 ? "job-impact-ahead" : (netTotal < 0 ? "job-impact-behind" : "job-impact-neutral");
 
@@ -4423,12 +4399,12 @@ function viewJobs(){
               ${jobHasOverlap ? `<div class="job-edit-overlap-hint">${overlapIndicatorButton}<span>${jobOverlapNoticeEsc}</span></div>` : ""}
               <div class="job-edit-grid">
                 <label>Job name<input type="text" data-j="name" data-id="${j.id}" value="${j.name}"></label>
-                <label>Estimate (hrs)<input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></label>
+                <label>Estimate (hrs)<input type="number" min="0.01" step="0.01" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></label>
                 <label>Material<input type="text" data-j="material" data-id="${j.id}" value="${j.material||""}"></label>
                 <label>Material cost ($)<input type="number" min="0" step="0.01" data-j="materialCost" data-id="${j.id}" value="${matCost}"></label>
                 <label>Material quantity<input type="number" min="0" step="0.01" data-j="materialQty" data-id="${j.id}" value="${matQty}"></label>
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
-                <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-j="costRate" data-id="${j.id}" value="${Number.isFinite(costRate) ? costRate : 45}"></label>
+                <label>Cost rate ($/hr)<input type="number" step="0.01" data-j="costRate" data-id="${j.id}" value="${j.costRate ?? j.efficiency?.costRate ?? costRate}"></label>
                 <label>Start Date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Completion Date<input type="date" value="" disabled aria-label="Completion Date (set when marked complete)"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
@@ -4605,7 +4581,7 @@ function viewJobs(){
             <input type="number" id="jobCharge" placeholder="200.00" min="0" step="0.01" value="${esc(addJobDraftField("charge", "200"))}">
           </label>
           <label>Cost rate ($/hr)
-            <input type="number" id="jobCostRate" placeholder="45.00" min="0" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
+            <input type="number" id="jobCostRate" placeholder="45.00" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
           </label>
           </div>
           <div class="job-add-column">

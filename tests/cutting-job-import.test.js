@@ -29,4 +29,12 @@ test("implementation avoids material creation and protected systems",()=>{const 
 test("API confirmation and a matching preview precede any mutation",async()=>{const h=env(),before=JSON.stringify(h.state);const r=await h.api.submit([base]);assert.match(r.saveError,/confirmation/);assert.equal(JSON.stringify(h.state),before);assert.deepEqual(h.calls,[]);});
 test("cloud verification failure suspends without rolling back a committed import",async()=>{const h=env({verify:false}),r=await h.api.submit([base],{confirmed:true,reviewedPreview:h.api.preview([base])});assert.equal(r.authoritativeSaveCompleted,true);assert.equal(r.saveIndeterminate,true);assert.equal(r.rollbackAttempted,false);assert.equal(h.state.cuttingJobs.length,1);assert.ok(h.calls.includes("suspend"));});
 test("distinct source identities preserve identical-looking cuts; sanitized ID collisions need review",async()=>{const h=env(),rows=[base,{...base,import_event_id:"evt-2"}],r=await h.api.submit(rows,{confirmed:true,reviewedPreview:h.api.preview(rows)});assert.equal(r.saveCompleted,true);assert.equal(h.state.cuttingJobs.length,2);const collision=h.api.preview([{...base,import_event_id:"collision/a"},{...base,import_event_id:"collision?a"}]);assert.ok(collision.every(row=>row.status!=="ready"));});
+test("CJPROFIT-01: signed imported costs retain sign and actual minutes become hours",()=>{
+  for(const minutes of [30,90]) for(const record_status of ["active","completed"]){
+    const p=api.preview([{...base,record_status,completed_date:"2026-01-02",actual_cut_minutes:String(minutes),cost_rate_per_hr:"-80"}],context)[0];
+    assert.equal(p.status,"ready");const job=api.map(p);
+    assert.equal(job.costRate,-80);assert.equal(job.manualLogs[0].completedHours,minutes/60);
+    if(record_status==="completed")assert.equal(job.actualHours,minutes/60);
+  }
+});
 (async()=>{for(const[n,f]of tests){await f();console.log(`ok - ${n}`);}console.log(`1..${tests.length}`);})().catch(e=>{console.error(e);process.exitCode=1;});

@@ -7956,7 +7956,7 @@ function renderDashboard(){
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
-    if (!Number.isFinite(costRate) || costRate < 0){ toast("Enter a valid cost rate."); return; }
+    if (!Number.isFinite(costRate)){ toast("Enter a valid cost rate."); return; }
     if (!categoryId){ toast("Choose a category."); return; }
     if (categoryId === "__new__"){
       const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
@@ -23006,7 +23006,7 @@ function renderJobs(){
     }
     if (!Number.isFinite(materialWeight) || materialWeight < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
-    if (!Number.isFinite(costRate) || costRate < 0){ toast("Enter a valid cost rate."); return; }
+    if (!Number.isFinite(costRate)){ toast("Enter a valid cost rate."); return; }
     if (materialCost <= 0 && materialWeight > 0){
       const selectedMaterial = materialSettings.materials.find(m => m.name === material);
       const pricePerLb = Number(selectedMaterial?.pricePerLb || 0);
@@ -23730,7 +23730,7 @@ function renderJobs(){
             chargeRate: Number.isFinite(Number(entry.chargeRate)) && Number(entry.chargeRate) >= 0
               ? Number(entry.chargeRate)
               : JOB_RATE_PER_HOUR,
-            costRate: Number.isFinite(Number(entry.costRate)) && Number(entry.costRate) >= 0
+            costRate: Number.isFinite(Number(entry.costRate))
               ? Number(entry.costRate) : JOB_BASE_COST_PER_HOUR,
             priority: typeof getJobPriority === "function"
               ? getJobPriority(entry)
@@ -23842,7 +23842,7 @@ function renderJobs(){
 
       const costRateVal = costRateInput?.value;
       const costRateNum = costRateVal === "" || costRateVal == null ? null : Number(costRateVal);
-      if (costRateNum != null && (!Number.isFinite(costRateNum) || costRateNum < 0)){ toast("Enter a valid cost rate."); return; }
+      if (costRateNum != null && !Number.isFinite(costRateNum)){ toast("Enter a valid cost rate."); return; }
 
       const notes = notesInput?.value ?? entry.notes ?? "";
 
@@ -23879,13 +23879,13 @@ function renderJobs(){
 
       const fallbackCost = (() => {
         const existingCost = Number(entry.costRate);
-        if (Number.isFinite(existingCost) && existingCost >= 0) return existingCost;
+        if (Number.isFinite(existingCost)) return existingCost;
         const effCost = Number(entry.efficiency?.costRate);
-        if (Number.isFinite(effCost) && effCost >= 0) return effCost;
+        if (Number.isFinite(effCost)) return effCost;
         return estimateHours > 0 ? JOB_BASE_COST_PER_HOUR + ((materialCost * materialQty) / estimateHours) : JOB_BASE_COST_PER_HOUR;
       })();
-      const costRate = Number.isFinite(costRateNum) && costRateNum >= 0 ? costRateNum : fallbackCost;
-      const netRate = chargeRate - costRate;
+      const costRate = Number.isFinite(costRateNum) ? costRateNum : fallbackCost;
+      const netRate = chargeRate + (-Math.abs(costRate));
 
       entry.name = name;
       entry.estimateHours = estimateHours;
@@ -24081,17 +24081,17 @@ function renderJobs(){
       if (chargeVal != null && (!Number.isFinite(chargeVal) || chargeVal < 0)){ toast("Enter a valid charge rate."); return; }
       const costRaw = qs("costRate");
       const costVal = costRaw === "" || costRaw == null ? null : Number(costRaw);
-      if (costVal != null && (!Number.isFinite(costVal) || costVal < 0)){ toast("Enter a valid cost rate."); return; }
+      if (costVal != null && !Number.isFinite(costVal)){ toast("Enter a valid cost rate."); return; }
       const existingCharge = Number.isFinite(Number(j.chargeRate)) && Number(j.chargeRate) >= 0
         ? Number(j.chargeRate)
         : JOB_RATE_PER_HOUR;
       const chargeToSet = chargeVal == null ? existingCharge : chargeVal;
-      const existingCost = Number.isFinite(Number(j.costRate)) && Number(j.costRate) >= 0
+      const existingCost = Number.isFinite(Number(j.costRate))
         ? Number(j.costRate)
         : 45;
       const costToSet = costVal == null ? existingCost : costVal;
       j.name = qs("name") || j.name;
-      j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
+      j.estimateHours = Math.max(0.01, Number(qs("estimateHours"))||j.estimateHours||1);
       j.material = qs("material") || j.material || "";
       j.materialCost = Math.max(0, Number(qs("materialCost")) || 0);
       j.materialQty = Math.max(0, Number(qs("materialQty")) || 0);
