@@ -181,9 +181,9 @@
     <div class="auth-modal-dialog">
       <h3>Sign in to workspace</h3>
       <p>Use the same email on all devices to see the same shared data.</p>
-      <form id="authForm" class="auth-form">
-        <input id="authEmail" type="email" placeholder="you@example.com" required />
-        <input id="authPass" type="password" placeholder="Password" required />
+      <form id="authForm" class="auth-form" autocomplete="on">
+        <input id="authEmail" name="email" type="email" autocomplete="username" placeholder="you@example.com" required />
+        <input id="authPass" name="password" type="password" autocomplete="current-password" placeholder="Password" required />
         <button type="submit" class="auth-button auth-button-primary">Sign In</button>
         <button type="button" id="authClose" class="auth-button auth-button-secondary">Cancel</button>
       </form>

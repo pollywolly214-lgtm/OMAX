@@ -27,11 +27,23 @@ test("POLISH-01D cutting-job corrections against disposable local state",{timeou
       state.jobFolders=[{id:"jobs_root",name:"All Jobs",parent:null,order:1},{id:"blanco",name:"1254 Blanco",projectNumber:"1254",parent:"jobs_root",order:2},{id:"mesquite",name:"1242 Mesquite",projectNumber:"1242",parent:"jobs_root",order:3}];
       state.completedCuttingJobs=[{...base,id:"polish-source",cat:"blanco",projectNumber:"1254",startISO:"2026-10-01",dueISO:"2026-10-01",completedAtISO:"2026-10-01",cutNumber:"C001"}];
       state.cuttingJobs=[{...base,id:"polish-other",cat:"mesquite",projectNumber:"1242",startISO:"2026-10-10",dueISO:"2026-10-10",cutNumber:"C002"}];
+      state.pumpEff={baselineRPM:1700,baselineDateISO:"2026-10-01",baselineTimeISO:"08:00",baselineHistory:[{dateISO:"2026-10-01",rpm:1700}],entries:[{dateISO:"2026-10-10",rpm:1750,timeISO:"10:00"}],notes:[]};
       await ref.set(state);
     });
     await load();
     await page.evaluate(()=>{window.jobCategoryFilter="mesquite";window.jobHistoryCategoryFilter="blanco";location.hash="#/jobs";renderJobs();});
     assert.equal(await page.evaluate(()=>window.completedCuttingJobs.some(job=>job.id==="polish-source")),true,"fixture adopted from disposable cloud");
+    await page.evaluate(()=>{
+      window.__preparedMismatch=null;
+      const atomic=window.OMAXAtomicPersistence;
+      window.OMAXAtomicPersistence={...atomic,save:args=>atomic.save({...args,prepare:(pending,remote)=>{
+        const before=structuredClone(pending);
+        try{return args.prepare(pending,remote);}catch(error){
+          window.__preparedMismatch={message:error.message,changedFields:Object.keys(before).filter(key=>CuttingJobChronology.stateKey(before[key])!==CuttingJobChronology.stateKey(pending[key])),removedPumpFields:Object.keys(before.pumpEff||{}).filter(key=>!Object.hasOwn(pending.pumpEff||{},key))};
+          throw error;
+        }
+      }})};
+    });
     const cloud=()=>page.evaluate(()=>readCurrentCloudStateReadOnly());
     const open=async()=>{await page.locator('[data-history-actions-toggle="polish-source"]').click();await page.locator('[data-history-activate="polish-source"]').click();await page.locator('[data-active-copy-submit]').waitFor();};
     return{context,page,errors,cloud,open};
@@ -40,6 +52,7 @@ test("POLISH-01D cutting-job corrections against disposable local state",{timeou
   await t.test("real verified copy is visible despite previous filter, local today defaults, due validation and duplicate clicks",async()=>{
     const h=await fixture();try{
       const before=(await h.cloud()).completedCuttingJobs;
+      const beforePump=(await h.cloud()).pumpEff;
       await h.open();
       assert.equal(await h.page.locator('[data-active-copy-start]').inputValue(),"2026-10-14");
       assert.equal(await h.page.locator('[data-active-copy-due]').inputValue(),"2026-10-14");
@@ -60,13 +73,25 @@ test("POLISH-01D cutting-job corrections against disposable local state",{timeou
       assert.equal(await h.page.evaluate(()=>window.__copyCalls),1);
       assert.equal(await h.page.locator('[data-active-copy-submit]').isDisabled(),true);
       await h.page.evaluate(()=>window.__releaseCopy());
+      const mismatch=await h.page.evaluate(()=>window.__preparedMismatch);
+      assert.equal(mismatch,null,JSON.stringify(mismatch));
       await h.page.locator('#makeActiveCopyModal').waitFor({state:'hidden'});
       const after=await h.cloud(),copy=after.cuttingJobs.find(job=>job.id!=='polish-other');
-      assert.ok(copy);assert.equal(copy.startISO,'2026-10-15');assert.equal(copy.cat,'blanco');assert.equal(copy.projectNumber,'1254');
+      assert.ok(copy);assert.notEqual(copy.id,'polish-source');assert.equal(copy.startISO,'2026-10-15');assert.equal(copy.cat,'blanco');assert.equal(copy.projectNumber,'1254');
       assert.equal(copy.pathLength,.5005);assert.equal(copy.pathWidth,1.125);
       assert.deepEqual(after.completedCuttingJobs,before);
       assert.equal(await h.page.evaluate(()=>window.jobCategoryFilter),'blanco');
       assert.equal(await h.page.locator(`tr[data-job-row="${copy.id}"]`).isVisible(),true);
+      assert.deepEqual(after.pumpEff,beforePump);
+      await h.page.reload();await h.page.waitForFunction(()=>window.__initialAdoptComplete);
+      await h.page.evaluate(()=>{window.jobCategoryFilter="blanco";renderJobs();});
+      assert.equal(await h.page.locator(`tr[data-job-row="${copy.id}"]`).isVisible(),true);
+      assert.deepEqual((await h.cloud()).completedCuttingJobs,before);
+      assert.deepEqual((await h.cloud()).pumpEff,beforePump);
+      assert.equal((await h.cloud()).cuttingJobs.filter(job=>job.id===copy.id).length,1);
+      await h.page.clock.setFixedTime(new Date("2026-10-16T02:30:00Z"));
+      await h.open();assert.equal(await h.page.locator('[data-active-copy-start]').inputValue(),'2026-10-15');
+      await h.page.locator('[data-active-copy-cancel]').click();
       assert.deepEqual(h.errors,[]);
     }finally{await h.context.close();}
   });
@@ -104,6 +129,26 @@ test("POLISH-01D cutting-job corrections against disposable local state",{timeou
     }finally{await h.context.close();}
   });
 
+  await t.test("prepared-state guard still rejects changed job content before any write",async()=>{
+    const h=await fixture();try{
+      const before=await h.cloud();
+      await h.page.evaluate(()=>{
+        const atomic=window.OMAXAtomicPersistence;
+        window.OMAXAtomicPersistence={...atomic,save:args=>atomic.save({...args,prepare:(pending,remote)=>{
+          const copy=pending.cuttingJobs.find(job=>job.id!=="polish-other");
+          if(copy)copy.name="Tampered fixture copy";
+          return args.prepare(pending,remote);
+        }})};
+      });
+      await h.open();const start=await h.page.locator('[data-active-copy-start]').inputValue();
+      await h.page.locator('[data-active-copy-submit]').click();
+      await h.page.getByText(/Prepared chronology state changed/).waitFor();
+      assert.equal(await h.page.locator('#makeActiveCopyModal').isVisible(),true);
+      assert.equal(await h.page.locator('[data-active-copy-start]').inputValue(),start);
+      assert.deepEqual(await h.cloud(),before);assert.deepEqual(h.errors,[]);
+    }finally{await h.context.close();}
+  });
+
   await t.test("indeterminate acknowledgement keeps dialog open and prevents retry",async()=>{
     const h=await fixture();try{
       await h.page.evaluate(()=>{
@@ -127,8 +172,8 @@ test("POLISH-01D cutting-job corrections against disposable local state",{timeou
           for(const kind of ['job','history']){
             const id=kind==='job'?'polish-other':'polish-source',button=h.page.locator(`[data-${kind}-actions-toggle="${id}"]`);
             await button.scrollIntoViewIfNeeded();
-            const rects=await button.evaluate(el=>{const b=el.getBoundingClientRect(),c=el.closest('td').getBoundingClientRect();return{left:b.left,right:b.right,top:b.top,bottom:b.bottom,cellLeft:c.left,cellRight:c.right,cellTop:c.top,cellBottom:c.bottom};});
-            assert.ok(rects.left>=rects.cellLeft&&rects.right<=rects.cellRight+.5&&rects.top>=rects.cellTop&&rects.bottom<=rects.cellBottom+.5,JSON.stringify({dpr,width,kind,rects}));
+            const rects=await button.evaluate(el=>{const b=el.getBoundingClientRect(),cell=el.closest('td'),c=cell.getBoundingClientRect(),caret=el.querySelector('.job-actions-trigger-caret').getBoundingClientRect();return{contentRight:c.right-parseFloat(getComputedStyle(cell).paddingRight),caretRight:caret.right,left:b.left,right:b.right,top:b.top,bottom:b.bottom,cellLeft:c.left,cellRight:c.right,cellTop:c.top,cellBottom:c.bottom};});
+            assert.ok(rects.right<=rects.contentRight-1.5&&rects.caretRight<=rects.right&&rects.left>=rects.cellLeft&&rects.right<=rects.cellRight+.5&&rects.top>=rects.cellTop&&rects.bottom<=rects.cellBottom+.5,JSON.stringify({dpr,width,kind,rects}));
             await button.focus();assert.equal(await button.evaluate(el=>document.activeElement===el),true);await h.page.keyboard.press('Enter');
             const menu=h.page.locator(`[data-${kind}-actions-menu="${id}"]`),rect=await menu.boundingBox();
             assert.ok(rect.x>=7&&rect.x+rect.width<=width-7&&rect.y>=7&&rect.y+rect.height<=793,JSON.stringify({dpr,width,kind,rect}));

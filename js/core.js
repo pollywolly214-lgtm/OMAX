@@ -2627,27 +2627,45 @@ async function initFirebase(){
   if (btnOut) btnOut.onclick = async ()=>{ await FB.auth.signOut(); };
   if (btnClose) btnClose.onclick = hideModal;
 
+  let authSubmitting = false;
   if (form){
     form.onsubmit = async (e)=>{
       e.preventDefault();
+      if (authSubmitting || FB.user || FB.auth?.currentUser) return;
+      authSubmitting = true;
+      const submitButton = form.querySelector('button[type="submit"]');
+      const wasDisabled = submitButton?.disabled;
+      if (submitButton) submitButton.disabled = true;
+      form.setAttribute("aria-busy", "true");
       try{
         await ensureEmailPassword((emailEl.value||"").trim(), (passEl.value||""));
         hideModal();
-      }catch(err){ console.error(err); alert(err.message || "Sign-in failed"); }
+      }catch(err){ alert(err.message || "Sign-in failed"); }
+      finally {
+        authSubmitting = false;
+        if (submitButton) submitButton.disabled = wasDisabled;
+        form.setAttribute("aria-busy", "false");
+      }
     };
   }
 
 
-  // Recovered from 947b9d3: Ctrl/Cmd+S opens the normal sign-in dialog.
+  // Ctrl/Cmd+S uses the normal form, including browser-filled credentials.
   const handleLoginShortcut = (event)=>{
     if (event.defaultPrevented || event.repeat || event.altKey || event.shiftKey) return;
     if (!(event.ctrlKey || event.metaKey) || String(event.key || "").toLowerCase() !== "s") return;
-    if (FB.user || !modal || isEditableTarget(event.target) || isEditableTarget(document.activeElement)) return;
+    if (FB.user || FB.auth?.currentUser || !modal || isEditableTarget(event.target) || isEditableTarget(document.activeElement)) return;
     if (event.target?.closest?.('[contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
     event.preventDefault();
+    if (authSubmitting) return;
     showModal();
-    emailEl?.focus();
-    emailEl?.select();
+    if ((emailEl?.value || "").trim() && passEl?.value && typeof form?.requestSubmit === "function"){
+      form.requestSubmit(); // Native validation and the ordinary Firebase submit handler.
+      return;
+    }
+    const focusField = (emailEl?.value || "").trim() ? passEl : emailEl;
+    focusField?.focus();
+    if (focusField === emailEl) emailEl?.select();
   };
   window.addEventListener("keydown", handleLoginShortcut);
 
@@ -4645,7 +4663,8 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
         // An exact isolated mutation must not normalize unrelated evidence.
         // Only fields proven identical to this transaction's remote snapshot
         // are retained verbatim; differences still use the existing merges.
-        const mergeUnlessIdentical=(field,merge,baseline)=>options.validateSourceState && options.validatePreparedState
+        // Captured-target chronology mutations have the same exact-state contract.
+        const mergeUnlessIdentical=(field,merge,baseline)=>options.validatePreparedState && (options.validateSourceState || target)
           && stableStringifyForIntegrity(pending[field])===stableStringifyForIntegrity(remote[field])
           ? pending[field] : merge(pending[field],remote[field],baseline);
         pending.totalHistory = mergeUnlessIdentical("totalHistory",mergeTotalHistoryForSave,totalHistoryBaseline);

@@ -1,5 +1,7 @@
 # POLISH-01: small UI and interaction fixes
 
+Latest targeted follow-up: [POLISH-01F root causes, checks and manual-verification limits](polish-01f.md). Earlier POLISH-01/01D results below record those iterations.
+
 Started from fetched `origin/main` at `a279fbed298c53b8d7206ca02a582efed3e1cdfe` in an isolated checkout on `codex/production-polish-small-bugs`.
 
 Each item was inspected before editing. Changes are limited to existing view markup, CSS, local form handling, menu positioning and the recovered authentication-dialog shortcut. Scheduling, calculations, import/export behavior and persistence architecture remain unchanged.
