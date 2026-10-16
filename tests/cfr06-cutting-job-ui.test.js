@@ -6,7 +6,7 @@ for(const token of ["Reference folder","OneDrive","data-open-local-file","data-p
   assert.ok(views.includes(token),`legacy attachment remains readable: ${token}`);
 for(const obsoleteControl of ["Attach from Reference Folder","Temporary local upload — not saved","Link OneDrive URL","Add from this computer OneDrive folder","data-job-file-add=","data-upload-job=","data-link-job-file="])
   assert.equal(views.includes(obsoleteControl),false,`normal attachment-creation control is hidden: ${obsoleteControl}`);
-assert.match(views,/id="jobSecureCloudFilesBtn">Upload file/);
+assert.match(views,/id="jobSecureCloudFilesBtn">Attach File/);
 assert.match(views,/data-cloud-file-upload=/);
 
 for(const token of [
@@ -28,7 +28,7 @@ assert.equal((uploadHandler.match(/uploadCfr05CuttingFile/g)||[]).length,1,"list
 assert.equal(uploadHandler.includes("saveCloudNow"),false,"existing-job cloud upload must not rewrite app/state");
 assert.match(renderers,/pendingSecureCloudJobFiles/);
 assert.match(renderers,/!created.saved\|\|!created.verified\|\|created.requiresReload/);
-assert.match(renderers,/for \(const file of pendingCloudFiles\)/);
+assert.match(renderers,/for \(const entry of pending\.files\)/);
 assert.match(renderers,/files:attachments/,"local/reference metadata remains in the authoritative job exactly as current main intended");
 assert.doesNotMatch(renderers,/files:\s*pendingCloudFiles/,"cloud bytes and pending cloud wrappers must not enter app\/state");
 assert.doesNotMatch(service,/cuttingJobs\.(push|splice)|completedCuttingJobs\.(push|splice)|cutting_job_files_v1/,"cloud metadata remains separate from authoritative arrays and the legacy cache");
