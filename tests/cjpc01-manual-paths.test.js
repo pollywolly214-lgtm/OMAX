@@ -11,6 +11,7 @@ class Select{
   getAttribute(name){return this.attrs?.[name]??null;}
   hasAttribute(name){return this.getAttribute(name)!=null;}
   appendChild(option){this.options.push(option);}
+  setAttribute(name,value){(this.attrs ||= {})[name]=value;}
 }
 function harness(active=[],completed=[]){
   const calls={save:0,upload:0,resequence:0},messages=[],elements={},fields={};
@@ -35,7 +36,7 @@ function harness(active=[],completed=[]){
   c.createCuttingJob=async job=>{calls.save++;window.cuttingJobs.push(job);return{saved:true,verified:true};};
   c.saveCuttingJobEdit=async(id,updates)=>{calls.save++;Object.assign([...window.cuttingJobs,...window.completedCuttingJobs].find(job=>job.id===id),updates);return{saved:true,verified:true};};
   for(const name of ["validateManualJobProjectCategory","applyManualJobProjectCategory","addJobFolder"])vm.runInContext(fn(core,name),c);
-  for(const name of ["parseCuttingJobDimension","promptCreateCategory","selectManualJobCategory","existingJobCategoryEditMessage","validateExistingJobCategoryEdit","syncManualJobProjectControl","syncManualJobProjectControls","persistNewCuttingJobWithAttachments","syncNewCuttingJobSaveControls"])vm.runInContext(fn(renderers,name),c);
+  for(const name of ["parseCuttingJobDimension","promptCreateCategory","selectManualJobCategory","existingJobCategoryEditMessage","validateExistingJobCategoryEdit","syncManualJobProjectControl","syncManualJobProjectControls","persistNewCuttingJobWithAttachments","syncNewCuttingJobSaveControls","newCuttingJobCategoryMessage","setNewCuttingJobFeedback"])vm.runInContext(fn(renderers,name),c);
   window.uploadCfr05CuttingFile=async()=>{calls.upload++;return{stage:"completed"};};
   function dashboard(cat="blanco",project="1254",costRate="45"){
     const defaults={jobNameInput:"Part",jobEstimateInput:"2",jobChargeInput:"200",jobCostRateInput:costRate,jobMaterialInput:"Steel",jobMaterialCostInput:"9",jobMaterialQtyInput:"1",jobStartInput:"2026-10-06",jobDueInput:"2026-10-07",jobProjectInput:project};
@@ -354,4 +355,86 @@ test("CJADD-01A: save controls lock pending job fields and allow only safe attac
   assert.equal(submit.disabled,false);assert.equal(submit.textContent,"Retry pending attachments");assert.equal(input.disabled,true);
   h.window.pendingNewJobSave.files[0].manualReviewRequired=true;h.c.syncNewCuttingJobSaveControls();assert.equal(submit.disabled,true);
   h.window.pendingNewJobSave=null;h.c.syncNewCuttingJobSaveControls();assert.equal(input.disabled,false);assert.equal(submit.disabled,false);
+});
+
+
+function visibleAddStatus(h){
+  return h.elements.jobAddStatus={hidden:true,textContent:"",attributes:{},setAttribute(name,value){this.attributes[name]=value;}};
+}
+
+test("CJADD-01B: All Jobs rejection stays visible with correction instructions and selected files",async()=>{
+  const h=harness(),status=visibleAddStatus(h);
+  await h.add("jobs_root","",true);
+  assert.equal(h.calls.save,0);assert.equal(h.calls.upload,0);assert.equal(h.c.pendingSecureCloudJobFiles.length,1);
+  assert.equal(status.hidden,false);assert.equal(status.attributes.role,"alert");
+  assert.match(status.textContent,/All Jobs groups jobs; select a project category instead/);
+  assert.match(status.textContent,/verified Project Number/);assert.match(status.textContent,/create a category/);
+  assert.equal(h.elements.jobName.value,"Part");assert.equal(h.window.jobAddFeedback.state,"category");
+});
+
+test("CJADD-01B: conflicting ownership remains blocked with persistent feedback",async()=>{
+  const h=harness([{id:"conflict",cat:"blanco",projectNumber:"9999"}]),status=visibleAddStatus(h);
+  await h.add("blanco","1254",true);
+  assert.equal(h.calls.save,0);assert.equal(h.calls.upload,0);assert.equal(status.hidden,false);
+  assert.match(status.textContent,/missing or conflicting/);assert.match(status.textContent,/1254 Blanco/);
+  assert.equal(h.c.pendingSecureCloudJobFiles.length,1);
+});
+
+test("CJADD-01B: saving is visible; verified jobs and attachments render in their selected category",async()=>{
+  for(const secure of [false,true]){
+    const h=harness(),status=visibleAddStatus(h),opened=[],renders=[],uploads=[];
+    h.window.jobCategoryFilter="mesquite";
+    h.c.ensureJobCategoryFolderOpen=id=>opened.push(id);
+    h.c.renderJobs=()=>renders.push({category:h.window.jobCategoryFilter,feedback:h.window.jobAddFeedback.message,jobs:h.window.cuttingJobs.filter(job=>job.cat===h.window.jobCategoryFilter)});
+    let release;
+    h.c.createCuttingJob=job=>{h.calls.save++;return new Promise(resolve=>{release=()=>{h.window.cuttingJobs.push(job);resolve({saved:true,verified:true});};});};
+    h.window.uploadCfr05CuttingFile=async(id,file)=>{uploads.push([id,file.name]);assert.equal(h.window.cuttingJobs[0].id,id);return{stage:"completed"};};
+    const saving=h.add("blanco","1254",secure);
+    assert.equal(status.hidden,false);assert.match(status.textContent,/Saving cutting job and verifying Firebase/);
+    assert.equal(renders.length,0);assert.equal(uploads.length,0);assert.equal(h.window.cuttingJobs.length,0);
+    release();await saving;
+    assert.equal(h.calls.save,1);assert.equal(renders.length,1);assert.equal(renders[0].category,"blanco");
+    assert.equal(renders[0].jobs[0].id,"new-job");assert.equal(status.attributes.role,"status");
+    assert.equal(h.window.jobAddFeedback.state,"success");assert.ok(opened.includes("blanco"));
+    assert.equal(uploads.length,secure?1:0);if(secure)assert.deepEqual(uploads[0],["new-job","part.dxf"]);
+    assert.equal(h.c.pendingSecureCloudJobFiles.length,0);
+  }
+  assert.match(views,/const addJobDefaultCategory = selectedCategory;/);
+  assert.match(views,/id="jobAddStatus"[^>]*role=/);
+});
+
+test("CJADD-01B: failures and unverified saves explain the outcome without rendering success",async()=>{
+  for(const outcome of [{saved:false,error:"Recovery Mode blocks saving."},{saved:true,verified:false,requiresReload:true}]){
+    const h=harness(),status=visibleAddStatus(h);let renders=0;
+    h.c.renderJobs=()=>renders++;h.c.createCuttingJob=async()=>outcome;
+    await h.add("blanco","1254",true);
+    assert.equal(status.hidden,false);assert.equal(status.attributes.role,"alert");assert.equal(renders,0);
+    assert.equal(h.calls.upload,0);assert.equal(h.c.pendingSecureCloudJobFiles.length,1);
+    if(outcome.requiresReload)assert.match(status.textContent,/Refresh and verify the server save before retrying/);
+    else assert.match(status.textContent,/Recovery Mode/);
+  }
+});
+
+test("CJADD-01B: native validation before submit and unexpected handler errors are visible",async()=>{
+  const h=harness(),status=visibleAddStatus(h);let invalid;
+  h.c.addJobForm={addEventListener:(event,handler,capture)=>{assert.equal(event,"invalid");assert.equal(capture,true);invalid=handler;}};
+  vm.runInContext(between('  addJobForm?.addEventListener("invalid",','\n  addJobForm?.addEventListener("input", (e)=>{'),h.c);
+  invalid({target:{labels:[{textContent:"Hours Taken (hrs)"}],validationMessage:"Please fill out this field."}});
+  assert.equal(status.hidden,false);assert.match(status.textContent,/correct Hours Taken/);assert.match(status.textContent,/Please fill out/);
+  h.c.recalcMaterialTotals=()=>{throw Error("calculation unavailable");};await h.add();
+  assert.match(status.textContent,/Add Job could not finish: calculation unavailable/);assert.equal(h.calls.save,0);
+});
+
+test("CJADD-01B: category guidance updates for invalid non-root categories and clears corrected errors",async()=>{
+  const h=harness(),listeners={},select=new Select("jobs_root"),status=visibleAddStatus(h);
+  select.addEventListener=(event,handler)=>{listeners[event]=handler;};
+  h.elements.jobCategory=select;h.elements.jobCategoryHint={hidden:true,textContent:""};h.elements.jobProjectNumber={tagName:"OUTPUT",value:""};
+  h.c.setNewCuttingJobFeedback("Choose a project category", "category");
+  vm.runInContext(between('  const jobCategorySelect = document.getElementById("jobCategory");','\n  const jobCategoryFilterSelect'),h.c);
+  assert.equal(h.elements.jobCategoryHint.hidden,false);assert.match(h.elements.jobCategoryHint.textContent,/All Jobs/);
+  select.value="unknown";await listeners.change({target:select,stopPropagation(){}});
+  assert.equal(h.elements.jobCategoryHint.hidden,false);assert.match(h.elements.jobCategoryHint.textContent,/Smith County/);
+  select.value="blanco";await listeners.change({target:select,stopPropagation(){}});
+  assert.equal(h.elements.jobProjectNumber.value,"1254");assert.equal(h.elements.jobCategoryHint.hidden,true);
+  assert.equal(select.attrs["aria-invalid"],"false");assert.equal(status.hidden,true);assert.equal(h.calls.save,0);
 });

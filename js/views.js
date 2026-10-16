@@ -3242,7 +3242,7 @@ function viewJobs(){
     ? String(historyCategoryFolder.name)
     : (historyCategory === rootCategoryId ? "All Jobs" : "Category");
   window.jobHistoryCategoryFilter = historyCategory;
-  const addJobDefaultCategory = rootCategoryId;
+  const addJobDefaultCategory = selectedCategory;
   const addJobDraft = window.jobAddDraft && typeof window.jobAddDraft === "object"
     ? window.jobAddDraft
     : {};
@@ -4545,10 +4545,10 @@ function viewJobs(){
           </label>
           <div class="job-category-field">
             <label for="jobCategory">Category</label>
-            <select id="jobCategory" aria-label="Category" required>
+            <select id="jobCategory" aria-label="Category" aria-describedby="jobCategoryHint" required>
               ${categoryOptionsMarkup(addJobCategoryDefault, { includeCreateOption: true })}
             </select>
-            <p class="small muted job-category-hint" id="jobCategoryHint" aria-live="polite">
+            <p class="small job-category-hint" id="jobCategoryHint" aria-live="polite">
               Choose a category with verified project ownership.
             </p>
           </div>
@@ -4590,6 +4590,7 @@ function viewJobs(){
           <input type="file" id="jobSecureCloudFiles" accept=".dxf,.ord,.omx" multiple style="display:none">
           <datalist id="jobMaterialOptions">${materialInventoryOptionsMarkup}</datalist>
         </form>
+        <p id="jobAddStatus" role="${["error", "category"].includes(window.jobAddFeedback?.state) ? "alert" : "status"}"${window.jobAddFeedback?.message ? "" : " hidden"}>${esc(window.jobAddFeedback?.message || "")}</p>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
         <div class="job-material-settings-modal" id="jobMaterialSettingsPanel" hidden aria-hidden="true">
           <div class="job-material-settings">

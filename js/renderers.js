@@ -6089,13 +6089,31 @@ async function persistNewCuttingJobWithAttachments(job){
   }
 }
 
+function newCuttingJobCategoryMessage(categoryId, reason){
+  const rootId = window.JOB_ROOT_FOLDER_ID || "jobs_root";
+  const category = String(categoryId) === rootId ? "All Jobs"
+    : (window.jobFolders || []).find(folder=>String(folder.id) === String(categoryId))?.name || "the selected category";
+  return `Cannot add this job to ${category}. ${String(categoryId) === rootId ? "All Jobs groups jobs; select a project category instead. " : ""}${reason} Choose a category with a verified Project Number, or create a category with its Project Number. Your form and selected files are preserved.`;
+}
+
+function setNewCuttingJobFeedback(message, state = "error"){
+  window.jobAddFeedback = { message, state };
+  const status = document.getElementById("jobAddStatus");
+  if (status){
+    status.textContent = message;
+    status.hidden = !message;
+    status.setAttribute("role", state === "error" || state === "category" ? "alert" : "status");
+  }
+  if (message) toast(message);
+}
+
 function syncNewCuttingJobSaveControls(){
   const pending = window.pendingNewJobSave;
   const form = document.getElementById("addJobForm");
   form?.querySelectorAll("input, select, button").forEach(control=>{
     control.disabled = Boolean(pending && (control.type !== "submit" || pending.busy || pending.requiresReload
       || pending.files.every(entry=>entry.outcome?.stage === "completed" || entry.manualReviewRequired)));
-    if (control.type === "submit") control.textContent = pending?.verified ? "Retry pending attachments" : "Add Job";
+    if (control.type === "submit") control.textContent = pending?.busy ? "Saving…" : pending?.verified ? "Retry pending attachments" : "Add Job";
   });
 }
 
@@ -22672,7 +22690,11 @@ function renderJobs(){
   const updateJobCategoryHint = ()=>{
     if (!jobCategoryHint) return;
     const current = jobCategorySelect ? String(jobCategorySelect.value || "") : "";
-    jobCategoryHint.hidden = !!current && current !== jobRootCategoryId;
+    const pair = window.CuttingJobHistory.resolveCategoryProject(current, window.jobFolders || [],
+      [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])]);
+    jobCategoryHint.hidden = pair.ok;
+    jobCategoryHint.textContent = pair.ok ? "" : newCuttingJobCategoryMessage(current, pair.reason);
+    jobCategorySelect?.setAttribute("aria-invalid", pair.ok ? "false" : "true");
   };
   if (jobCategorySelect){
     jobCategorySelect.dataset.prevValue = jobCategorySelect.value;
@@ -22701,6 +22723,7 @@ function renderJobs(){
       updateJobCategoryHint();
       syncManualJobProjectControl(select, document.getElementById("jobProjectNumber"));
       syncAddJobDraftFromForm();
+      if (window.jobAddFeedback?.state === "category") setNewCuttingJobFeedback("", "status");
     });
   }
 
@@ -23124,6 +23147,12 @@ function renderJobs(){
   }
   addJobForm?.addEventListener("input", syncAddJobDraftFromForm);
   addJobForm?.addEventListener("change", syncAddJobDraftFromForm);
+  // Native constraint validation runs before submit; make those rejections visible too.
+  addJobForm?.addEventListener("invalid", (event)=>{
+    const field = event.target;
+    const label = field.labels?.[0]?.textContent?.trim() || field.id || "a required field";
+    setNewCuttingJobFeedback(`Cannot add job: correct ${label}. ${field.validationMessage || "Enter a valid value."}`);
+  }, true);
   addJobForm?.addEventListener("input", (e)=>{
     if (["jobMaterial", "jobMaterialThickness", "jobMaterialLengthFt", "jobMaterialWidthFt"].includes(e.target?.id)) recalcMaterialTotals();
   });
@@ -23204,98 +23233,117 @@ function renderJobs(){
   syncNewCuttingJobSaveControls();
   document.getElementById("addJobForm")?.addEventListener("submit",async (e)=>{
     e.preventDefault();
-    if(typeof createCuttingJob!=="function"){toast("Cutting-job saving is unavailable.");return {blocked:true};}
+    try {
+      if(typeof createCuttingJob!=="function"){setNewCuttingJobFeedback("Cutting-job saving is unavailable.");return {blocked:true};}
 
-    if (window.pendingNewJobSave?.busy) return;
-    const previousCategoryFilter = window.jobCategoryFilter || jobRootCategoryId;
-    let newJob = window.pendingNewJobSave?.job;
-    if (!newJob){
-      recalcMaterialTotals();
-      if (typeof e.currentTarget?.reportValidity === "function" && !e.currentTarget.reportValidity()) return;
-      const name  = document.getElementById("jobName").value.trim();
-      const estMinutesInput = document.getElementById("jobEstMinutes");
-      applyMinutesToHours(addJobEstHoursInput, estMinutesInput, addJobEstBreakdown);
-      const est = Number(addJobEstHoursInput?.value);
-      const material = document.getElementById("jobMaterial")?.value.trim() || "";
-      const chargeRaw = document.getElementById("jobCharge")?.value ?? "";
-      const costRateRaw = document.getElementById("jobCostRate")?.value ?? "";
-      const materialCostRaw = document.getElementById("jobMaterialCost")?.value ?? "";
-      const materialQtyRaw = document.getElementById("jobMaterialQty")?.textContent ?? "";
-      const start = document.getElementById("jobStart").value;
-      const due   = document.getElementById("jobDue").value;
-      const projectNumberRaw = document.getElementById("jobProjectNumber")?.value ?? "";
-      const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
-      const priorityNum = Number(priorityRaw);
-      const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
-      const categorySelect = document.getElementById("jobCategory");
-      let categoryId = categorySelect?.value || "";
-      let materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
-      const materialWeight = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
-      const materialQty = 1;
-      const chargeRate = chargeRaw === "" ? 200 : Number(chargeRaw);
-      const costRate = costRateRaw === "" ? 45 : Number(costRateRaw);
-      if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
-      if (!Number.isFinite(materialCost) || materialCost < 0){
-        materialCost = 0;
-      }
-      if (!Number.isFinite(materialWeight) || materialWeight < 0){ toast("Enter a valid material quantity."); return; }
-      if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
-      if (!Number.isFinite(costRate)){ toast("Enter a valid cost rate."); return; }
-      if (materialCost <= 0 && materialWeight > 0){
-        const selectedMaterial = materialSettings.materials.find(m => m.name === material);
-        const pricePerLb = Number(selectedMaterial?.pricePerLb || 0);
-        if (Number.isFinite(pricePerLb) && pricePerLb > 0){
-          materialCost = Number((materialWeight * pricePerLb).toFixed(2));
+      if (window.pendingNewJobSave?.busy){ setNewCuttingJobFeedback("Saving this cutting job. Please wait.", "saving"); return; }
+      let newJob = window.pendingNewJobSave?.job;
+      if (!newJob){
+        recalcMaterialTotals();
+        if (typeof e.currentTarget?.reportValidity === "function" && !e.currentTarget.reportValidity()){
+          setNewCuttingJobFeedback("Cannot add job: correct the highlighted required or invalid fields, then try again."); return;
         }
+        const name  = document.getElementById("jobName").value.trim();
+        const estMinutesInput = document.getElementById("jobEstMinutes");
+        applyMinutesToHours(addJobEstHoursInput, estMinutesInput, addJobEstBreakdown);
+        const est = Number(addJobEstHoursInput?.value);
+        const material = document.getElementById("jobMaterial")?.value.trim() || "";
+        const chargeRaw = document.getElementById("jobCharge")?.value ?? "";
+        const costRateRaw = document.getElementById("jobCostRate")?.value ?? "";
+        const materialCostRaw = document.getElementById("jobMaterialCost")?.value ?? "";
+        const materialQtyRaw = document.getElementById("jobMaterialQty")?.textContent ?? "";
+        const start = document.getElementById("jobStart").value;
+        const due   = document.getElementById("jobDue").value;
+        const projectNumberRaw = document.getElementById("jobProjectNumber")?.value ?? "";
+        const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
+        const priorityNum = Number(priorityRaw);
+        const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
+        const categorySelect = document.getElementById("jobCategory");
+        let categoryId = categorySelect?.value || "";
+        let materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
+        const materialWeight = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
+        const materialQty = 1;
+        const chargeRate = chargeRaw === "" ? 200 : Number(chargeRaw);
+        const costRate = costRateRaw === "" ? 45 : Number(costRateRaw);
+        if (!name || !isFinite(est) || est<=0 || !start || !due){ setNewCuttingJobFeedback("Fill job fields."); return; }
+        if (!Number.isFinite(materialCost) || materialCost < 0){
+          materialCost = 0;
+        }
+        if (!Number.isFinite(materialWeight) || materialWeight < 0){ setNewCuttingJobFeedback("Enter a valid material quantity."); return; }
+        if (!Number.isFinite(chargeRate) || chargeRate < 0){ setNewCuttingJobFeedback("Enter a valid charge rate."); return; }
+        if (!Number.isFinite(costRate)){ setNewCuttingJobFeedback("Enter a valid cost rate."); return; }
+        if (materialCost <= 0 && materialWeight > 0){
+          const selectedMaterial = materialSettings.materials.find(m => m.name === material);
+          const pricePerLb = Number(selectedMaterial?.pricePerLb || 0);
+          if (Number.isFinite(pricePerLb) && pricePerLb > 0){
+            materialCost = Number((materialWeight * pricePerLb).toFixed(2));
+          }
+        }
+        if (!categoryId){ setNewCuttingJobFeedback("Choose a category."); return; }
+        if (categoryId === "__new__"){
+          const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
+          const folder = await promptCreateCategory(parent);
+          if (!folder){ setNewCuttingJobFeedback("Category not created."); return; }
+          categoryId = String(folder.id);
+          selectManualJobCategory(categorySelect, folder);
+          syncManualJobProjectControl(categorySelect, document.getElementById("jobProjectNumber"));
+          ensureJobCategoryFolderOpen(categoryId);
+        }
+        const pair = validateManualJobProjectCategory(categoryId, document.getElementById("jobProjectNumber")?.value ?? projectNumberRaw);
+        if (!pair.ok){
+          setNewCuttingJobFeedback(newCuttingJobCategoryMessage(categoryId, pair.reason), "category");
+          categorySelect?.focus?.();
+          return pair;
+        }
+        const projectNumber = pair.projectNumber;
+        const attachments = pendingNewJobFiles.map(f=>({ ...f }));
+        const thickness = fractionToNumber(document.getElementById("jobMaterialThickness")?.value);
+        const lengthText = document.getElementById("jobMaterialLengthFt")?.value || "";
+        const widthText = document.getElementById("jobMaterialWidthFt")?.value || "";
+        const pathLength = lengthText.trim() ? window.CuttingJobDimensions.readInput(document.getElementById("jobMaterialLengthFt")) : 0;
+        const pathWidth = widthText.trim() ? window.CuttingJobDimensions.readInput(document.getElementById("jobMaterialWidthFt")) : 0;
+        if (![pathLength, pathWidth].every(value => Number.isFinite(value) && value >= 0)){
+          setNewCuttingJobFeedback("Enter valid dimensions in feet, using decimals or fractions."); return;
+        }
+        newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material,
+          thickness, pathLength, pathWidth, materialCost, materialQty, materialWeight, materialCostComplete:materialCostRaw !== "",
+          chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: pair.cat };
       }
-      if (!categoryId){ toast("Choose a category."); return; }
-      if (categoryId === "__new__"){
-        const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
-        const folder = await promptCreateCategory(parent);
-        if (!folder){ toast("Category not created."); return; }
-        categoryId = String(folder.id);
-        selectManualJobCategory(categorySelect, folder);
-        syncManualJobProjectControl(categorySelect, document.getElementById("jobProjectNumber"));
-        ensureJobCategoryFolderOpen(categoryId);
+      syncAddJobDraftFromForm();
+      setNewCuttingJobFeedback(window.pendingNewJobSave?.verified ? "Saving pending attachments for this job…" : "Saving cutting job and verifying Firebase…", "saving");
+      const saving = persistNewCuttingJobWithAttachments(newJob);
+      syncNewCuttingJobSaveControls();
+      const result = await saving;
+      syncNewCuttingJobSaveControls();
+      if (result.busy){ setNewCuttingJobFeedback("Saving this cutting job. Please wait.", "saving"); return; }
+      if (result.complete || window.pendingNewJobSave?.verified){
+        window.jobCategoryFilter = newJob.cat;
+        ensureJobCategoryFolderOpen(newJob.cat);
       }
-      const pair = validateManualJobProjectCategory(categoryId, document.getElementById("jobProjectNumber")?.value ?? projectNumberRaw);
-      if (!pair.ok) return;
-      const projectNumber = pair.projectNumber;
-      const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-      const thickness = fractionToNumber(document.getElementById("jobMaterialThickness")?.value);
-      const lengthText = document.getElementById("jobMaterialLengthFt")?.value || "";
-      const widthText = document.getElementById("jobMaterialWidthFt")?.value || "";
-      const pathLength = lengthText.trim() ? window.CuttingJobDimensions.readInput(document.getElementById("jobMaterialLengthFt")) : 0;
-      const pathWidth = widthText.trim() ? window.CuttingJobDimensions.readInput(document.getElementById("jobMaterialWidthFt")) : 0;
-      if (![pathLength, pathWidth].every(value => Number.isFinite(value) && value >= 0)){
-        toast("Enter valid dimensions in feet, using decimals or fractions."); return;
+      if (!result.complete){
+        if (result.failures?.length){
+          const first = result.failures[0];
+          const review = result.failures.some(entry=>entry.manualReviewRequired);
+          setNewCuttingJobFeedback(`Job created, but attachment failed at ${first.outcome.stage}: ${first.outcome.error?.message || "Unknown error"}. ${review ? "Manual inspection required; do not re-upload uncertain files." : "Retry pending attachments to continue with this saved job."}`);
+          content.dataset.cfr05LastResult = JSON.stringify({ jobId:result.jobId, created:true,
+            attachmentFailures:result.failures.map(entry=>({ name:entry.name, ...entry.outcome })) });
+          renderCalendarPreservingScroll();
+          renderJobs();
+        } else setNewCuttingJobFeedback(result.requiresReload
+          ? `${result.error || "Job save could not be verified."} Refresh and verify the server save before retrying. Your form and selected files are preserved.`
+          : result.error || "Job was not saved. Your form and selected files are preserved.");
+        return result;
       }
-      newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material,
-        thickness, pathLength, pathWidth, materialCost, materialQty, materialWeight, materialCostComplete:materialCostRaw !== "",
-        chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: pair.cat };
+      cuttingJobs=window.cuttingJobs;completedCuttingJobs=window.completedCuttingJobs;
+      setNewCuttingJobFeedback(result.listingFailed ? "Upload succeeded; Cloud Files refresh failed. Do not upload the file again."
+        : result.fileCount ? `Job created and ${result.fileCount} cloud file${result.fileCount === 1 ? "" : "s"} verified.` : "Cutting job added", "success");
+      renderCalendarPreservingScroll();
+      renderJobs();
+    } catch (error){
+      setNewCuttingJobFeedback(`Add Job could not finish: ${error.message || error}. Check the save status before retrying.`);
+    } finally {
+      syncNewCuttingJobSaveControls();
     }
-    syncAddJobDraftFromForm();
-    const saving = persistNewCuttingJobWithAttachments(newJob);
-    syncNewCuttingJobSaveControls();
-    const result = await saving;
-    syncNewCuttingJobSaveControls();
-    if (result.busy) return;
-    if (result.complete || window.pendingNewJobSave?.verified) window.jobCategoryFilter = previousCategoryFilter;
-    if (!result.complete){
-      if (result.failures?.length){
-        const first = result.failures[0];
-        const review = result.failures.some(entry=>entry.manualReviewRequired);
-        toast(`Job created, but attachment failed at ${first.outcome.stage}: ${first.outcome.error?.message || "Unknown error"}. ${review ? "Manual inspection required; do not re-upload uncertain files." : "Retry pending attachments to continue with this saved job."}`);
-        content.dataset.cfr05LastResult = JSON.stringify({ jobId:result.jobId, created:true,
-          attachmentFailures:result.failures.map(entry=>({ name:entry.name, ...entry.outcome })) });
-      } else toast(result.error || "Job was not saved.");
-      return result;
-    }
-    cuttingJobs=window.cuttingJobs;completedCuttingJobs=window.completedCuttingJobs;
-    toast(result.listingFailed ? "Upload succeeded; Cloud Files refresh failed. Do not upload the file again."
-      : result.fileCount ? `Job created and ${result.fileCount} cloud file${result.fileCount === 1 ? "" : "s"} verified.` : "Cutting job added");
-    renderCalendarPreservingScroll();
-    renderJobs();
   });
 
   // 5) Inline material $/qty (kept)
@@ -23387,7 +23435,7 @@ function renderJobs(){
   });
 
   const historyBody = content.querySelector(".past-jobs-table tbody");
-  
+
   historyBody?.addEventListener("change", (e)=>{
     const previewSelect = e.target instanceof Element
       ? e.target.closest("select[data-file-preview-select]")
