@@ -3547,7 +3547,7 @@ function viewJobs(){
     const colorStyleAttr = colorData.style;
     const actions = [
       `<button type="button" class="link" data-job-folder-add="${esc(id)}">+ Sub-category</button>`,
-      !isRoot ? `<button type="button" class="link" data-job-folder-rename="${esc(id)}">Rename</button>` : "",
+      !isRoot ? `<button type="button" class="link" data-job-folder-rename="${esc(id)}">Edit</button>` : "",
       !isRoot ? `<button type="button" class="link danger" data-job-folder-remove="${esc(id)}">Remove</button>` : ""
     ].filter(Boolean).join("<span class=\"job-folder-action-sep\" aria-hidden=\"true\">·</span>");
     const childrenMarkup = childrenOf(folder.id).map(child => renderFolderTree(child)).join("");
@@ -3558,7 +3558,7 @@ function viewJobs(){
           <span class="category-color-bar" aria-hidden="true"></span>
           <input type="color" class="category-color-picker" value="${categoryAccentHex(id)}" data-job-folder-color-input="${esc(id)}" aria-label="Choose color for ${esc(folder.name || (isRoot ? "All Jobs" : "Category"))}">
         </span>
-        <button type="button" class="category-color-reset${categoryHasCustomColor(id) ? "" : " is-hidden"}" data-job-folder-color-reset="${esc(id)}" title="Use automatic color">Auto</button>
+        <button type="button" class="category-color-reset${categoryHasCustomColor(id) ? "" : " is-hidden"}" data-job-folder-color-reset="${esc(id)}" title="Use automatic color">Auto Color</button>
       </div>
     <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
       <div class="cost-receipt-backdrop" data-order-repair-close></div>
@@ -4480,7 +4480,7 @@ function viewJobs(){
   return `
   <div class="container job-page-container">
     <div class="dashboard-toolbar">
-      <span class="dashboard-edit-hint" id="jobEditHint" hidden>Drag the job categories window to reposition or resize it.</span>
+      <span class="dashboard-edit-hint" id="jobEditHint" hidden>Use Edit Categories to manage job categories.</span>
     </div>
 
     ${avgBanner}
@@ -4490,8 +4490,10 @@ function viewJobs(){
       <button type="button" data-wjcuts-open-setup>Open WJ Cuts setup</button>
     </div>
 
-    <div class="dashboard-layout job-layout" id="jobLayout">
-      <div class="dashboard-window" data-job-window="categories">
+    <div class="job-category-modal" id="jobCategoryManager" role="dialog" aria-modal="true" aria-labelledby="jobCategoryManagerTitle" ${window.jobCategoryManagerOpen ? "" : "hidden"}>
+      <div class="job-category-backdrop" data-job-category-close></div>
+      <div class="job-category-modal-card">
+        <div class="job-category-modal-heading"><h3 id="jobCategoryManagerTitle">Edit Categories</h3><button type="button" data-job-category-close aria-label="Close categories">×</button></div>
         <div class="block job-category-panel" data-job-category-panel>
           <div class="job-category-header">
             <h3>Job Categories</h3>
@@ -4505,12 +4507,38 @@ function viewJobs(){
       </div>
     </div>
 
+    <dialog id="jobCategoryEditor" class="job-category-editor" aria-labelledby="jobCategoryEditorTitle" aria-describedby="jobCategoryEditImpact">
+      <form id="jobCategoryEditForm" class="job-category-edit-form">
+        <h3 id="jobCategoryEditorTitle">Edit Category</h3>
+        <input type="hidden" name="categoryId">
+        <section class="job-category-current" aria-labelledby="jobCategoryCurrentTitle">
+          <h4 id="jobCategoryCurrentTitle">Current Category</h4>
+          <dl class="job-category-edit-grid">
+            <div><dt>Project Number</dt><dd data-job-category-current-project></dd></div>
+            <div><dt>Category Name</dt><dd data-job-category-current-name></dd></div>
+          </dl>
+        </section>
+        <section aria-labelledby="jobCategoryNewTitle">
+          <h4 id="jobCategoryNewTitle">New Category</h4>
+          <div class="job-category-edit-grid">
+            <label>Project Number<input name="projectNumber" type="text" autocomplete="off" required></label>
+            <label>Category Name<input name="categoryName" type="text" maxlength="120" required></label>
+          </div>
+        </section>
+        <p id="jobCategoryEditImpact" class="job-category-edit-impact" aria-live="polite"></p>
+        <p class="small muted">This updates the existing category and linked jobs. Job descriptions, cut numbers, dates, files, costs and history are retained.</p>
+        <p class="job-category-edit-status" role="status" aria-live="polite"></p>
+        <div class="job-category-edit-actions"><button type="button" data-job-category-edit-cancel>Cancel</button><button type="submit" data-job-category-edit-save>Save Changes</button></div>
+      </form>
+    </dialog>
+
     <div class="block job-main-block">
       <p data-cutting-job-verification-notice role="alert" class="small" style="padding:10px;border:1px solid #b45309;background:#fff7ed;color:#7c2d12" ${window.__cuttingJobDisplayUnconfirmed ? "" : "hidden"}>Unverified cutting-job display: values below may be previously loaded data or unsaved edits. The latest save has not been verified; do not treat the information below as confirmed.</p>
       <div class="job-page-topbar">
         <div class="job-page-toolbar">
           <h3>Cutting Jobs</h3>
           <div class="job-toolbar-actions">
+            <button type="button" class="job-history-button" data-job-category-open>Edit Categories</button>
             <button
               type="button"
               class="job-add-button"
