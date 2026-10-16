@@ -1,5 +1,7 @@
 # PHv2-02B — purchase order refinements
 
+PHv2-02C adds guarded whole-order editing, live suggestions and the original Settings handoff on the same PR #506. See [phv2-02c.md](phv2-02c.md) for the current behavior and validation. This report records the 02B implementation.
+
 ## Branch and compatibility
 
 Checked GitHub PR #506: open, draft, unmerged, head `d2badbe6fab60c9203247c90ac484ff22d9071d2`. Ran `git fetch origin`; the local and remote order branch matched. Continued `codex/phv2-02a-purchase-orders` and updated the existing PR, without creating or merging another PR. Its stacked base remains `codex/phv2-01c-purchase-history` (#503).

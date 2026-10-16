@@ -94,9 +94,68 @@
     week.rows.push(...clone(order.rows));
     return {state, alreadySaved:false};
   }
+  function openSaved(source, orderId){
+    const weeks = source?.receiptTrackerWeeks;
+    const fail = ()=>{ throw Error("This saved order has missing or inconsistent identity, dates or charge metadata. Review it before editing."); };
+    if (!validId(orderId) || !Array.isArray(weeks) || weeks.some(week=> !week || !Array.isArray(week.rows))) return fail();
+    const containers = weeks.filter(week=> week.rows.some(row=> row?.orderId === orderId));
+    if (containers.length !== 1) return fail();
+    const week = containers[0], rows = week.rows.filter(row=> row?.orderId === orderId), first = rows[0];
+    if (!rows.length || !first.orderDateISO || weeks.filter(item=> item.key === week.key).length !== 1) return fail();
+    const all = weeks.flatMap(item=> item.rows), seen = new Set(), po = String(first.poNumber ?? "").trim();
+    let shipping = 0, tax = 0;
+    for (const row of rows){
+      if (!validId(row.lineId) || seen.has(row.lineId) || all.filter(item=> item?.lineId === row.lineId).length !== 1
+        || row.date !== first.orderDateISO || row.orderDateISO !== first.orderDateISO || row.orderShippingCents !== first.orderShippingCents
+        || row.shippingAllocationVersion !== 1 || row.orderTaxCents !== first.orderTaxCents || row.taxAllocationVersion !== first.taxAllocationVersion
+        || String(row.poNumber ?? "").trim() !== po) return fail();
+      seen.add(row.lineId); shipping += cents(row.shipping); tax += cents(row.tax);
+    }
+    if (!Number.isSafeInteger(shipping) || !Number.isSafeInteger(tax) || shipping !== first.orderShippingCents
+      || (first.orderTaxCents !== undefined && (tax !== first.orderTaxCents || first.taxAllocationVersion !== 1))
+      || (first.orderTaxCents === undefined && first.taxAllocationVersion !== undefined)) return fail();
+    const draft = {orderId, date:first.orderDateISO, poNumber:po, shipping:String(dollars(shipping)), tax:String(dollars(tax)), items:rows.map(row=>({
+      lineId:row.lineId, purchased:row.purchased, partNumber:row.partNumber || "", cost:String(row.cost), qty:String(row.qty),
+      inventoryItemId:row.inventoryItemId || "", ...(row.taskId ? {taskId:row.taskId} : {})
+    }))};
+    if (plan(draft).week.key !== week.key) return fail();
+    return {draft, expected:{weekKey:week.key, rows:clone(rows)}};
+  }
+  function replace(source, order, expected, confirmedRemovedLineIds = []){
+    const current = openSaved(source, order.orderId);
+    if (key(current.expected) !== key(expected)) throw Error("This order changed in another session. Your draft is retained; reload and compare before editing again.");
+    const originals = new Map(expected.rows.map(row=> [row.lineId, row])), ids = new Set(order.rows.map(row=> row.lineId));
+    const removed = expected.rows.filter(row=> !ids.has(row.lineId)).map(row=> row.lineId).sort();
+    if (!Array.isArray(confirmedRemovedLineIds) || key(removed) !== key([...new Set(confirmedRemovedLineIds)].sort())) throw Error("Confirm removal of the saved order items before saving changes.");
+    const all = source.receiptTrackerWeeks.flatMap(week=> week.rows);
+    if (order.rows.some(row=> !originals.has(row.lineId) && all.some(item=> item?.lineId === row.lineId))) throw Error("A new line ID already exists. Review before saving.");
+    const updated = order.rows.map(row=>{
+      const prior = {...originals.get(row.lineId)};
+      // Explicitly cleared links/PO must not leak back from the original metadata.
+      for (const field of ["poNumber", "inventoryItemId", "taskId"]) delete prior[field];
+      return {...prior, ...clone(row)};
+    });
+    const state = clone(source), origin = state.receiptTrackerWeeks.find(week=> week.key === expected.weekKey);
+    if (order.week.key === expected.weekKey){
+      const byId = new Map(updated.map(row=> [row.lineId, row])), last = origin.rows.findLastIndex(row=> row?.orderId === order.orderId);
+      origin.rows = origin.rows.flatMap((row,index)=>{
+        const next = row?.orderId === order.orderId ? (byId.has(row.lineId) ? [byId.get(row.lineId)] : []) : [row];
+        if (index === last) next.push(...updated.filter(item=> !originals.has(item.lineId)));
+        return next;
+      });
+    } else {
+      origin.rows = origin.rows.filter(row=> row?.orderId !== order.orderId);
+      const destinations = state.receiptTrackerWeeks.filter(week=> week.key === order.week.key);
+      if (destinations.length > 1) throw Error("The destination week is ambiguous. Review before saving.");
+      let destination = destinations[0];
+      if (!destination){ destination = clone(order.week); state.receiptTrackerWeeks.push(destination); }
+      destination.rows.push(...updated);
+    }
+    return {state, alreadySaved:key(state) === key(source)};
+  }
   function createApi(env){
     let busy = false, uncertain = false;
-    return Object.freeze({isBusy:()=> busy, isUncertain:()=> uncertain, async save(draft){
+    return Object.freeze({isBusy:()=> busy, isUncertain:()=> uncertain, async save(draft, edit = null){
       if (busy || uncertain) return {saved:false, blocked:true, indeterminate:uncertain, error:uncertain ? "This save needs server verification. Do not retry the order." : "An order is already saving."};
       busy = true;
       let reserved = false, attempted = false, committed = false, token;
@@ -108,18 +167,28 @@
         return result;
       };
       try {
-        const order = plan(clone(draft));
+        const order = plan(clone(draft)), editing = edit ? clone(edit) : null;
         result.orderId = order.orderId; result.lineIds = order.rows.map(row=> row.lineId);
         if (!env.canWrite()) throw Error("Purchase orders are unavailable while writes are blocked. Your draft remains available.");
-        await env.settle();
+        try { await env.settle(); }
+        catch (error){
+          // Pending unrelated saves remain blocking. A read-only check can still
+          // explain a stale order conflict without flushing or bypassing them.
+          if (editing){
+            const latest = await env.read(env.capture());
+            if (key(openSaved(latest, order.orderId).expected) !== key(editing.expected)) throw Error("This order changed in another session. Your draft is retained; reload and compare before editing again.");
+          }
+          throw error;
+        }
         token = env.capture();
         const source = await env.read(token);
+        if (editing && key(openSaved(source, order.orderId).expected) !== key(editing.expected)) throw Error("This order changed in another session. Your draft is retained; reload and compare before editing again.");
         if (!Number.isSafeInteger(source?.syncMeta?.rev) || source.syncMeta.rev < 0 || !env.matches(source, token)) throw Error("The authoritative state or local edits changed. Save/reload and review before saving this order.");
         env.validate(source, order);
-        const next = append(source, order);
+        const next = editing ? replace(source, order, editing.expected, editing.confirmedRemovedLineIds) : append(source, order);
         if (next.alreadySaved) return {...result, saved:true, verificationCompleted:true, alreadySaved:true, weekKey:order.week.key};
         env.reserve(token); reserved = true;
-        env.backup(source);
+        env.backup(source, editing);
         const preparedKey = key(withoutRevision(next.state));
         attempted = true;
         const written = await env.write(next.state, source, token);
@@ -143,5 +212,5 @@
       }
     }});
   }
-  return Object.freeze({cents, dollars, key, businessKey, newItem, newDraft, plan, append, createApi});
+  return Object.freeze({cents, dollars, key, businessKey, newItem, newDraft, plan, append, openSaved, replace, createApi});
 });

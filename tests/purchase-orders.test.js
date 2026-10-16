@@ -82,7 +82,7 @@ function base(){return {schema:72,syncMeta:{rev:7},saveMeta:{retain:"exact"},syn
   cuttingJobs:[],completedCuttingJobs:[],totalHistory:[{dateISO:"2026-10-01",hours:100}],dailyCutHours:[{dateISO:"2026-10-01",hours:3}],pumpEff:{entries:[]},
   receiptTrackerWeeks:[{key:"2025-W01",year:2025,week:1,startISO:"2024-12-30",endISO:"2025-01-05",rows:[{date:"2025-01-03",purchased:"Legacy",cost:"3.125",qty:"1.5",shipping:"2.125",import_event_id:"legacy-source",custom:{retain:true}}]}],customEvidence:{retain:true}};}
 function harness(flags={}){
-  let server=clone(base()),live=clone(server),version=0,commits=0,reads=0,writes=0,adoptions=0,backups=0;
+  let server=clone(flags.initialState || base()),live=clone(server),version=0,commits=0,reads=0,writes=0,adoptions=0,backups=0;
   let context,releaseRead;const callbacks={};
   const db={async runTransaction(callback){for(let retry=0;retry<3;retry++){
     const priorVersion=version;let pending;
@@ -104,7 +104,9 @@ function harness(flags={}){
     if(flags.unknownAfter)throw Error("acknowledgement lost");
     return result;
   }throw Object.assign(Error("contention"),{code:"aborted"});}};
-  const window={OMAXPurchaseOrders:orders,OMAXAtomicPersistence:atomic,CuttingFileContentFirewall:firewall,__lastLoadedCloudState:clone(server),__loadedCloudRevisionForSaveGuard:7,
+  const localCopies=new Map();
+  const window={OMAXPurchaseOrders:orders,OMAXAtomicPersistence:atomic,CuttingFileContentFirewall:firewall,__lastLoadedCloudState:clone(server),__loadedCloudRevisionForSaveGuard:server.syncMeta.rev,
+    localStorage:{setItem:(key,value)=>{if(flags.backupFailure)throw Error("recovery copy unavailable");localCopies.set(key,value);},getItem:key=>localCopies.get(key)},
     addEventListener:(event,callback)=>{callbacks[event]=callback;}};
   context=vm.createContext({window,FB:{ready:true,user:{uid:"fixture"},db,docRef:{path:"workspaces/fixture/app/state"},app:{options:{projectId:"fixture"}}},cloudSaveQueue:Promise.resolve(),hasPendingLocalChanges:!!flags.pending,lastLocalMutationAt:0,
     canWriteCloud:()=>!flags.readonly&&!window.__recoveryInspectMode&&!window.__autosaveDisabled,isVercelPreviewRuntime:()=>!!flags.preview,
@@ -179,4 +181,97 @@ test("Central Data Table and chart/average source include mixed lines exactly on
   vm.runInContext(formatter+renderers.slice(a,b)+";this.table=purchaseDataTable;this.series=totalSpendSeries",context);
   assert.equal(context.table.length,3);assert.equal(context.series.length,1);assert.equal(context.series[0].value,-128);assert.equal(context.table[1].shippingLabel,"$6.00");
   assert.equal(context.table[0].poNumber,"");assert.equal(context.table[1].poNumber,"0012-AB");assert.equal(context.table[2].poNumber,"0012-AB");
+});
+
+function savedOrderState(){
+  const value={...draft([item("edit-a",20),item("edit-b",80)],10,"edit-order"),tax:"5",poNumber:"0007-OLD"};
+  const source=orders.append(base(),orders.plan(value)).state;
+  const rows=source.receiptTrackerWeeks[1].rows;rows[0].custom={retain:"line evidence"};rows[0].id="persistent-row-a";
+  source.receiptTrackerWeeks[1].customWeek={retain:true};
+  source.receiptTrackerWeeks[1].rows.splice(1,0,{date:"2026-10-14",purchased:"Unrelated",qty:"1.5",cost:"3.125",shipping:"2.125",custom:{retain:true}});
+  return source;
+}
+test("opening a complete saved order is read-only and populates all fields with stable IDs",()=>{
+  const source=savedOrderState(),before=JSON.stringify(source),opened=orders.openSaved(source,"edit-order");
+  assert.equal(JSON.stringify(source),before);assert.equal(opened.draft.poNumber,"0007-OLD");assert.equal(opened.draft.shipping,"10");assert.equal(opened.draft.tax,"5");
+  assert.deepEqual(opened.draft.items.map(row=>row.lineId),["edit-a","edit-b"]);assert.equal(opened.draft.items[0].qty,"1");assert.equal(opened.expected.rows[0].custom.retain,"line evidence");
+});
+for(const [name,change] of [
+  ["price",d=>d.items[0].cost="50"],["quantity",d=>d.items[0].qty="3"],["charges",d=>{d.shipping="12.03";d.tax="9.07";}],["PO and links",d=>{d.poNumber="0001250-NEW";d.items[0].inventoryItemId="inv";d.items[0].taskId="task";}]
+])test(`whole-order ${name} changes reallocate both charges and preserve unrelated metadata`,()=>{
+  const source=savedOrderState(),before=JSON.stringify(source),opened=orders.openSaved(source,"edit-order");change(opened.draft);
+  const plan=orders.plan(opened.draft),next=orders.replace(source,plan,opened.expected),rows=next.state.receiptTrackerWeeks[1].rows.filter(row=>row.orderId);
+  assert.equal(JSON.stringify(source),before);assert.deepEqual(rows.map(row=>row.shipping),plan.rows.map(row=>row.shipping));assert.deepEqual(rows.map(row=>row.tax),plan.rows.map(row=>row.tax));
+  assert.equal(rows.reduce((sum,row)=>sum+orders.cents(row.shipping),0),plan.shippingCents);assert.equal(rows.reduce((sum,row)=>sum+orders.cents(row.tax),0),plan.taxCents);
+  assert.equal(rows[0].id,"persistent-row-a");assert.deepEqual(rows[0].custom,{retain:"line evidence"});assert.deepEqual(next.state.receiptTrackerWeeks[0],source.receiptTrackerWeeks[0]);
+  assert.deepEqual(next.state.receiptTrackerWeeks[1].customWeek,source.receiptTrackerWeeks[1].customWeek);assert.deepEqual(next.state.receiptTrackerWeeks[1].rows[1],source.receiptTrackerWeeks[1].rows[1]);
+  assert.equal(rows[0].orderId,"edit-order");assert.equal(rows[0].lineId,"edit-a");
+});
+test("add/remove and PO/link clearing replace only the selected order and require exact removal confirmation",()=>{
+  const source=savedOrderState(),opened=orders.openSaved(source,"edit-order");
+  source.receiptTrackerWeeks[1].rows[0].inventoryItemId="inv";source.receiptTrackerWeeks[1].rows[0].taskId="task";
+  const fresh=orders.openSaved(source,"edit-order");fresh.draft.poNumber="";fresh.draft.items[0].inventoryItemId="";delete fresh.draft.items[0].taskId;
+  fresh.draft.items.splice(1,1);fresh.draft.items.push(item("brand-new",5));
+  const plan=orders.plan(fresh.draft);assert.throws(()=>orders.replace(source,plan,fresh.expected),/Confirm removal/);
+  assert.throws(()=>orders.replace(source,plan,fresh.expected,["unrelated"]),/Confirm removal/);
+  const next=orders.replace(source,plan,fresh.expected,["edit-b"]),rows=next.state.receiptTrackerWeeks[1].rows.filter(row=>row.orderId);
+  assert.deepEqual(rows.map(row=>row.lineId),["edit-a","brand-new"]);for(const field of ["poNumber","taskId","inventoryItemId"])assert.equal(Object.hasOwn(rows[0],field),false);
+  assert.equal(source.receiptTrackerWeeks[1].rows.filter(row=>row.orderId).length,opened.expected.rows.length);
+});
+test("week/year moves retain source/destination week metadata and every unrelated record",()=>{
+  for(const date of ["2026-10-22","2027-01-04"]){
+    const source=savedOrderState(),opened=orders.openSaved(source,"edit-order");opened.draft.date=date;
+    const target=orders.plan(opened.draft).week;source.receiptTrackerWeeks.push({...target,rows:[{date,purchased:"Destination legacy",custom:123}],other:"keep"});
+    const next=orders.replace(source,orders.plan(opened.draft),opened.expected).state;
+    assert.deepEqual(next.receiptTrackerWeeks[0],source.receiptTrackerWeeks[0]);assert.deepEqual(next.receiptTrackerWeeks[1],{...source.receiptTrackerWeeks[1],rows:[source.receiptTrackerWeeks[1].rows[1]]});
+    assert.equal(next.receiptTrackerWeeks[2].other,"keep");assert.deepEqual(next.receiptTrackerWeeks[2].rows[0],source.receiptTrackerWeeks[2].rows[0]);
+    assert.deepEqual(next.receiptTrackerWeeks[2].rows.slice(1).map(row=>row.lineId),["edit-a","edit-b"]);assert.ok(next.receiptTrackerWeeks[2].rows.slice(1).every(row=>row.date===date));
+  }
+});
+for(const [name,change] of [
+  ["missing ID",s=>delete s.receiptTrackerWeeks[1].rows[0].lineId],["duplicate ID",s=>s.receiptTrackerWeeks[1].rows[2].lineId="edit-a"],
+  ["split order",s=>s.receiptTrackerWeeks[0].rows.push(s.receiptTrackerWeeks[1].rows.pop())],["wrong week",s=>s.receiptTrackerWeeks[1].key="2026-W43"],
+  ["shipping",s=>s.receiptTrackerWeeks[1].rows[0].orderShippingCents=999],["tax",s=>s.receiptTrackerWeeks[1].rows[0].orderTaxCents=999],
+  ["PO",s=>s.receiptTrackerWeeks[1].rows[0].poNumber="different"],["date",s=>s.receiptTrackerWeeks[1].rows[0].date="2026-10-14"],
+  ["allocation version",s=>s.receiptTrackerWeeks[1].rows[0].taxAllocationVersion=99]
+])test(`ambiguous saved order blocks editing: ${name}`,()=>{const source=savedOrderState();change(source);const before=JSON.stringify(source);assert.throws(()=>orders.openSaved(source,"edit-order"));assert.equal(JSON.stringify(source),before);});
+test("old 02A tax is summed on open without mutation, and only an explicit edit save reallocates it",()=>{
+  const source=savedOrderState(),rows=source.receiptTrackerWeeks[1].rows.filter(row=>row.orderId);rows[0].tax=4;rows[1].tax=1;
+  rows.forEach(row=>{delete row.orderTaxCents;delete row.taxAllocationVersion;});const before=JSON.stringify(source),opened=orders.openSaved(source,"edit-order");
+  assert.equal(opened.draft.tax,"5");assert.equal(JSON.stringify(source),before);
+  const next=orders.replace(source,orders.plan(opened.draft),opened.expected).state;
+  assert.deepEqual(next.receiptTrackerWeeks[1].rows.filter(row=>row.orderId).map(row=>row.tax),[1,4]);assert.equal(JSON.stringify(source),before);
+});
+test("stale snapshot, missing whole order, duplicate destination and foreign line IDs cannot overwrite history",()=>{
+  const source=savedOrderState(),opened=orders.openSaved(source,"edit-order"),plan=orders.plan(opened.draft);
+  source.receiptTrackerWeeks[1].rows[0].custom.retain="concurrent edit";assert.throws(()=>orders.replace(source,plan,opened.expected),/another session/);
+  const fresh=savedOrderState(),edit=orders.openSaved(fresh,"edit-order");edit.draft.items.push(item("foreign",1));fresh.receiptTrackerWeeks[0].rows[0].lineId="foreign";
+  assert.throws(()=>orders.replace(fresh,orders.plan(edit.draft),edit.expected),/line ID already exists/);
+  assert.throws(()=>orders.openSaved(fresh,"legacy-id"),/missing or inconsistent/);
+  const destination=orders.plan({...edit.draft,date:"2027-01-04"}).week;fresh.receiptTrackerWeeks.push({...destination,rows:[]},{...destination,rows:[]});
+  edit.draft.items.pop();edit.draft.date="2027-01-04";assert.throws(()=>orders.replace(fresh,orders.plan(edit.draft),edit.expected),/destination week is ambiguous/);
+});
+test("real edit adapter atomically replaces/reloads, preserves identity and creates local recovery evidence",async()=>{
+  const initialState=savedOrderState(),opened=orders.openSaved(initialState,"edit-order"),h=harness({initialState});opened.draft.items[0].cost="50";opened.draft.poNumber="0001250";
+  const result=await h.api.save(opened.draft,{expected:opened.expected,confirmedRemovedLineIds:[]});assert.equal(result.saved,true,result.error);assert.equal(h.commits,1);assert.deepEqual(h.live,h.server);
+  const rows=h.server.receiptTrackerWeeks[1].rows.filter(row=>row.orderId);assert.deepEqual(rows.map(row=>row.lineId),["edit-a","edit-b"]);assert.deepEqual(rows.map(row=>row.shipping),[3.85,6.15]);assert.deepEqual(rows.map(row=>row.poNumber),["0001250","0001250"]);
+  assert.deepEqual(JSON.parse(h.window.localStorage.getItem("omax_purchase_order_edit_backup_v1")).expected,opened.expected);
+  assert.equal((await h.api.save(opened.draft,{expected:opened.expected,confirmedRemovedLineIds:[]})).saved,false);assert.equal(h.commits,1);
+});
+for(const [name,flags] of [["permission",{permission:true}],["guard",{preflight:true}],["pending",{pending:true}],["backup",{backupFailure:true}],["concurrent CAS",{onRead:(count,{server})=>{if(count===2)server.syncMeta.rev++;}}]])test(`failed edit ${name} retains original order and detached draft`,async()=>{
+  const initialState=savedOrderState(),opened=orders.openSaved(initialState,"edit-order"),h=harness({...flags,initialState}),before=h.live;opened.draft.items[0].qty="2";const draftBefore=JSON.stringify(opened.draft);
+  const result=await h.api.save(opened.draft,{expected:opened.expected,confirmedRemovedLineIds:[]});assert.equal(result.saved,false);assert.equal(h.commits,0);assert.deepEqual(h.live,before);assert.equal(JSON.stringify(opened.draft),draftBefore);
+});
+test("stale edit is rejected against the expected original even after the local baseline adopts the newer server order",async()=>{
+  const initialState=savedOrderState(),opened=orders.openSaved(initialState,"edit-order");initialState.receiptTrackerWeeks[1].rows[0].purchased="Concurrent edit";
+  const h=harness({initialState}),result=await h.api.save(opened.draft,{expected:opened.expected,confirmedRemovedLineIds:[]});assert.equal(result.saved,false);assert.match(result.error,/another session/);assert.equal(h.commits,0);
+});
+test("pending saves remain blocking while a read-only probe explains a stale order conflict",async()=>{
+  const initialState=savedOrderState(),opened=orders.openSaved(initialState,"edit-order");initialState.receiptTrackerWeeks[1].rows[0].purchased="Other session";
+  const h=harness({initialState,pending:true}),result=await h.api.save(opened.draft,{expected:opened.expected,confirmedRemovedLineIds:[]});
+  assert.equal(result.saved,false);assert.match(result.error,/another session/);assert.equal(h.reads,1);assert.equal(h.writes,0);assert.equal(h.context.hasPendingLocalChanges,true);
+});
+for(const [name,flags] of [["unknown completion",{unknownAfter:true}],["wrong readback",{wrongValue:true}]])test(`edit ${name} enters recovery without blind retry or local rollback`,async()=>{
+  const initialState=savedOrderState(),opened=orders.openSaved(initialState,"edit-order"),h=harness({...flags,initialState});opened.draft.items[0].cost="50";
+  const edit={expected:opened.expected,confirmedRemovedLineIds:[]},result=await h.api.save(opened.draft,edit);assert.equal(result.indeterminate,true);assert.equal(h.api.isUncertain(),true);assert.equal(h.adoptions,0);assert.deepEqual(h.live,initialState);const writes=h.writes;await h.api.save(opened.draft,edit);assert.equal(h.writes,writes);
 });

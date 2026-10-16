@@ -13312,7 +13312,17 @@ function getPurchaseOrderApi(){
       // No order draft is ever appended to live state or available to generic autosaves.
       hasPendingLocalChanges = true;
     },
-    backup:source=> persistLocalStateBackup(source),
+    backup:(source, edit)=>{
+      persistLocalStateBackup(source);
+      if (edit){
+        // The existing Trash has no purchase-order restore type. Keep one exact
+        // local before-image, independently of the rolling workspace backup.
+        const evidence = {atISO:new Date().toISOString(), path:FB.docRef.path, projectId:String(FB.app?.options?.projectId || ""), expected:edit.expected, confirmedRemovedLineIds:edit.confirmedRemovedLineIds};
+        if (!window.localStorage) throw Error("A local order recovery copy is unavailable. Your edit draft is retained.");
+        window.localStorage.setItem("omax_purchase_order_edit_backup_v1", JSON.stringify(evidence));
+        window.__lastPurchaseOrderEditBackup = evidence;
+      }
+    },
     write:(pending, source, token)=>{
       const sourceKey = orders.key(source), preparedKey = orders.key(pending);
       const queued = cloudSaveQueue.then(()=>{
@@ -14674,6 +14684,14 @@ function renderCosts(){
         return {task, inv, partNumber:String(task?.pn || "").trim() || String(inv?.pn || "").trim(),
           price:Number.isFinite(Number(task?.price)) ? Number(task.price) : Number.isFinite(Number(inv?.price)) ? Number(inv.price) : null};
       }
+      const openPurchaseInventoryEditor = (purchased, inventoryItemId)=>{
+        const items = Array.isArray(window.inventory) ? window.inventory : [];
+        const inv = items.find(item=> inventoryItemId && String(item.id) === String(inventoryItemId))
+          || items.find(item=> String(item?.name || "").trim().toLowerCase() === String(purchased || "").trim().toLowerCase());
+        const taskId = inv?.linkedTaskId != null ? String(inv.linkedTaskId) : "";
+        if (taskId && typeof openSettingsAndReveal === "function") openSettingsAndReveal(taskId);
+        else if (typeof window.showScreen === "function") window.showScreen("settings");
+      };
       const saveWeekRowsFromDom = ({ persist = true, includeDrafts = false, showValidation = false } = {})=>{
         if (!(weekRowsBody instanceof HTMLElement)) return getWeekEntry(activeWeekKey);
         const groups = includeDrafts ? new Map(receiptDraftRows) : new Map();
@@ -14870,6 +14888,11 @@ const appendEmptyRow = (focusFirst = false)=>{
           section.className = "purchase-order-group";
           if (orderId) section.dataset.receiptOrderId = orderId;
           section.innerHTML = `<h4>${escapeHtml(title)}</h4>${summary ? `<p>${escapeHtml(summary)}</p>` : ""}<div class="cost-weekly-table-wrap"><table class="cost-table cost-receipt-week-table"><thead><tr><th>Date</th><th>Purchased Item</th><th>PO Num.</th><th>Part #</th><th class="purchase-number">Qty</th><th class="purchase-number">Unit Cost</th><th class="purchase-number">Item Subtotal</th><th class="purchase-number">Shipping</th><th class="purchase-number">Tax</th><th class="purchase-number">Total Spend</th><th>Inventory link</th><th>Actions</th></tr></thead><tbody${orderId ? "" : " data-receipt-legacy-rows"}></tbody></table></div>`;
+          if (orderId){
+            const edit = document.createElement("button");
+            edit.type = "button"; edit.className = "btn secondary"; edit.dataset.receiptEditOrder = orderId; edit.textContent = "Edit Order";
+            section.querySelector("h4").appendChild(edit);
+          }
           section.querySelector("tbody").replaceChildren(...elements);
           sections.push(section);
         };
@@ -15121,10 +15144,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           if (target.getAttribute("data-col") === "goTask"){
             const row = target.closest("tr[data-receipt-row]");
             const purchased = String(row?.querySelector('[data-col="purchased"]')?.value || "").trim().toLowerCase();
-            const inv = (Array.isArray(inventory) ? inventory : []).find(item => String(item?.name || "").trim().toLowerCase() === purchased);
-            const taskId = inv && inv.linkedTaskId != null ? String(inv.linkedTaskId) : "";
-            if (taskId && typeof openSettingsAndReveal === "function"){ openSettingsAndReveal(taskId); }
-            else if (typeof window.showScreen === "function"){ window.showScreen("settings"); }
+            openPurchaseInventoryEditor(purchased);
           }
         });
       };
@@ -15473,7 +15493,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         const addButton = orderEditor.querySelector("[data-purchase-order-add]");
         const saveButton = orderEditor.querySelector("[data-purchase-order-save]");
         const cancelButton = orderEditor.querySelector("[data-purchase-order-cancel]");
-        let draft = null, saving = false;
+        let session = window.__purchaseOrderDraftSession || null, draft = session?.draft || null, saving = false;
         const disabledBeforeOrder = new Map();
         const lockHistory = locked=>{
           if (locked){
@@ -15490,8 +15510,6 @@ const appendEmptyRow = (focusFirst = false)=>{
           itemsBody.querySelectorAll("tr[data-order-line]").forEach(tr=>{
             const item = draft.items.find(item=> item.lineId === tr.dataset.orderLine);
             for (const field of ["purchased", "partNumber", "qty", "cost", "inventoryItemId"]) item[field] = tr.querySelector(`[data-order-field="${field}"]`).value;
-            const task = findTaskByNameExact(item.purchased);
-            if (task) item.taskId = String(task.id); else delete item.taskId;
           });
         };
         const updatePreview = ()=>{
@@ -15515,17 +15533,29 @@ const appendEmptyRow = (focusFirst = false)=>{
         };
         const renderItems = ()=>{
           itemsBody.innerHTML = draft.items.map(item=> `<tr data-order-line="${escapeHtml(item.lineId)}">
-            <td><input data-order-field="purchased" list="${purchasedDatalistId}" value="${escapeHtml(item.purchased)}" aria-label="Item description" required></td>
+            <td class="purchase-order-name"><input data-order-field="purchased" value="${escapeHtml(item.purchased)}" aria-label="Item description" role="combobox" aria-autocomplete="list" aria-controls="${escapeHtml(item.lineId)}-suggestions" aria-expanded="false" autocomplete="off" required><div id="${escapeHtml(item.lineId)}-suggestions" data-order-suggestions role="listbox" aria-label="Purchase items" hidden></div></td>
             <td><input data-order-field="partNumber" value="${escapeHtml(item.partNumber)}" aria-label="Part number"></td>
             <td><input type="number" min="1" step="1" data-order-field="qty" value="${escapeHtml(item.qty)}" aria-label="Quantity" required></td>
             <td><input type="number" min="0" step="0.01" data-order-field="cost" value="${escapeHtml(item.cost)}" aria-label="Unit cost" required></td>
-            <td><select data-order-field="inventoryItemId" aria-label="Optional inventory link"><option value="">No link</option>${(window.inventory || []).map(inv=> `<option value="${escapeHtml(String(inv.id))}"${item.inventoryItemId === String(inv.id) ? " selected" : ""}>${escapeHtml(inv.name || inv.pn || String(inv.id))}</option>`).join("")}</select></td>
+            <td><select data-order-field="inventoryItemId" aria-label="Optional inventory link"><option value="">No link</option>${item.inventoryItemId && !(window.inventory || []).some(inv=> String(inv.id) === item.inventoryItemId) ? `<option value="${escapeHtml(item.inventoryItemId)}" selected>Missing link — review</option>` : ""}${(window.inventory || []).map(inv=> `<option value="${escapeHtml(String(inv.id))}"${item.inventoryItemId === String(inv.id) ? " selected" : ""}>${escapeHtml(inv.name || inv.pn || String(inv.id))}</option>`).join("")}</select><button type="button" class="btn secondary" data-order-edit-inventory="${escapeHtml(item.lineId)}">Edit Inventory</button></td>
             <td data-order-allocation>—</td><td data-order-tax-allocation>—</td><td data-order-total>—</td>
             <td><button type="button" class="btn danger" data-order-remove="${escapeHtml(item.lineId)}">Remove Item</button></td>
           </tr>`).join("");
           updatePreview();
         };
-        newOrderBtn.addEventListener("click", async()=>{
+        const showDraft = ()=>{
+          dateInput.value = draft.date; shippingInput.value = draft.shipping; taxInput.value = draft.tax; poInput.value = draft.poNumber || ""; status.textContent = "";
+          orderEditor.querySelector("[data-purchase-order-title]").textContent = session.edit ? "Edit Purchase Order" : "New Purchase Order";
+          orderEditor.setAttribute("aria-label", session.edit ? "Edit purchase order" : "New purchase order");
+          saveButton.textContent = session.edit ? "Save Changes" : "Save Order";
+          orderEditor.hidden = false; lockHistory(true); rebuildPurchaseTemplates(); renderItems(); dateInput.focus();
+          window.costPurchaseHistoryModalOpen = true;
+          if (getPurchaseOrderApi().isUncertain()){
+            orderEditor.querySelectorAll("input, select, button").forEach(element=>{ element.disabled = true; }); cancelButton.disabled = false;
+            status.textContent = "The last save needs server verification. Review Recovery Mode before retrying.";
+          }
+        };
+        const startOrder = async orderId=>{
           if (saving || getPurchaseOrderApi().isBusy()) return;
           if (getPurchaseOrderApi().isUncertain()){
             if (typeof toast === "function") toast("The previous order needs server verification before another order can be entered.");
@@ -15535,22 +15565,51 @@ const appendEmptyRow = (focusFirst = false)=>{
           try {
             const today = new Date();
             const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-            draft = orders.newDraft(date, window.crypto);
-            dateInput.value = date; shippingInput.value = "0"; taxInput.value = "0"; poInput.value = ""; status.textContent = "";
-            orderEditor.hidden = false; lockHistory(true); renderItems(); dateInput.focus();
-          } catch (error){ status.textContent = error.message; orderEditor.hidden = false; }
+            const saved = orderId ? orders.openSaved({receiptTrackerWeeks:window.receiptTrackerWeeks}, orderId) : null;
+            draft = saved ? saved.draft : orders.newDraft(date, window.crypto);
+            session = {draft, edit:saved ? {expected:saved.expected, confirmedRemovedLineIds:[]} : null};
+            window.__purchaseOrderDraftSession = session;
+            showDraft();
+          } catch (error){ if (typeof toast === "function") toast(error.message); }
+        };
+        newOrderBtn.addEventListener("click", ()=> startOrder());
+        weekRowsBody.addEventListener("click", event=>{
+          const id = event.target.closest?.("[data-receipt-edit-order]")?.dataset.receiptEditOrder;
+          if (id) void startOrder(id);
         });
+        const applyOrderSelection = input=>{
+          const tr = input.closest("tr[data-order-line]"), selected = purchaseSelection(input.value), item = draft.items.find(item=> item.lineId === tr.dataset.orderLine);
+          tr.querySelector('[data-order-field="inventoryItemId"]').value = selected.inv ? String(selected.inv.id) : "";
+          if (selected.task) item.taskId = String(selected.task.id); else delete item.taskId;
+          if (selected.task || selected.inv){
+            const part = tr.querySelector('[data-order-field="partNumber"]');
+            part.value = selected.partNumber || part.value;
+            if (selected.price !== null) tr.querySelector('[data-order-field="cost"]').value = String(selected.price);
+          }
+        };
+        const hideSuggestions = tr=>{
+          tr.querySelector("[data-order-suggestions]").hidden = true;
+          const input = tr.querySelector('[data-order-field="purchased"]');
+          input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant");
+        };
+        const suggest = input=>{
+          const tr = input.closest("tr[data-order-line]"), list = tr.querySelector("[data-order-suggestions]"), query = input.value.trim().toLowerCase();
+          itemsBody.querySelectorAll("tr[data-order-line]").forEach(row=>{ if (row !== tr) hideSuggestions(row); });
+          // New Order owns its visible matches; a shared native datalist popup can
+          // retain the previous selection even though this row's text changed.
+          const names = Array.from(purchasedDatalist.options).map(option=> option.value).filter(name=> query && name.toLowerCase().includes(query));
+          list.innerHTML = names.map((name,index)=> `<button type="button" role="option" id="${escapeHtml(tr.dataset.orderLine)}-option-${index}" aria-selected="false" tabindex="-1" data-order-suggestion="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join("");
+          tr.dataset.suggestionIndex = "-1"; list.hidden = !names.length; input.setAttribute("aria-expanded", String(!!names.length)); input.removeAttribute("aria-activedescendant");
+        };
+        const choose = (tr, name)=>{
+          const input = tr.querySelector('[data-order-field="purchased"]');
+          input.value = name; applyOrderSelection(input); updatePreview(); input.focus(); hideSuggestions(tr);
+        };
         orderEditor.addEventListener("input", event=>{
           if (saving || !draft) return;
           const input = event.target;
           if (input.dataset.orderField === "purchased"){
-            const tr = input.closest("tr[data-order-line]"), selected = purchaseSelection(input.value);
-            tr.querySelector('[data-order-field="inventoryItemId"]').value = selected.inv ? String(selected.inv.id) : "";
-            if (selected.task || selected.inv){
-              const part = tr.querySelector('[data-order-field="partNumber"]');
-              part.value = selected.partNumber || part.value;
-              if (selected.price !== null) tr.querySelector('[data-order-field="cost"]').value = String(selected.price);
-            }
+            applyOrderSelection(input); suggest(input);
           }
           updatePreview();
         });
@@ -15564,6 +15623,8 @@ const appendEmptyRow = (focusFirst = false)=>{
               tr.querySelector('[data-order-field="partNumber"]').value = String(inv.pn || "");
               if (Number.isFinite(Number(inv.price))) tr.querySelector('[data-order-field="cost"]').value = String(inv.price);
             }
+            const item = draft.items.find(item=> item.lineId === tr.dataset.orderLine), task = inv && (findTaskByNameExact(inv.name) || [...(window.tasksInterval || []), ...(window.tasksAsReq || [])].find(task=> String(task.id) === String(inv.linkedTaskId)));
+            if (task) item.taskId = String(task.id); else delete item.taskId;
           }
           updatePreview();
         });
@@ -15572,13 +15633,53 @@ const appendEmptyRow = (focusFirst = false)=>{
           readDraft(); draft.items.push(orders.newItem(window.crypto)); renderItems();
         });
         itemsBody.addEventListener("click", event=>{
+          const suggestion = event.target.closest("[data-order-suggestion]");
+          if (suggestion && !saving){ choose(suggestion.closest("tr[data-order-line]"), suggestion.dataset.orderSuggestion); return; }
+          const editInventory = event.target.closest("[data-order-edit-inventory]");
+          if (editInventory && !saving){
+            readDraft();
+            const item = draft.items.find(item=> item.lineId === editInventory.dataset.orderEditInventory);
+            session.inventoryRefresh = {lineId:item.lineId, item:{...item}, selection:purchaseSelection(item.purchased)};
+            session.inventoryRefresh = JSON.parse(JSON.stringify(session.inventoryRefresh));
+            modal.hidden = true; window.costPurchaseHistoryModalOpen = false; document.body.classList.remove("cost-receipt-modal-open");
+            openPurchaseInventoryEditor(item.purchased, item.inventoryItemId); return;
+          }
           const lineId = event.target.getAttribute("data-order-remove");
           if (!lineId || saving || !draft) return;
+          if (session.edit?.expected.rows.some(row=> row.lineId === lineId)){
+            if (!confirm("Remove this previously saved item from the order? It will be removed only when you save changes. A local before-image will be retained for recovery.")) return;
+            session.edit.confirmedRemovedLineIds.push(lineId);
+          }
           readDraft(); draft.items = draft.items.filter(item=> item.lineId !== lineId); renderItems();
+        });
+        itemsBody.addEventListener("pointerdown", event=>{ if (event.target.closest("[data-order-suggestion]")) event.preventDefault(); });
+        itemsBody.addEventListener("focusin", event=>{ if (event.target.dataset.orderField === "purchased" && !saving) suggest(event.target); });
+        itemsBody.addEventListener("focusout", event=>{
+          const tr = event.target.closest("tr[data-order-line]");
+          if (tr) setTimeout(()=>{ if (!tr.contains(document.activeElement)) hideSuggestions(tr); }, 0);
+        });
+        itemsBody.addEventListener("keydown", event=>{
+          const input = event.target;
+          if (saving || input.dataset.orderField !== "purchased") return;
+          const tr = input.closest("tr[data-order-line]"), list = tr.querySelector("[data-order-suggestions]");
+          if (event.key === "Escape"){ event.preventDefault(); event.stopPropagation(); hideSuggestions(tr); return; }
+          if (!["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
+          if (list.hidden && event.key !== "Enter") suggest(input);
+          const options = Array.from(list.querySelectorAll("[data-order-suggestion]"));
+          if (list.hidden || !options.length) return;
+          let index = Number(tr.dataset.suggestionIndex);
+          if (event.key === "Enter"){
+            if (index < 0) return;
+            event.preventDefault(); choose(tr, options[index].dataset.orderSuggestion); return;
+          }
+          event.preventDefault(); event.stopPropagation();
+          index = event.key === "ArrowDown" ? (index + 1) % options.length : (index <= 0 ? options.length - 1 : index - 1);
+          tr.dataset.suggestionIndex = String(index); options.forEach((option,i)=> option.setAttribute("aria-selected", String(i === index)));
+          input.setAttribute("aria-activedescendant", options[index].id); options[index].scrollIntoView({block:"nearest"});
         });
         cancelButton.addEventListener("click", ()=>{
           if (saving) return;
-          draft = null; orderEditor.hidden = true; lockHistory(false);
+          draft = null; session = null; delete window.__purchaseOrderDraftSession; orderEditor.hidden = true; lockHistory(false);
         });
         saveButton.addEventListener("click", async()=>{
           if (saving || !draft) return;
@@ -15587,7 +15688,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           saving = true;
           orderEditor.querySelectorAll("input, select, button").forEach(element=>{ element.disabled = true; });
           status.textContent = "Saving order and verifying the server…";
-          const result = await getPurchaseOrderApi().save(draft);
+          const result = await getPurchaseOrderApi().save(draft, session.edit);
           saving = false;
           if (!result.saved || !result.verificationCompleted){
             const uncertain = result.indeterminate || getPurchaseOrderApi().isUncertain();
@@ -15597,7 +15698,7 @@ const appendEmptyRow = (focusFirst = false)=>{
             if (!uncertain) updatePreview();
             return;
           }
-          draft = null; orderEditor.hidden = true; lockHistory(false);
+          draft = null; session = null; delete window.__purchaseOrderDraftSession; orderEditor.hidden = true; lockHistory(false);
           orderEditor.querySelectorAll("input, select, button").forEach(element=>{ element.disabled = false; });
           receiptDraftRows.clear();
           activeWeekKey = result.weekKey; selectedReceiptYear = Number(activeWeekKey.slice(0, 4));
@@ -15607,6 +15708,24 @@ const appendEmptyRow = (focusFirst = false)=>{
           refreshCostDashboard({keepReceiptModalOpen:true});
           if (typeof toast === "function") toast("Order saved and verified.");
         });
+        if (draft){
+          const refresh = session.inventoryRefresh;
+          if (refresh){
+            const item = draft.items.find(item=> item.lineId === refresh.lineId), prior = refresh.selection;
+            const inv = (window.inventory || []).find(inv=> String(inv.id) === refresh.item.inventoryItemId);
+            const task = [...(window.tasksInterval || []), ...(window.tasksAsReq || [])].find(task=> String(task.id) === refresh.item.taskId);
+            if (item){
+              if (task && item.purchased === prior.task?.name) item.purchased = task.name;
+              else if (inv && item.purchased === prior.inv?.name) item.purchased = inv.name;
+              const selected = purchaseSelection(item.purchased);
+              if (selected.inv && prior.inv && String(item.inventoryItemId) === String(prior.inv.id)) item.inventoryItemId = String(selected.inv.id);
+              if (item.partNumber === prior.partNumber) item.partNumber = selected.partNumber || item.partNumber;
+              if (prior.price !== null && Number(item.cost) === prior.price && selected.price !== null) item.cost = String(selected.price);
+            }
+            delete session.inventoryRefresh;
+          }
+          showDraft();
+        }
       }
       const openModal = ({ preserveTarget = false } = {})=>{
         if (!preserveTarget) navigateReceiptWeek(currentReceiptWeek().key);

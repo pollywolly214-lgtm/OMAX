@@ -1993,7 +1993,8 @@ function viewCosts(model){
             <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
           </div>
           <section data-purchase-order-editor hidden aria-label="New purchase order" style="border:1px solid #cfd7e6;border-radius:10px;padding:14px;margin-bottom:14px;">
-            <h4>New Purchase Order</h4>
+            <h4 data-purchase-order-title>New Purchase Order</h4>
+            <p class="small muted">Edit Inventory opens the existing Settings workflow. Return to Cost Analysis to resume this draft. Reloading the page discards unsaved drafts.</p>
             <div class="cost-receipt-controls">
               <label>Order date<input type="date" data-purchase-order-date required></label>
               <label>PO Num.<input type="text" data-purchase-order-po placeholder="Optional"></label>

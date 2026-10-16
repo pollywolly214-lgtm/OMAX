@@ -675,6 +675,12 @@ body.cost-receipt-modal-open{ overflow:hidden; }
 .cost-table .purchase-number{ text-align:right; font-variant-numeric:tabular-nums; }
 #costReceiptModal .purchase-order-group{ margin-bottom:22px; }
 #costReceiptModal .purchase-order-group h4{ margin-bottom:6px; }
+#costReceiptModal .purchase-order-group h4 button{ margin-left:14px; }
+#costReceiptModal [data-order-suggestions]{ max-height:170px; overflow:auto; border:1px solid #cfd7e6; background:white; margin-top:4px; }
+#costReceiptModal [data-order-suggestions] button{ display:block; width:100%; border:0; padding:7px; text-align:left; white-space:normal; background:white; color:inherit; }
+#costReceiptModal [data-order-suggestions] button:hover,
+#costReceiptModal [data-order-suggestions] button[aria-selected="true"]{ background:#e5efff; }
+#costReceiptModal [data-order-edit-inventory]{ margin-top:5px; }
 #costReceiptModal [data-purchase-order-editor] table{ table-layout:fixed; min-width:1080px; }
 #costReceiptModal [data-purchase-order-editor] th{ width:auto; white-space:normal; }
 #costReceiptModal [data-purchase-order-editor] th:nth-child(1){ width:20%; }

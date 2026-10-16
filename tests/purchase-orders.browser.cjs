@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs/promises"),path=require("node:path"),http=require("node:http");
 const {chromium}=require(process.env.OMAX_PLAYWRIGHT_PATH||"playwright");
-test("PHv2-02B real browser with disposable local backend only",{timeout:120000},async t=>{
+test("PHv2-02C real browser with disposable local backend only",{timeout:120000},async t=>{
   const root=path.resolve(__dirname,".."),server=http.createServer(async(req,res)=>{
     const pathname=new URL(req.url,"http://localhost").pathname,file=path.resolve(root,"."+pathname+(pathname.endsWith("/")?"index.html":""));
     if(!file.startsWith(root+path.sep)||pathname.split("/").some(part=>part.startsWith("."))){res.writeHead(403).end();return;}
@@ -13,7 +13,7 @@ test("PHv2-02B real browser with disposable local backend only",{timeout:120000}
     const context=await browser.newContext({timezoneId:"America/Chicago",viewport:{width:1280,height:900}});
     await context.route("**/*",route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
     const page=await context.newPage(),errors=[];page.on("pageerror",error=>errors.push(error.message));page.setDefaultTimeout(12000);
-    await page.clock.setFixedTime(new Date("2026-10-16T02:30:00Z"));
+    await page.clock.setSystemTime(new Date("2026-10-16T02:30:00Z"));
     const load=async()=>{await page.goto(origin+"/?devsafe=1");await page.waitForFunction(()=>window.OMAXDevSafe?.active&&window.__initialAdoptComplete);await page.evaluate(()=>{location.hash="#/costs";renderCosts();});};
     await load();assert.equal((await page.evaluate(()=>saveCloudNow())).saved,true);
     await load();assert.equal((await page.evaluate(()=>saveCloudNow())).saved,true);
@@ -25,6 +25,7 @@ test("PHv2-02B real browser with disposable local backend only",{timeout:120000}
         state.inventory.push(...[{id:"fixture-inv-a",name:"Inventory Alpha",pn:"INV-A",price:10},{id:"fixture-inv-b",name:"Inventory Beta",pn:"INV-B",price:20}].map(item=>({...item,qty:0,qtyNew:0,qtyOld:0,unit:"pcs",note:"",folderId:null})));
         const task=state.tasksInterval[0];if(!task)throw Error("Expected existing task fixture");
         task.name="Task pick";task.pn="TASK-PN";task.price=7;task.inventoryId="fixture-inv-a";
+        state.inventory.find(item=>item.id==="fixture-inv-a").linkedTaskId=task.id;
       }
       await ref.set(state);
     },autofill);
@@ -139,6 +140,87 @@ test("PHv2-02B real browser with disposable local backend only",{timeout:120000}
       assert.deepEqual(await h.page.locator('[data-order-line]').evaluateAll(rows=>rows.map(row=>row.dataset.orderLine)),ids);
       await h.page.evaluate(()=>{window.writeAuthoritativeStateSnapshot=window.__orderRealWriter;});await h.save();
       assert.deepEqual((await h.cloud()).receiptTrackerWeeks.flatMap(week=>week.rows).filter(row=>row.orderId).map(row=>row.lineId),ids);assert.deepEqual(h.errors,[]);
+    }finally{await h.context.close();}
+  });
+  await t.test("whole saved order edits retain IDs, confirm removals, recalculate and atomically move weeks",async()=>{
+    const h=await fixture();try{
+      await h.fill();await h.save();let original=(await h.cloud()).receiptTrackerWeeks.flatMap(week=>week.rows).filter(row=>row.orderId),id=original[0].orderId;
+      await h.open();let item=h.page.locator('[data-purchase-order-items] tr').first();await item.locator('[data-order-field="purchased"]').fill("Other order");await item.locator('[data-order-field="cost"]').fill("1");await h.save();
+      const before=await h.cloud(),unrelated=before.receiptTrackerWeeks.flatMap(week=>week.rows).filter(row=>row.orderId!==id);
+      await h.page.locator(`[data-receipt-edit-order="${id}"]`).click();
+      assert.equal(await h.page.locator('[data-purchase-order-title]').textContent(),"Edit Purchase Order");assert.equal(await h.page.locator('[data-purchase-order-save]').textContent(),"Save Changes");
+      assert.equal(await h.page.locator('[data-purchase-order-po]').inputValue(),"0012-AB");assert.equal(await h.page.locator('[data-purchase-order-shipping]').inputValue(),"20");assert.equal(await h.page.locator('[data-purchase-order-tax]').inputValue(),"5");
+      assert.deepEqual(await h.page.locator('[data-order-line]').evaluateAll(rows=>rows.map(row=>row.dataset.orderLine)),original.map(row=>row.lineId));
+      const rows=h.page.locator('[data-purchase-order-items] tr');await rows.nth(0).locator('[data-order-field="qty"]').fill("2");await rows.nth(0).locator('[data-order-field="cost"]').fill("50");
+      h.page.once("dialog",dialog=>dialog.dismiss());await rows.nth(1).locator('[data-order-remove]').click();assert.equal(await rows.count(),2);
+      h.page.once("dialog",dialog=>{assert.match(dialog.message(),/previously saved item/);return dialog.accept();});await rows.nth(1).locator('[data-order-remove]').click();assert.equal(await rows.count(),1);
+      await h.page.locator('[data-purchase-order-add]').click();await rows.nth(1).locator('[data-order-field="purchased"]').fill("Added");await rows.nth(1).locator('[data-order-field="cost"]').fill("20");
+      await h.page.locator('[data-purchase-order-date]').fill("2026-10-08");await h.page.locator('[data-purchase-order-po]').fill("0001250-NEW");await h.page.locator('[data-purchase-order-shipping]').fill("10.07");await h.page.locator('[data-purchase-order-tax]').fill("6.03");
+      assert.match(await h.page.locator('[data-purchase-order-preview]').textContent(),/\$136.10/);assert.deepEqual(await h.cloud(),before);
+      const ids=await h.page.locator('[data-order-line]').evaluateAll(rows=>rows.map(row=>row.dataset.orderLine));assert.equal(ids[0],original[0].lineId);assert.ok(!original.some(row=>row.lineId===ids[1]));
+      await h.save();const after=await h.cloud(),saved=after.receiptTrackerWeeks.flatMap(week=>week.rows).filter(row=>row.orderId===id);
+      assert.deepEqual(saved.map(row=>row.lineId),ids);assert.deepEqual(saved.map(row=>row.poNumber),["0001250-NEW","0001250-NEW"]);assert.ok(saved.every(row=>row.date==="2026-10-08"&&row.orderId===id));
+      assert.equal(saved.reduce((sum,row)=>sum+Math.round(row.shipping*100),0),1007);assert.equal(saved.reduce((sum,row)=>sum+Math.round(row.tax*100),0),603);
+      assert.deepEqual(after.receiptTrackerWeeks.flatMap(week=>week.rows).filter(row=>row.orderId!==id),unrelated);assert.equal(await h.page.locator('[data-receipt-week-select]').inputValue(),"2026-W41");
+      assert.equal(await h.page.locator('[data-receipt-week-subtotal]').textContent(),"$136.10");assert.deepEqual(await h.page.evaluate(()=>JSON.parse(localStorage.getItem("omax_purchase_order_edit_backup_v1")).expected.rows),original);
+      await h.page.reload();await h.page.waitForFunction(()=>window.__initialAdoptComplete);assert.deepEqual((await h.cloud()).receiptTrackerWeeks,after.receiptTrackerWeeks);assert.equal(await h.page.locator('[data-spend-row]').count(),4);
+      assert.equal(await h.page.evaluate(()=>Math.round(computeCostModel().totalSpendSeries.reduce((sum,row)=>sum+row.value,0)*100)),-14035);assert.deepEqual(h.errors,[]);
+    }finally{await h.context.close();}
+  });
+  await t.test("edit Cancel and definite failure preserve persisted order and draft; retry commits once",async()=>{
+    const h=await fixture();try{
+      await h.fill();await h.save();const before=await h.cloud(),id=before.receiptTrackerWeeks.flatMap(week=>week.rows).find(row=>row.orderId).orderId;
+      const edit=()=>h.page.locator(`[data-receipt-edit-order="${id}"]`).click();await edit();await h.page.locator('[data-purchase-order-po]').fill("Cancelled");await h.page.locator('[data-purchase-order-cancel]').click();assert.deepEqual(await h.cloud(),before);
+      await edit();await h.page.locator('[data-purchase-order-po]').fill("Retry-0001");
+      await h.page.evaluate(()=>{window.__orderRealWriter=writeAuthoritativeStateSnapshot;window.writeAuthoritativeStateSnapshot=()=>Promise.resolve(cloudSaveNoWriteFailure("fixture_permission","Edit permission denied"));});
+      await h.page.locator('[data-purchase-order-save]').click();await h.page.waitForFunction(()=>document.querySelector('[data-purchase-order-status]').textContent.includes("Edit permission denied"));
+      assert.deepEqual(await h.cloud(),before);assert.equal(await h.page.locator('[data-purchase-order-po]').inputValue(),"Retry-0001");
+      await h.page.evaluate(()=>{window.writeAuthoritativeStateSnapshot=window.__orderRealWriter;});await h.save();
+      const rows=(await h.cloud()).receiptTrackerWeeks.flatMap(week=>week.rows).filter(row=>row.orderId===id);assert.equal(rows.length,2);assert.ok(rows.every(row=>row.poNumber==="Retry-0001"));assert.deepEqual(h.errors,[]);
+    }finally{await h.context.close();}
+  });
+  await t.test("concurrent order change rejects stale edit without writing over it",async()=>{
+    const h=await fixture();try{
+      await h.fill();await h.save();const before=await h.cloud(),id=before.receiptTrackerWeeks.flatMap(week=>week.rows).find(row=>row.orderId).orderId;
+      await h.page.locator(`[data-receipt-edit-order="${id}"]`).click();await h.page.locator('[data-purchase-order-po]').fill("Unsaved local");
+      await h.page.evaluate(async id=>{const ref=OMAXDevSafe.db.doc(FB.docRef.path),state=(await ref.get()).data();state.receiptTrackerWeeks.flatMap(week=>week.rows).find(row=>row.orderId===id).purchased="Other session";state.syncMeta.rev++;await ref.set(state);},id);
+      const concurrent=await h.cloud();await h.page.locator('[data-purchase-order-save]').click();await h.page.waitForFunction(()=>!document.querySelector('[data-purchase-order-status]').textContent.startsWith("Saving order"));assert.match(await h.page.locator('[data-purchase-order-status]').textContent(),/another session/);
+      assert.deepEqual(await h.cloud(),concurrent);assert.equal(await h.page.locator('[data-purchase-order-po]').inputValue(),"Unsaved local");assert.deepEqual(h.errors,[]);
+    }finally{await h.context.close();}
+  });
+  await t.test("live autocomplete changes immediately, clears and isolates rows with keyboard and mouse selection",async()=>{
+    const h=await fixture({autofill:true});try{
+      const before=await h.cloud();await h.open();const rows=h.page.locator('[data-purchase-order-items] tr'),name=index=>rows.nth(index).locator('[data-order-field="purchased"]');
+      await name(0).fill("Alpha");assert.deepEqual(await rows.nth(0).locator('[data-order-suggestion]').allTextContents(),["Inventory Alpha"]);await rows.nth(0).locator('[data-order-suggestion]').click();
+      assert.equal(await name(0).inputValue(),"Inventory Alpha");assert.equal(await rows.nth(0).locator('[data-order-field="inventoryItemId"]').inputValue(),"fixture-inv-a");
+      await name(0).fill("Beta");assert.deepEqual(await rows.nth(0).locator('[data-order-suggestion]').allTextContents(),["Inventory Beta"]);await name(0).press("ArrowDown");await name(0).press("Enter");
+      assert.equal(await name(0).inputValue(),"Inventory Beta");assert.equal(await rows.nth(0).locator('[data-order-field="cost"]').inputValue(),"20");
+      await h.page.locator('[data-purchase-order-add]').click();await name(1).fill("Alpha");assert.equal(await rows.nth(0).locator('[data-order-suggestions]').isHidden(),true);assert.deepEqual(await rows.nth(1).locator('[data-order-suggestion]').allTextContents(),["Inventory Alpha"]);
+      await name(1).fill("");assert.equal(await rows.nth(1).locator('[data-order-suggestions]').isHidden(),true);assert.equal(await rows.nth(1).locator('[data-order-suggestion]').count(),0);
+      await name(1).fill("Task");await name(1).press("ArrowDown");await name(1).press("Enter");assert.equal(await rows.nth(1).locator('[data-order-field="partNumber"]').inputValue(),"TASK-PN");
+      assert.equal(await rows.nth(0).locator('[data-order-field="partNumber"]').inputValue(),"INV-B");assert.deepEqual(await h.cloud(),before);assert.deepEqual(h.errors,[]);
+    }finally{await h.context.close();}
+  });
+  await t.test("Edit Inventory uses existing Settings editor and resumes new/edit drafts with refreshed selection",async()=>{
+    const h=await fixture({autofill:true});try{
+      const initial=await h.cloud(),taskId=initial.tasksInterval[0].id;await h.open();let row=h.page.locator('[data-purchase-order-items] tr').first();
+      await row.locator('[data-order-field="purchased"]').fill("Task pick");await row.locator('[data-order-field="qty"]').fill("3");await h.page.locator('[data-purchase-order-po]').fill("0001-resume");await h.page.locator('[data-purchase-order-shipping]').fill("2");await h.page.locator('[data-purchase-order-tax]').fill("1");
+      await row.locator('[data-order-edit-inventory]').click();await h.page.waitForFunction(()=>location.hash==="#/settings");
+      const task=h.page.locator(`details.task[data-task-id="${taskId}"]`);await h.page.waitForFunction(id=>document.querySelector(`details.task[data-task-id="${id}"]`)?.open,taskId);
+      await task.locator('[data-edit-task]').click();await task.locator('[data-k="pn"]').fill("UPDATED-PN");await task.locator('[data-k="pn"]').press("Tab");
+      await task.locator('[data-k="price"]').fill("11");await task.locator('[data-k="price"]').press("Tab");
+      await h.page.waitForFunction(id=>window.tasksInterval.find(task=>task.id===id)?.price===11,taskId);
+      assert.equal((await h.page.evaluate(()=>saveCloudNow())).saved,true);await h.page.waitForFunction(()=>!hasPendingLocalChanges);await h.page.locator('#tab-costs').click();await h.page.locator('[data-purchase-order-editor]').waitFor({state:"visible"});
+      row=h.page.locator('[data-purchase-order-items] tr').first();assert.equal(await row.locator('[data-order-field="qty"]').inputValue(),"3");assert.equal(await row.locator('[data-order-field="cost"]').inputValue(),"11");assert.equal(await row.locator('[data-order-field="partNumber"]').inputValue(),"UPDATED-PN");assert.equal(await row.locator('[data-order-field="inventoryItemId"]').inputValue(),"fixture-inv-a");
+      assert.equal(await h.page.locator('[data-purchase-order-po]').inputValue(),"0001-resume");
+      await h.page.waitForFunction(()=>!hasPendingLocalChanges);const inventoryAfterSettings=(await h.cloud()).inventory;await h.save();
+      const source=await h.cloud(),saved=source.receiptTrackerWeeks.flatMap(week=>week.rows).filter(row=>row.orderId),id=saved[0].orderId;
+      assert.equal(saved[0].taskId,taskId);assert.equal(saved[0].cost,11);assert.deepEqual(source.inventory,inventoryAfterSettings);
+      for(const item of initial.inventory){const current=source.inventory.find(row=>row.id===item.id);assert.deepEqual([current.qtyNew,current.qtyOld],[item.qtyNew,item.qtyOld]);}
+      await h.page.locator(`[data-receipt-edit-order="${id}"]`).click();row=h.page.locator('[data-purchase-order-items] tr').first();await row.locator('[data-order-field="cost"]').fill("15");await h.page.locator('[data-purchase-order-po]').fill("edit draft");
+      await row.locator('[data-order-edit-inventory]').click();await h.page.waitForFunction(()=>location.hash==="#/settings");await h.page.locator('#tab-costs').click();await h.page.locator('[data-purchase-order-editor]').waitFor({state:"visible"});
+      assert.equal(await h.page.locator('[data-purchase-order-title]').textContent(),"Edit Purchase Order");assert.equal(await h.page.locator('[data-purchase-order-po]').inputValue(),"edit draft");assert.equal(await h.page.locator('[data-order-field="cost"]').inputValue(),"15");
+      assert.deepEqual((await h.cloud()).receiptTrackerWeeks,source.receiptTrackerWeeks);assert.deepEqual(h.errors,[]);
     }finally{await h.context.close();}
   });
   await t.test("uncertain completion preserves recovery and prevents a second writer call",async()=>{
