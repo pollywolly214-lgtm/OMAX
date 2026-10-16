@@ -2651,11 +2651,11 @@ body.modal-open .auth-bar {
   width: 140px;
 }
 .job-table thead th:nth-child(14) {
-  min-width: 220px;
-  width: 260px;
+  min-width: 320px;
+  width: 360px;
 }
 .job-table thead th:nth-child(15) {
-  width: 132px;
+  width: 88px;
 }
 .job-table thead th:not(:last-child) {
   border-right: 1px solid var(--job-table-divider);
@@ -2697,9 +2697,8 @@ body.modal-open .auth-bar {
 }
 
 .job-col-note {
-  min-width: 132px;
-  width: 132px;
-  max-width: 132px;
+  min-width: 320px;
+  width: 360px;
 }
 
 .job-cell {
@@ -6556,7 +6555,7 @@ button.job-cloud-preview-button { display: block; width: min(100%, 340px); margi
 .job-actions-menu[popover] button { white-space:normal; overflow-wrap:anywhere; }
 
 /* Keep the trigger's intrinsic label/padding from expanding a fixed table cell. */
-.job-col-actions { min-width:88px; }
+.job-col-actions { min-width:88px; width:88px; }
 .job-col-actions .job-actions { min-width:0; max-width:100%; }
 .job-col-actions .job-actions-trigger {
   width:calc(100% - 4px); min-width:0; max-width:calc(100% - 4px); margin-inline:2px;
