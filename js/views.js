@@ -2632,18 +2632,18 @@ function viewCosts(model){
         <div class="cost-jobs-summary">
           <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
           <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
-          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = Hours Taken × (Charge Rate - abs(Cost Rate))"}`.trim())}"><span class="label">Total net gain</span><span data-efficiency-summary-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
-          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = Hours Taken × (Charge Rate - abs(Cost Rate))"}`.trim())}"><span class="label">Avg net gain / row</span><span data-efficiency-summary-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
+          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"}`.trim())}"><span class="label">Total net gain</span><span data-efficiency-summary-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
+          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"}`.trim())}"><span class="label">Avg net gain / row</span><span data-efficiency-summary-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
           <div><span class="label">Total run cost</span><span data-efficiency-summary-cost>${esc(efficiencySnapshot.totalCostLabel || "$0.00")}</span></div>
           <div><span class="label">Avg run cost / row</span><span data-efficiency-summary-cost-average>${esc(efficiencySnapshot.averageCostLabel || "$0.00")}</span></div>
         </div>
-        <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = Hours Taken × (Charge Rate - abs(Cost Rate))"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
+        <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
         <div class="cost-weekly-table-wrap">
           <table class="cost-table">
             <thead><tr><th>Task</th>
                   <th>Source</th><th>Date</th>
                   <th>Original</th>
-                  <th>Note</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = Hours Taken × (Charge Rate - abs(Cost Rate))"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net gain</th><th>Task link</th></tr></thead>
+                  <th>Note</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net gain</th><th>Task link</th></tr></thead>
             <tbody>
               ${efficiencyRows.length ? efficiencyRows.map(row => `
                 <tr data-efficiency-row data-efficiency-id="${esc(row.id || "")}" data-efficiency-date="${esc(row.dateLabel || "")}" data-efficiency-hours="${esc(String(Number(row.hoursValue) || 0))}" data-efficiency-material="${esc(String(Number(row.materialValue || 0)))}">
@@ -2653,7 +2653,7 @@ function viewCosts(model){
                   <td>${esc(row.partCostLabel || "$0.00")}</td>
                   <td data-efficiency-labor-cell>${esc(row.laborCostLabel || "$0.00")}</td>
                   <td data-efficiency-total-cost-cell>${esc(row.totalCostLabel || "$0.00")}</td>
-                  <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Net gain = Hours Taken × (Charge Rate - abs(Cost Rate))"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.netGainLabel || "$0.00")}</td>
+                  <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.netGainLabel || "$0.00")}</td>
                   <td>${row.settingsLink ? `<button type="button" class="btn secondary" data-efficiency-open-job="${esc(row.id || "")}">Open job</button>` : "Invalid link"}</td>
                 </tr>
               `).join("") : `
@@ -3883,6 +3883,7 @@ function viewJobs(){
           </td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
+              <button type="button" data-history-failed-cut="${esc(String(job.id))}">Failed Cut${computeCuttingJobProfit(job).failurePercent ? ` (${computeCuttingJobProfit(job).failurePercent}%)` : ""}</button>
               <button type="button" class="job-actions-trigger" data-history-actions-toggle="${job.id}" aria-haspopup="true" aria-expanded="false" aria-controls="${esc(actionMenuId)}">
                 <span class="job-actions-trigger-label">Actions</span>
                 <span class="job-actions-trigger-caret" aria-hidden="true">▾</span>

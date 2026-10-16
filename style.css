@@ -6563,3 +6563,12 @@ button.job-cloud-preview-button { display: block; width: min(100%, 340px); margi
 .job-actions-trigger-caret { flex:0 0 auto; }
 .job-dimension-preview { display:block; font-size:12px; color:var(--brand-blue-800); }
 [data-active-copy-status] { overflow-wrap:anywhere; }
+
+/* Failed Cut financial preview */
+.failed-cut-dialog { width: min(92vw, 480px); max-height: 90vh; overflow: auto; border: 1px solid var(--border, #cbd5e1); border-radius: 12px; padding: 24px; }
+.failed-cut-dialog::backdrop { background: rgb(15 23 42 / 45%); }
+.failed-cut-dialog label { display: grid; gap: 6px; }
+.failed-cut-preview { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; }
+.failed-cut-preview dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.failed-cut-preview .is-negative { color: #b91c1c; font-weight: 700; }
+.failed-cut-actions { display: flex; justify-content: flex-end; gap: 8px; }

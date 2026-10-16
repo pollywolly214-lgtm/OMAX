@@ -16,7 +16,7 @@ function readers(state){
   freeze(state);freeze(folders);
   const c=vm.createContext({window:{...state,CuttingJobDateEditing:dates,jobFolders:folders,JOB_ROOT_FOLDER_ID:"jobs_root",CuttingJobChronology:{...chronology,createMutationApi:stop("coordinator"),planRenumbering:stop("renumber")},CuttingJobHistory:{...history,resequence:stop("resequence")}},cuttingJobs:state.cuttingJobs,completedCuttingJobs:state.completedCuttingJobs,completedJobs:state.completedCuttingJobs,
     completedSorted:dates.historyJobs(state.completedCuttingJobs),JOB_RATE_PER_HOUR:200,JOB_BASE_COST_PER_HOUR:45,saveCloudNow:stop("save"),saveCloudDebounced:stop("debounce"),persistJobChanges:stop("persist"),
-    formatterCurrency:value=>"$"+value,resolveCategoryName:()=>"Company Improvements",computeJobEfficiency:()=>null,resolveCuttingJobNetTotal:()=>({hours:2,chargeRate:200,cutCostRate:45,materialCost:10,total:310}),
+    formatterCurrency:value=>"$"+value,resolveCategoryName:()=>"Company Improvements",computeJobEfficiency:()=>null,resolveCuttingJobNetTotal:()=>({hours:2,chargeRate:200,cutCostRate:45,materialCost:10,total:300}),
     maintenanceRows:[{taskId:"maint",taskName:"Maintenance"}],normalizeProjectNumber:value=>String(value||""),categoryProjectNumber:()=>"0000",escapeHtml:String,categoryStyleAttr:()=>"",readFlowCollapsedCategories:()=>new Set(),previewCardMarkup:()=>"",
     flowChart:{innerHTML:"",classList:{toggle(){}}},flowFilterInput:{value:""},flowGroupingSelect:{value:"job"},flowHidePreviews:{checked:true}
   });
@@ -44,10 +44,10 @@ test("reordering active/completed arrays never changes visible stored labels",()
     assert.ok(right.c.flowChart.innerHTML.includes(job.name+" · "+(job.cutNumber||"—")+" · "));
   }
 });
-test("Data Center uses Completion Date and shared category sequence with the cutting-profit rule excluding material",()=>{
+test("Data Center uses Completion Date and shared category sequence with the net-profit rule including material",()=>{
   const h=readers(fixture());assert.deepEqual(Array.from(h.c.dataRows,row=>row.id),["imported_a","reviewed_b","missing_c"]);
   assert.deepEqual(Array.from(h.c.dataRows,row=>row.categoryCutNumberLabel),["#3","#2","#4"]);
-  for(const row of h.c.dataRows){assert.equal(row.hoursValue,2);assert.equal(row.laborCostValue,90);assert.equal(row.totalCostValue,100);assert.equal(row.totalProfitValue,310);}
+  for(const row of h.c.dataRows){assert.equal(row.hoursValue,2);assert.equal(row.laborCostValue,90);assert.equal(row.totalCostValue,100);assert.equal(row.totalProfitValue,300);}
   assert.equal(h.c.categoryLabel(h.c.window.cuttingJobs[0]),1);assert.equal(h.c.jobTitle(h.c.window.cuttingJobs[0]),"Active · C041 · 1");
   assert.equal(h.c.window.cuttingJobs[0].priority,3);
 });

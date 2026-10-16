@@ -43,7 +43,7 @@ test("CJPROFIT-01B: imported Hours Taken controls profit despite zero actual min
   for(const record_status of ["active","completed"])for(const cost_rate_per_hr of ["45","-45"]){
     const p=api.preview([{...base,record_status,estimate_hours:"2.8",add_minutes:"0",actual_cut_minutes:"0",completed_date:"2026-01-02",cost_rate_per_hr}],context)[0];
     assert.equal(p.status,"ready");const job=api.map(p),before=structuredClone(job);
-    assert.equal(job.estimateHours,2.8);assert.ok(Math.abs(c.computeCuttingJobProfit(job).totalProfit-434)<1e-9);
+    assert.equal(job.estimateHours,2.8);assert.ok(Math.abs(c.computeCuttingJobProfit(job).totalProfit-(434-job.materialCost*job.materialQty))<1e-9);
     assert.deepEqual(job,before);
   }
 });

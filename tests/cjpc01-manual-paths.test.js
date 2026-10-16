@@ -179,7 +179,7 @@ test("CJPROFIT-01: active/history save signed cost and fractional cut time witho
     const original=job({costRate:60,chargeRate:150,actualHours:0}),before=structuredClone(original),h=harness(past?[]:[original],past?[original]:[]);
     await h.edit(past,{cat:"blanco",projectNumber:"1254",costRate:"-80",chargeRate:"200",estimateHours:"0.5",actualHours:"0.5",materialCost:"9",materialQty:"1"});
     assert.equal(original.costRate,-80);assert.equal(original.chargeRate,200);assert.equal(original.estimateHours,.5);
-    if(past){assert.equal(original.actualHours,0);assert.equal(original.efficiency.netRate,120);assert.equal(original.efficiency.costRate,80);assert.equal(original.efficiency.totalProfit,60);}
+    if(past){assert.equal(original.actualHours,0);assert.equal(original.efficiency.netRate,120);assert.equal(original.efficiency.costRate,80);assert.equal(original.efficiency.totalProfit,51);}
     assert.equal(h.calls.save,1);
     for(const key of ["id","cat","projectNumber","cutNumber","cutDateISO","cutOrderWithinDay","files","importProvenance","actualHours","manualLogs"])
       assert.deepEqual(original[key],before[key],key);

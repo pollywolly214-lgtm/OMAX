@@ -3750,6 +3750,10 @@ function saveCuttingJobEdit(jobId, updates){
   return saveCuttingJobBusinessOperation({type:"edit",id:String(jobId || ""),updates});
 }
 
+function saveCuttingJobFailurePercent(jobId, failurePercent){
+  return saveCuttingJobBusinessOperation({type:"failure",id:String(jobId || ""),failurePercent});
+}
+
 function createCuttingJob(job){
   return saveCuttingJobBusinessOperation({type:"create",job});
 }
