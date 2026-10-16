@@ -1,5 +1,7 @@
 # PHv2-02A — create-only purchase orders
 
+PHv2-02B refines this implementation on the same PR #506. The current order-level tax, inventory autofill, grouping and PO-number behavior is documented in [phv2-02b.md](phv2-02b.md). The descriptions below record the original 02A implementation.
+
 ## Branch and scope
 
 PR #503 (PHv2-01C) was checked through GitHub and is still open. This branch, `codex/phv2-02a-purchase-orders`, starts at its current head `8a9e43f604115a0dcec2b185a441812d33bb71f3`. The PR targets `codex/phv2-01c-purchase-history`, not main. The base branch itself is unchanged. Main had advanced to `b189e15` / POLISHv2 #504; its unrelated changes are not copied over or reverted by this stacked diff. Reconcile and retarget after #503 merges. Do not merge automatically.

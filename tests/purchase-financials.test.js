@@ -17,7 +17,7 @@ function renderPurchase(row){
   const rangeAllocationNote = new Element(), weekAllocationNote = new Element(), weekSubtotal = new Element();
   const week = {key:"2025-W01",week:1,startISO:"2024-12-30",endISO:"2025-01-05",rows:[row]};
   const context = vm.createContext({ ...api, HTMLElement:Element, document:{ querySelector:()=>spendBody }, window:{receiptTrackerWeeks:[week]}, escapeHtml, formatUsd:usd, toIsoDate:value=>String(value || "").slice(0,10), normalizeRows:rows=>rows || [], getWeekEntry:()=>week, activeWeekKey:week.key, getRangeWindow:()=>({start:null,end:null}), buildRangeRows:()=>[{...row,total:api.getPurchaseFinancials(row).totalSpend}], activeRange:"all", rangeRowsBody, weekRowsBody, rangeAllocationNote, weekAllocationNote, weekSubtotal, rangeSubtotal:{}, weekRangeLabel:{}, rangeLabel:{}, formatDateRangeLabel:()=>"All time", findInventoryByPartNumber:()=>null, purchasedDatalistId:"fixture", appendEmptyRow:()=>{}, recomputeWeekTotals:()=>{} });
-  Object.assign(context, { receiptDraftRows:new Map(), rememberReceiptRow:()=>{} });
+  Object.assign(context, { layoutWeekOrderTables:()=>{}, receiptDraftRows:new Map(), rememberReceiptRow:()=>{} });
   vm.runInContext(extract("    const formatUsd", "    const toIsoDate") + extract("    const computeRowTotal", "    const escWorkbookHtml") + extract("    const renderCentralSpendRows", "    const getWeekEntry") + extract("      const renderWeekRows", "      const findInventoryByPartNumber") + extract("      const renderRangeTable", "      const bindRowEvents") + ";renderWeekRows();renderRangeTable();renderCentralSpendRows();", context);
   return { range:rangeRowsBody.innerHTML, week:weekRowsBody.innerHTML, spend:spendBody.innerHTML, rangeAllocationNote, weekAllocationNote };
 }
@@ -50,6 +50,13 @@ test("manual rows render the same amounts with zero optional charges and no allo
   for(const html of [rendered.range,rendered.week,rendered.spend]){assert.ok(html.includes("$30.00"));assert.ok(html.includes("Manual &amp; item"));assert.ok(!html.includes("undefined"));}
   assert.equal(rendered.rangeAllocationNote.hidden,true);assert.equal(rendered.weekAllocationNote.hidden,true);
 });
+test("week, range and live purchase popup show PO text or N/A without adding historical metadata",()=>{
+  for(const poNumber of [undefined,"","   ","0001250","0012-AB","<unsafe>"]){
+    const row=freeze({date:"2025-01-03",purchased:"PO fixture",cost:15,qty:2,...(poNumber===undefined?{}:{poNumber})}),before=JSON.stringify(row),rendered=renderPurchase(row);
+    for(const html of [rendered.week,rendered.range,rendered.spend])assert.ok(html.includes(`<td>${escapeHtml(String(poNumber??"").trim()||"N/A")}</td>`));
+    assert.equal(JSON.stringify(row),before);
+  }
+});
 test("initial Data Center model and Purchase History agree and preserve cents for totals over 1000",()=>{
   const row=freeze({...recovered(),cost:600,qty:2}),before=JSON.stringify(row);
   const context=vm.createContext({...api,window:{receiptTrackerWeeks:[{key:"2025-W01",rows:[row]}]},toHistoryDateKey:value=>value});
@@ -74,5 +81,5 @@ test("table headers, footers, exports, script order and scrolling match the fina
   assert.ok(modal.includes("Week Total Spend"));assert.ok(modal.includes("Range Total Spend"));assert.match(modal,/data-receipt-range-allocation-note hidden/);
   const index=fs.readFileSync("index.html","utf8"),css=fs.readFileSync("style.css","utf8");assert.ok(index.indexOf('src="js/purchaseFinancials.js"')<index.indexOf('src="js/views.js"'));
   assert.match(css,/#costReceiptModal \.cost-weekly-table-wrap\{[^}]*overflow-x:auto/);assert.match(css,/min-width:1280px/);assert.match(css,/purchase-number\{ text-align:right/);
-  assert.equal((renderer.match(/headerRows: \[\["Date", "Purchased Item", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"\]\]/g)||[]).length,2);
+  assert.equal((renderer.match(/headerRows: \[\["Date", "Purchased Item", "PO Num.", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"\]\]/g)||[]).length,2);
 });

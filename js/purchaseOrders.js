@@ -26,17 +26,18 @@
     if (typeof crypto?.randomUUID !== "function") throw Error("Secure order IDs are unavailable. Use a secure, supported browser.");
     return crypto.randomUUID();
   }
-  const newItem = crypto=> ({lineId:`pol_${newId(crypto)}`, purchased:"", partNumber:"", cost:"0", qty:"1", tax:"0", inventoryItemId:""});
+  const newItem = crypto=> ({lineId:`pol_${newId(crypto)}`, purchased:"", partNumber:"", cost:"0", qty:"1", inventoryItemId:""});
   function newDraft(date, crypto){
-    return {orderId:`po_${newId(crypto)}`, date, shipping:"0", items:[newItem(crypto)]};
+    return {orderId:`po_${newId(crypto)}`, date, poNumber:"", shipping:"0", tax:"0", items:[newItem(crypto)]};
   }
   function plan(draft){
     if (!validId(draft?.orderId)) throw Error("A stable order ID is required.");
     const date = String(draft.date || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date + "T00:00:00Z")) || new Date(date + "T00:00:00Z").toISOString().slice(0, 10) !== date) throw Error("Choose a valid order date.");
     if (!Array.isArray(draft.items) || !draft.items.length) throw Error("Add at least one purchase item.");
-    const shippingCents = cents(draft.shipping, "Order shipping"), ids = new Set();
-    let merchandise = 0n, taxes = 0n;
+    const shippingCents = cents(draft.shipping, "Order shipping"), taxCents = cents(draft.tax, "Order tax"), ids = new Set();
+    const poNumber = String(draft.poNumber ?? "").trim();
+    let merchandise = 0n;
     const items = draft.items.map(item=>{
       if (!validId(item.lineId) || ids.has(item.lineId)) throw Error("Every item needs a unique stable line ID.");
       ids.add(item.lineId);
@@ -44,31 +45,37 @@
       if (!purchased) throw Error("Each item needs a description.");
       const rawQty = String(item.qty ?? "").trim(), qty = Number(rawQty);
       if (!rawQty || !Number.isSafeInteger(qty) || qty < 1) throw Error("Each quantity must be a positive whole number.");
-      const costCents = cents(item.cost, "Unit cost"), taxCents = cents(item.tax, "Line tax");
+      const costCents = cents(item.cost, "Unit cost");
       const weight = BigInt(costCents) * BigInt(qty);
-      merchandise += weight; taxes += BigInt(taxCents);
-      return {item, purchased, qty, costCents, taxCents, weight};
+      merchandise += weight;
+      return {item, purchased, qty, costCents, weight};
     });
-    if (merchandise === 0n && shippingCents > 0) throw Error("Shipping cannot be allocated because the order merchandise total is $0.");
-    if (merchandise + taxes + BigInt(shippingCents) > BigInt(Number.MAX_SAFE_INTEGER)) throw Error("Order total is too large.");
-    const allocations = items.map(({item, weight})=>{
-      const numerator = weight * BigInt(shippingCents);
-      return {lineId:item.lineId, amount:merchandise ? numerator / merchandise : 0n, remainder:merchandise ? numerator % merchandise : 0n};
-    });
-    let remaining = BigInt(shippingCents) - allocations.reduce((sum, item)=> sum + item.amount, 0n);
-    const ranked = allocations.slice().sort((a,b)=> a.remainder === b.remainder ? (a.lineId < b.lineId ? -1 : a.lineId > b.lineId ? 1 : 0) : a.remainder > b.remainder ? -1 : 1);
-    for (let index = 0; remaining > 0n; index++, remaining--) ranked[index].amount++;
-    const rows = items.map(({item, purchased, qty, costCents, taxCents}, index)=> ({
+    if (merchandise === 0n && (shippingCents > 0 || taxCents > 0)) throw Error("Shipping and tax cannot be allocated because the order merchandise total is $0.");
+    if (merchandise + BigInt(taxCents) + BigInt(shippingCents) > BigInt(Number.MAX_SAFE_INTEGER)) throw Error("Order total is too large.");
+    const allocate = charge=>{
+      const allocations = items.map(({item, weight})=>{
+        const numerator = weight * BigInt(charge);
+        return {lineId:item.lineId, amount:merchandise ? numerator / merchandise : 0n, remainder:merchandise ? numerator % merchandise : 0n};
+      });
+      let remaining = BigInt(charge) - allocations.reduce((sum, item)=> sum + item.amount, 0n);
+      const ranked = allocations.slice().sort((a,b)=> a.remainder === b.remainder ? (a.lineId < b.lineId ? -1 : a.lineId > b.lineId ? 1 : 0) : a.remainder > b.remainder ? -1 : 1);
+      for (let index = 0; remaining > 0n; index++, remaining--) ranked[index].amount++;
+      return allocations.map(item=> Number(item.amount));
+    };
+    const shipping = allocate(shippingCents), tax = allocate(taxCents);
+    const rows = items.map(({item, purchased, qty, costCents}, index)=> ({
       date, purchased, partNumber:String(item.partNumber || "").trim(), cost:dollars(costCents), qty,
-      shipping:dollars(Number(allocations[index].amount)), tax:dollars(taxCents),
+      shipping:dollars(shipping[index]), tax:dollars(tax[index]),
+      ...(poNumber ? {poNumber} : {}),
       ...(item.inventoryItemId ? {inventoryItemId:String(item.inventoryItemId)} : {}),
       ...(item.taskId ? {taskId:String(item.taskId)} : {}),
-      lineId:item.lineId, orderId:draft.orderId, orderDateISO:date, orderShippingCents:shippingCents, shippingAllocationVersion:1
+      lineId:item.lineId, orderId:draft.orderId, orderDateISO:date, orderShippingCents:shippingCents, orderTaxCents:taxCents, shippingAllocationVersion:1, taxAllocationVersion:1
     }));
     if (rows.reduce((sum, row)=> sum + cents(row.shipping), 0) !== shippingCents) throw Error("Shipping did not reconcile to cents.");
-    const merchandiseCents = Number(merchandise), totalCents = Number(merchandise + taxes + BigInt(shippingCents));
+    if (rows.reduce((sum, row)=> sum + cents(row.tax), 0) !== taxCents) throw Error("Tax did not reconcile to cents.");
+    const merchandiseCents = Number(merchandise), totalCents = Number(merchandise + BigInt(taxCents) + BigInt(shippingCents));
     dollars(merchandiseCents); dollars(totalCents);
-    return {orderId:draft.orderId, date, shippingCents, merchandiseCents, totalCents, rows, week:history.weekFor(date)};
+    return {orderId:draft.orderId, date, shippingCents, taxCents, merchandiseCents, totalCents, rows, week:history.weekFor(date)};
   }
   function append(source, order){
     if (!Array.isArray(source.receiptTrackerWeeks) || source.receiptTrackerWeeks.some(week=> !week || !Array.isArray(week.rows))) throw Error("Purchase History requires review before adding an order.");

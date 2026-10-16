@@ -14448,6 +14448,7 @@ function renderCosts(){
           flatRows.push({
             dateISO: toIsoDate(row.date) || "",
             purchased: String(row.purchased || ""),
+            poNumber: String(row.poNumber ?? "").trim(),
             partNumber: String(row.partNumber || ""),
             qty: financials.qty,
             cost: financials.unitCost,
@@ -14463,13 +14464,14 @@ function renderCosts(){
       });
       flatRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
       if (!flatRows.length){
-        spendBody.innerHTML = '<tr><td colspan="10" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
+        spendBody.innerHTML = '<tr><td colspan="11" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
         return;
       }
       spendBody.innerHTML = flatRows.map(row => `
-        <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${escapeHtml(String(row.dateISO || ""))}" data-spend-week-key="${escapeHtml(String(row.weekKey || ""))}" data-spend-row-index="${escapeHtml(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+        <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${escapeHtml(String(row.dateISO || ""))}" data-spend-week-key="${escapeHtml(String(row.weekKey || ""))}" data-spend-row-index="${escapeHtml(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.poNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
           <td>${escapeHtml(row.dateISO || "—")}</td>
           <td>${escapeHtml(row.purchased || "—")}</td>
+          <td>${escapeHtml(row.poNumber || "N/A")}</td>
           <td>${escapeHtml(row.weekLabel || "—")}</td>
           <td>${escapeHtml(row.partNumber || "—")}</td>
           <td class="purchase-number">${escapeHtml(String(row.qty || 0))}</td>
@@ -14507,6 +14509,7 @@ function renderCosts(){
       body{font-family:Arial,sans-serif;padding:16px;color:#1e2b45;} h2{margin:0 0 6px;} .summary{margin:0 0 14px;}
       table{border-collapse:collapse;width:100%;margin-bottom:12px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
       th{background:#eef3fb;font-weight:700;} .right{text-align:right;} .totals td{font-weight:700;background:#f7f9fd;}
+      tbody td:nth-child(3){mso-number-format:"\\@";text-align:left;}
     </style></head><body>
       <h2>${escWorkbookHtml(title || "Export")}</h2>
       <div class="summary">${escWorkbookHtml(subtitle || "")}</div>
@@ -14660,6 +14663,17 @@ function renderCosts(){
         const tasks = (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).concat(Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []);
         return tasks.find(task => String(task?.name || "").trim().toLowerCase() === key) || null;
       }
+      // Shared with the legacy editor: task PN/price take precedence over inventory.
+      function purchaseSelection(name){
+        const typed = String(name || "").trim().toLowerCase();
+        if (!typed) return {task:null, inv:null, partNumber:"", price:null};
+        const task = findTaskByNameExact(name);
+        const items = Array.isArray(window.inventory) ? window.inventory : [];
+        const inv = (task?.inventoryId != null && items.find(item=> String(item?.id || "") === String(task.inventoryId)))
+          || items.find(item=> String(item?.name || "").trim().toLowerCase() === typed);
+        return {task, inv, partNumber:String(task?.pn || "").trim() || String(inv?.pn || "").trim(),
+          price:Number.isFinite(Number(task?.price)) ? Number(task.price) : Number.isFinite(Number(inv?.price)) ? Number(inv.price) : null};
+      }
       const saveWeekRowsFromDom = ({ persist = true, includeDrafts = false, showValidation = false } = {})=>{
         if (!(weekRowsBody instanceof HTMLElement)) return getWeekEntry(activeWeekKey);
         const groups = includeDrafts ? new Map(receiptDraftRows) : new Map();
@@ -14699,6 +14713,9 @@ function renderCosts(){
             if (showValidation && typeof toast === "function") toast("Saved order items cannot be removed individually. Whole-order editing is not available yet.");
             return null;
           }
+          // Tables group orders visually; retain the authoritative flat source order.
+          const positions = new Map(sources.map(([tr, row])=> [row, entry.rows.indexOf(receiptRowSources.get(tr)?.original)]));
+          rows.sort((a,b)=> (positions.get(a) < 0 ? Number.MAX_SAFE_INTEGER : positions.get(a)) - (positions.get(b) < 0 ? Number.MAX_SAFE_INTEGER : positions.get(b)));
           pending.push({ entry, rows, sources });
         }
         let changed = false;
@@ -14801,6 +14818,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         tr.innerHTML = `
           <td><input type="date" data-col="date" min="${escapeHtml(String(getWeekEntry(activeWeekKey)?.startISO || ""))}" max="${escapeHtml(String(getWeekEntry(activeWeekKey)?.endISO || ""))}"></td>
           <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" placeholder="Select existing item"></td>
+          <td>N/A</td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
           <td class="purchase-number"><input type="number" min="0" step="1" data-col="qty" placeholder="0"></td>
           <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
@@ -14810,7 +14828,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           <td class="purchase-number" data-col="total">${formatUsd(0)}</td>
           <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
           <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>`;
-        weekRowsBody.appendChild(tr);
+        (weekRowsBody.querySelector("[data-receipt-legacy-rows]") || weekRowsBody).appendChild(tr);
         rememberReceiptRow(tr, undefined);
         if (focusFirst){
           const first = tr.querySelector("[data-col='date']");
@@ -14837,6 +14855,36 @@ const appendEmptyRow = (focusFirst = false)=>{
         });
         if (weekSubtotal) weekSubtotal.textContent = formatUsd(subtotal);
       };
+      const layoutWeekOrderTables = ()=>{
+        if (!weekRowsBody.hasAttribute?.("data-receipt-week-groups")) return;
+        const groups = new Map(), legacy = [];
+        Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).forEach(tr=>{
+          const original = receiptRowSources.get(tr)?.original;
+          if (!original?.orderId){ legacy.push(tr); return; }
+          if (!groups.has(original.orderId)) groups.set(original.orderId, []);
+          groups.get(original.orderId).push(tr);
+        });
+        const sections = [];
+        const table = (title, elements, summary, orderId)=>{
+          const section = document.createElement("section");
+          section.className = "purchase-order-group";
+          if (orderId) section.dataset.receiptOrderId = orderId;
+          section.innerHTML = `<h4>${escapeHtml(title)}</h4>${summary ? `<p>${escapeHtml(summary)}</p>` : ""}<div class="cost-weekly-table-wrap"><table class="cost-table cost-receipt-week-table"><thead><tr><th>Date</th><th>Purchased Item</th><th>PO Num.</th><th>Part #</th><th class="purchase-number">Qty</th><th class="purchase-number">Unit Cost</th><th class="purchase-number">Item Subtotal</th><th class="purchase-number">Shipping</th><th class="purchase-number">Tax</th><th class="purchase-number">Total Spend</th><th>Inventory link</th><th>Actions</th></tr></thead><tbody${orderId ? "" : " data-receipt-legacy-rows"}></tbody></table></div>`;
+          section.querySelector("tbody").replaceChildren(...elements);
+          sections.push(section);
+        };
+        groups.forEach((elements, orderId)=>{
+          const originals = elements.map(tr=> receiptRowSources.get(tr).original), first = originals[0];
+          const totals = originals.reduce((sum,row)=>{
+            const values = getPurchaseFinancials(row);
+            sum.shipping += values.shipping; sum.tax += values.tax; sum.total += values.totalSpend; return sum;
+          }, {shipping:0,tax:0,total:0});
+          table(`Order ${sections.length + 1} — ${first.orderDateISO || first.date || "Undated"}`, elements,
+            `PO Num: ${String(first.poNumber ?? "").trim() || "N/A"} · Order Shipping: ${formatUsd(totals.shipping)} · Order Tax: ${formatUsd(totals.tax)} · Order Total: ${formatUsd(totals.total)} · View only`, orderId);
+        });
+        table("Other / Legacy Purchases", legacy);
+        weekRowsBody.replaceChildren(...sections);
+      };
       const renderWeekRows = ()=>{
         const entry = getWeekEntry(activeWeekKey);
         const rows = (Array.isArray(entry.rows) ? entry.rows : []).map(row=> normalizeRows([row])[0] || row);
@@ -14848,13 +14896,15 @@ const appendEmptyRow = (focusFirst = false)=>{
         if (receiptDraftRows.has(activeWeekKey)){
           weekRowsBody.replaceChildren(...receiptDraftRows.get(activeWeekKey));
           receiptDraftRows.delete(activeWeekKey);
+          layoutWeekOrderTables();
           recomputeWeekTotals();
           return;
         }
-        weekRowsBody.innerHTML = rows.map((row, idx) => `
+        weekRowsBody.innerHTML = '<table><tbody>' + rows.map((row, idx) => `
           <tr data-receipt-row="1" data-receipt-row-index="${idx}">
             <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}" min="${escapeHtml(String(entry.startISO || ""))}" max="${escapeHtml(String(entry.endISO || ""))}"></td>
-            <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" value="${escapeHtml(row.purchased || "")}">${row.orderId ? `<small title="${escapeHtml(row.orderId)}">Order ${escapeHtml(String(row.orderId).slice(-8))} · ${escapeHtml(row.orderDateISO || row.date || "")} · order shipping ${formatUsd(Number(row.orderShippingCents || 0) / 100)}. View only; edit the whole order in a future release.</small>` : ""}</td>
+            <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" value="${escapeHtml(row.purchased || "")}">${row.orderId ? `<small title="${escapeHtml(row.orderId)}">View only</small>` : ""}</td>
+            <td>${escapeHtml(String(row.poNumber ?? "").trim() || "N/A")}</td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
             <td class="purchase-number"><input type="number" min="0" step="1" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
@@ -14864,7 +14914,7 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td class="purchase-number" data-col="total">${formatUsd(computeRowTotal(row))}</td>
             <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
             <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>
-          </tr>`).join("");
+          </tr>`).join("") + '</tbody></table>';
         Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).forEach((tr, index)=>{
           rememberReceiptRow(tr, entry.rows[index]);
           if (entry.rows[index]?.orderId){
@@ -14873,6 +14923,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           }
         });
         appendEmptyRow();
+        layoutWeekOrderTables();
         recomputeWeekTotals();
       };
       const findInventoryByPartNumber = (partNumber)=>{
@@ -14975,6 +15026,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           <tr>
             <td>${escapeHtml(row.date || "—")}</td>
             <td>${escapeHtml(row.purchased || "—")}${row.orderId ? `<small title="${escapeHtml(row.orderId)}"> · Order ${escapeHtml(String(row.orderId).slice(-8))} (view only)</small>` : ""}</td>
+            <td>${escapeHtml(String(row.poNumber ?? "").trim() || "N/A")}</td>
             <td>${escapeHtml(row.partNumber || "—")}</td>
             <td class="purchase-number">${escapeHtml(String(financials.qty))}</td>
             <td class="purchase-number">${formatUsd(financials.unitCost)}</td>
@@ -14984,7 +15036,7 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td class="purchase-number">${formatUsd(financials.totalSpend)}</td>
             <td><span class="small muted">${stateLabel}</span></td>
           </tr>`;
-        }).join("") : '<tr><td colspan="10" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
+        }).join("") : '<tr><td colspan="11" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
         if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
         if (rangeLabel) rangeLabel.textContent = formatDateRangeLabel(start, end);
       };
@@ -15025,23 +15077,12 @@ const appendEmptyRow = (focusFirst = false)=>{
             const row = inputEl.closest("tr[data-receipt-row]");
             const typed = String(inputEl.value || "").trim();
             if (row && typed){
-              const task = findTaskByNameExact(typed);
-              const invFromTask = task && task.inventoryId != null && Array.isArray(window.inventory)
-                ? window.inventory.find(item => String(item?.id || "") === String(task.inventoryId))
-                : null;
-              const inv = invFromTask || (Array.isArray(window.inventory) ? window.inventory.find(item => String(item?.name || "").trim().toLowerCase() === typed.toLowerCase()) : null);
+              const {task, inv, partNumber, price} = purchaseSelection(typed);
               const partEl = row.querySelector('[data-col="partNumber"]');
               const costEl = row.querySelector('[data-col="cost"]');
               if (task || inv){
-                const taskPn = String(task?.pn || "").trim();
-                const taskPrice = Number(task?.price);
-                const invPn = String(inv?.pn || "").trim();
-                const invPrice = Number(inv?.price);
-                if (partEl instanceof HTMLInputElement) partEl.value = String(taskPn || invPn || partEl.value || "");
-                if (costEl instanceof HTMLInputElement){
-                  if (Number.isFinite(taskPrice)) costEl.value = String(taskPrice);
-                  else if (Number.isFinite(invPrice)) costEl.value = String(invPrice);
-                }
+                if (partEl instanceof HTMLInputElement) partEl.value = partNumber || partEl.value || "";
+                if (costEl instanceof HTMLInputElement && price !== null) costEl.value = String(price);
               }
             }
           }
@@ -15146,11 +15187,11 @@ const appendEmptyRow = (focusFirst = false)=>{
                 renderWeekRows();
                 renderRangeTable();
                 renderCentralSpendRows();
-                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                const field = weekRowsBody instanceof HTMLElement ? Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"))[focusRowIndex]?.querySelector('[data-col="purchased"]') : null;
                 if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
               },
               onClosed: ()=>{
-                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                const field = weekRowsBody instanceof HTMLElement ? Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"))[focusRowIndex]?.querySelector('[data-col="purchased"]') : null;
                 if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
               }
             });
@@ -15224,10 +15265,11 @@ const appendEmptyRow = (focusFirst = false)=>{
           const workbook = buildWorkbookFromTable({
             title: "Purchase History — Weekly Export",
             subtitle: weekRange,
-            headerRows: [["Date", "Purchased Item", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
+            headerRows: [["Date", "Purchased Item", "PO Num.", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
             bodyRows: rows.map(row => [
               row.date || "—",
               row.purchased || "—",
+              String(row.poNumber ?? "").trim() || "N/A",
               row.partNumber || "—",
               getPurchaseFinancials(row).qty.toFixed(2),
               getPurchaseFinancials(row).unitCost.toFixed(2),
@@ -15236,7 +15278,7 @@ const appendEmptyRow = (focusFirst = false)=>{
               getPurchaseFinancials(row).tax.toFixed(2),
               getPurchaseFinancials(row).totalSpend.toFixed(2)
             ]),
-            footerRows: [["", "", "", "", "", "", "", "Week Total Spend", Number(subtotal || 0).toFixed(2)]]
+            footerRows: [["", "", "", "", "", "", "", "", "Week Total Spend", Number(subtotal || 0).toFixed(2)]]
           });
           downloadWorkbook(`receipt-week-${entry.key || "week"}.xls`, workbook);
         });
@@ -15399,10 +15441,11 @@ const appendEmptyRow = (focusFirst = false)=>{
           const workbook = buildWorkbookFromTable({
             title: "Purchase History — Date Range Export",
             subtitle: formatDateRangeLabel(start, end),
-            headerRows: [["Date", "Purchased Item", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
+            headerRows: [["Date", "Purchased Item", "PO Num.", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
             bodyRows: rows.map(row => [
               row.date || "—",
               row.purchased || "—",
+              String(row.poNumber ?? "").trim() || "N/A",
               row.partNumber || "—",
               getPurchaseFinancials(row).qty.toFixed(2),
               getPurchaseFinancials(row).unitCost.toFixed(2),
@@ -15411,7 +15454,7 @@ const appendEmptyRow = (focusFirst = false)=>{
               getPurchaseFinancials(row).tax.toFixed(2),
               getPurchaseFinancials(row).totalSpend.toFixed(2)
             ]),
-            footerRows: [["", "", "", "", "", "", "", "Range Total Spend", Number(subtotal || 0).toFixed(2)]]
+            footerRows: [["", "", "", "", "", "", "", "", "Range Total Spend", Number(subtotal || 0).toFixed(2)]]
           });
           downloadWorkbook(`receipt-range-${activeRange}.xls`, workbook);
         });
@@ -15422,6 +15465,8 @@ const appendEmptyRow = (focusFirst = false)=>{
         const orders = window.OMAXPurchaseOrders;
         const dateInput = orderEditor.querySelector("[data-purchase-order-date]");
         const shippingInput = orderEditor.querySelector("[data-purchase-order-shipping]");
+        const taxInput = orderEditor.querySelector("[data-purchase-order-tax]");
+        const poInput = orderEditor.querySelector("[data-purchase-order-po]");
         const itemsBody = orderEditor.querySelector("[data-purchase-order-items]");
         const previewLabel = orderEditor.querySelector("[data-purchase-order-preview]");
         const status = orderEditor.querySelector("[data-purchase-order-status]");
@@ -15441,10 +15486,10 @@ const appendEmptyRow = (focusFirst = false)=>{
           }
         };
         const readDraft = ()=>{
-          draft.date = dateInput.value; draft.shipping = shippingInput.value;
+          draft.date = dateInput.value; draft.shipping = shippingInput.value; draft.tax = taxInput.value; draft.poNumber = poInput.value;
           itemsBody.querySelectorAll("tr[data-order-line]").forEach(tr=>{
             const item = draft.items.find(item=> item.lineId === tr.dataset.orderLine);
-            for (const field of ["purchased", "partNumber", "qty", "cost", "tax", "inventoryItemId"]) item[field] = tr.querySelector(`[data-order-field="${field}"]`).value;
+            for (const field of ["purchased", "partNumber", "qty", "cost", "inventoryItemId"]) item[field] = tr.querySelector(`[data-order-field="${field}"]`).value;
             const task = findTaskByNameExact(item.purchased);
             if (task) item.taskId = String(task.id); else delete item.taskId;
           });
@@ -15454,16 +15499,17 @@ const appendEmptyRow = (focusFirst = false)=>{
           readDraft();
           try {
             const planned = orders.plan(draft);
-            previewLabel.textContent = `Merchandise ${formatUsd(orders.dollars(planned.merchandiseCents))} · Shipping ${formatUsd(orders.dollars(planned.shippingCents))} · Total spend ${formatUsd(orders.dollars(planned.totalCents))}`;
+            previewLabel.textContent = `Merchandise ${formatUsd(orders.dollars(planned.merchandiseCents))} · Shipping ${formatUsd(orders.dollars(planned.shippingCents))} · Tax ${formatUsd(orders.dollars(planned.taxCents))} · Total spend ${formatUsd(orders.dollars(planned.totalCents))}`;
             planned.rows.forEach(row=>{
               const tr = itemsBody.querySelector(`[data-order-line="${row.lineId}"]`);
               tr.querySelector("[data-order-allocation]").textContent = formatUsd(row.shipping);
+              tr.querySelector("[data-order-tax-allocation]").textContent = formatUsd(row.tax);
               tr.querySelector("[data-order-total]").textContent = formatUsd(getPurchaseFinancials(row).totalSpend);
             });
             saveButton.disabled = saving || getPurchaseOrderApi().isUncertain();
           } catch (error){
             previewLabel.textContent = error.message;
-            itemsBody.querySelectorAll("[data-order-allocation], [data-order-total]").forEach(cell=>{ cell.textContent = "—"; });
+            itemsBody.querySelectorAll("[data-order-allocation], [data-order-tax-allocation], [data-order-total]").forEach(cell=>{ cell.textContent = "—"; });
             saveButton.disabled = true;
           }
         };
@@ -15473,9 +15519,8 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td><input data-order-field="partNumber" value="${escapeHtml(item.partNumber)}" aria-label="Part number"></td>
             <td><input type="number" min="1" step="1" data-order-field="qty" value="${escapeHtml(item.qty)}" aria-label="Quantity" required></td>
             <td><input type="number" min="0" step="0.01" data-order-field="cost" value="${escapeHtml(item.cost)}" aria-label="Unit cost" required></td>
-            <td><input type="number" min="0" step="0.01" data-order-field="tax" value="${escapeHtml(item.tax)}" aria-label="Line tax" required></td>
             <td><select data-order-field="inventoryItemId" aria-label="Optional inventory link"><option value="">No link</option>${(window.inventory || []).map(inv=> `<option value="${escapeHtml(String(inv.id))}"${item.inventoryItemId === String(inv.id) ? " selected" : ""}>${escapeHtml(inv.name || inv.pn || String(inv.id))}</option>`).join("")}</select></td>
-            <td data-order-allocation>—</td><td data-order-total>—</td>
+            <td data-order-allocation>—</td><td data-order-tax-allocation>—</td><td data-order-total>—</td>
             <td><button type="button" class="btn danger" data-order-remove="${escapeHtml(item.lineId)}">Remove Item</button></td>
           </tr>`).join("");
           updatePreview();
@@ -15491,11 +15536,24 @@ const appendEmptyRow = (focusFirst = false)=>{
             const today = new Date();
             const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
             draft = orders.newDraft(date, window.crypto);
-            dateInput.value = date; shippingInput.value = "0"; status.textContent = "";
+            dateInput.value = date; shippingInput.value = "0"; taxInput.value = "0"; poInput.value = ""; status.textContent = "";
             orderEditor.hidden = false; lockHistory(true); renderItems(); dateInput.focus();
           } catch (error){ status.textContent = error.message; orderEditor.hidden = false; }
         });
-        orderEditor.addEventListener("input", ()=>{ if (!saving) updatePreview(); });
+        orderEditor.addEventListener("input", event=>{
+          if (saving || !draft) return;
+          const input = event.target;
+          if (input.dataset.orderField === "purchased"){
+            const tr = input.closest("tr[data-order-line]"), selected = purchaseSelection(input.value);
+            tr.querySelector('[data-order-field="inventoryItemId"]').value = selected.inv ? String(selected.inv.id) : "";
+            if (selected.task || selected.inv){
+              const part = tr.querySelector('[data-order-field="partNumber"]');
+              part.value = selected.partNumber || part.value;
+              if (selected.price !== null) tr.querySelector('[data-order-field="cost"]').value = String(selected.price);
+            }
+          }
+          updatePreview();
+        });
         orderEditor.addEventListener("change", event=>{
           if (saving || !draft) return;
           const input = event.target;
@@ -20087,7 +20145,7 @@ function computeCostModel(){
       const purchased = String(row?.purchased || "").trim();
       const partNumber = String(row?.partNumber || "").trim();
       const financials = getPurchaseFinancials(row);
-      return { dateValue, purchased, partNumber, cost:financials.unitCost, qty:financials.qty, merchandiseSubtotal:financials.merchandiseSubtotal, shipping:financials.shipping, tax:financials.tax, total:financials.totalSpend };
+      return { dateValue, purchased, partNumber, poNumber:String(row?.poNumber ?? "").trim(), cost:financials.unitCost, qty:financials.qty, merchandiseSubtotal:financials.merchandiseSubtotal, shipping:financials.shipping, tax:financials.tax, total:financials.totalSpend };
     });
   };
   (Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks : []).forEach(weekEntry => {
@@ -20118,6 +20176,7 @@ function computeCostModel(){
         tax,
         total,
         merchandiseSubtotal,
+        poNumber:rawRow.poNumber,
         weekLabel,
         weekKey: key,
         rowIndex
@@ -20129,6 +20188,7 @@ function computeCostModel(){
     id: `spend_${idx}_${row.dateISO || "undated"}`,
     dateISO: row.dateISO || "—",
     purchased: row.purchased || "—",
+    poNumber: row.poNumber || "",
     weekLabel: row.weekLabel || "—",
     weekKey: row.weekKey || "",
     rowIndex: Number.isFinite(row.rowIndex) ? row.rowIndex : -1,

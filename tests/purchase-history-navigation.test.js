@@ -90,6 +90,17 @@ function harness({date="2026-10-15T12:00:00",weeks=[],save,remembered}={}){
 const row = extra=>({date:"2026-10-15",purchased:"Original",cost:15,qty:2,shipping:4,tax:2,...extra});
 const week = (rows,key="2026-W42")=>({key,year:Number(key.slice(0,4)),week:Number(key.slice(-2)),startISO:"2026-10-12",endISO:"2026-10-18",rows});
 
+test("grouped DOM order cannot reorder flat sources or strip legacy/old-order metadata",async()=>{
+  const legacy=row({qty:"1.5",poNumber:"0007",custom:{keep:true}}),a=row({orderId:"a",lineId:"a1",tax:2.125}),b=row({orderId:"b",lineId:"b1"}),a2=row({orderId:"a",lineId:"a2"});
+  const entry=week([legacy,a,b,a2]),before=JSON.stringify(entry),h=harness({weeks:[entry]});
+  const [l,ar,br,a2r,blank]=h.body.children;h.body.children=[ar,a2r,br,l,blank];
+  await h.week("2026-W43");await h.week("2026-W42");
+  await h.control("export-week").fire("click");assert.equal(JSON.stringify(entry),before);assert.equal(h.saves+h.autosaves,0);
+  await h.edit(3,"purchased","Edited legacy");assert.equal(JSON.stringify(entry.rows),JSON.stringify([{...legacy,purchased:"Edited legacy",taskId:""},a,b,a2]));
+  assert.strictEqual(entry.rows[1],a);assert.strictEqual(entry.rows[2],b);assert.strictEqual(entry.rows[3],a2);
+  assert.equal(entry.rows[0].poNumber,"0007");assert.equal(entry.rows[0].qty,"1.5");
+});
+
 test("ordinary opening selects local current ISO week/year and highlights it",async()=>{
   const h=harness({remembered:"2025-W01"});await h.open.fire("click");
   assert.equal(h.control("week-select").value,"2026-W42");assert.equal(h.control("year-select").value,"2026");
@@ -154,7 +165,7 @@ test("deletion followed by repeated saves preserves the surviving row's complete
 test("saved order lines are view-only and generic edit/remove/clear cannot change their allocations",async()=>{
   const original=row({lineId:"line-a",orderId:"order-a",orderShippingCents:400,orderDateISO:"2026-10-15"});
   const weeks=[week([original])],h=harness({weeks}),before=JSON.stringify(weeks);
-  assert.equal(h.input(0,"qty").readOnly,true);assert.match(h.body.html,/Order order-a/);
+  assert.equal(h.input(0,"qty").readOnly,true);assert.match(h.body.html,/<small title="order-a">View only<\/small>/);
   await h.remove(0);assert.equal(JSON.stringify(weeks),before);
   await h.edit(0,"qty","5");await h.control("save-week").fire("click");assert.equal(JSON.stringify(weeks),before);assert.equal(h.saves+h.autosaves,0);
   await h.control("clear-all").fire("click");assert.equal(JSON.stringify(weeks),before);
@@ -184,8 +195,9 @@ test("an edit arriving before a scheduled dashboard refresh cancels that refresh
 test("Export Range keeps POLISH-01 placement, generates financial output, and range navigation never saves",async()=>{
   const views=fs.readFileSync("js/views.js","utf8"),a=views.indexOf('id="costReceiptModal"'),b=views.indexOf('data-receipt-export-range',a);
   assert.ok(b>views.indexOf('class="cost-receipt-summary-controls"',a));assert.ok(b>views.indexOf('data-receipt-range-select',a));
-  const h=harness({weeks:[week([row()])]});h.control("range-select").value="all";await h.control("range-select").fire("change");await h.control("export-range").fire("click");
+  const h=harness({weeks:[week([row({poNumber:"0001250"})])]});h.control("range-select").value="all";await h.control("range-select").fire("change");await h.control("export-range").fire("click");
   assert.equal(h.exports[0].name,"receipt-range-all.xls");const html=await h.blobs.get(h.exports[0].url).text();assert.match(html,/Original/);assert.match(html,/36\.00/);assert.equal(h.saves+h.autosaves,0);
+  assert.match(html,/PO Num\./);assert.match(html,/0001250/);assert.ok(html.includes('mso-number-format:"\\@"'));
 });
 test("Chicago UTC-boundary dates and range labels stay on their local calendar day",()=>{
   const cp=require("node:child_process");const code=`const fs=require('node:fs'),vm=require('node:vm');const s=fs.readFileSync('js/renderers.js','utf8');class Clock extends Date{constructor(...a){super(...(a.length?a:['2027-01-04T00:30:00Z']));}}const c=vm.createContext({Date:Clock});vm.runInContext(s.slice(s.indexOf('    const weekStartFromIndex'),s.indexOf('    if (!Array.isArray(window.receiptTrackerWeeks))'))+s.slice(s.indexOf('    const formatDateRangeLabel'),s.indexOf('    const buildRangeRows'))+';this.key=currentReceiptWeek().key;this.label=formatDateRangeLabel(null,new Date(2026,9,15,23,59,59));',c);console.log(JSON.stringify({key:c.key,label:c.label}));`;

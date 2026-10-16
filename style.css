@@ -666,22 +666,29 @@ body.cost-receipt-modal-open{ overflow:hidden; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(3),
 #costReceiptModal .cost-receipt-summary-table th:nth-child(3){ width:130px; }
 #costReceiptModal .cost-receipt-week-table th:nth-child(4),
-#costReceiptModal .cost-receipt-summary-table th:nth-child(4){ width:65px; }
+#costReceiptModal .cost-receipt-summary-table th:nth-child(4){ width:130px; }
+#costReceiptModal .cost-receipt-week-table th:nth-child(5),
+#costReceiptModal .cost-receipt-summary-table th:nth-child(5){ width:65px; }
+#costReceiptModal .purchase-order-group table{ min-width:1450px; }
+#costReceiptModal .purchase-order-group th:nth-child(1){ width:155px; }
+#costReceiptModal .cost-receipt-summary-table{ min-width:1280px; }
 .cost-table .purchase-number{ text-align:right; font-variant-numeric:tabular-nums; }
+#costReceiptModal .purchase-order-group{ margin-bottom:22px; }
+#costReceiptModal .purchase-order-group h4{ margin-bottom:6px; }
 #costReceiptModal [data-purchase-order-editor] table{ table-layout:fixed; min-width:1080px; }
 #costReceiptModal [data-purchase-order-editor] th{ width:auto; white-space:normal; }
-#costReceiptModal [data-purchase-order-editor] th:nth-child(1){ width:18%; }
+#costReceiptModal [data-purchase-order-editor] th:nth-child(1){ width:20%; }
 #costReceiptModal [data-purchase-order-editor] th:nth-child(2){ width:10%; }
 #costReceiptModal [data-purchase-order-editor] th:nth-child(3){ width:6%; }
 #costReceiptModal [data-purchase-order-editor] th:nth-child(4){ width:9%; }
-#costReceiptModal [data-purchase-order-editor] th:nth-child(5){ width:8%; }
-#costReceiptModal [data-purchase-order-editor] th:nth-child(6){ width:19%; }
-#costReceiptModal [data-purchase-order-editor] th:nth-child(7){ width:11%; }
+#costReceiptModal [data-purchase-order-editor] th:nth-child(5){ width:18%; }
+#costReceiptModal [data-purchase-order-editor] th:nth-child(6){ width:9%; }
+#costReceiptModal [data-purchase-order-editor] th:nth-child(7){ width:9%; }
 #costReceiptModal [data-purchase-order-editor] th:nth-child(8){ width:10%; }
 #costReceiptModal [data-purchase-order-editor] th:nth-child(9){ width:9%; }
 #costReceiptModal [data-purchase-order-editor] input,
 #costReceiptModal [data-purchase-order-editor] select{ box-sizing:border-box; width:100%; min-width:0; }
-#costReceiptModal .cost-receipt-week-table td:nth-child(n+4):nth-child(-n+9),
+#costReceiptModal .cost-receipt-week-table td:nth-child(n+5):nth-child(-n+10),
 #costReceiptModal .cost-receipt-week-table input[type="number"]{ text-align:right; font-variant-numeric:tabular-nums; }
 @media (max-width: 640px){
   .cost-timeframe-card-body{ padding:24px 18px 28px; }
