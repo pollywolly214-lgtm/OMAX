@@ -7659,7 +7659,9 @@ async function saveCuttingJobCategoryChange(request){
     ||!canWriteCloud("cutting-job category edit"))return failure("Category editing is unavailable while another save or recovery review is active.");
   if(typeof window.CuttingJobCategoryEdit?.plan!=="function")return failure("Category editor is unavailable.");
   window.__categoryMutationPending=true;
-  const target=captureCuttingJobSaveTarget();
+  let target;
+  try{target=captureCuttingJobSaveTarget();}
+  catch(error){window.__categoryMutationPending=false;return failure(error);}
   const key=stableStringifyForIntegrity, actor=FB.user.uid,client=getCloudSyncClientId();
   let writeStarted=false,acknowledged=false;
   const evidence={request:cloneStructured(request)};
@@ -7694,6 +7696,9 @@ async function saveCuttingJobCategoryChange(request){
     const planned=window.CuttingJobCategoryEdit.plan(source,request);
     if(!planned.ok)throw Error(planned.reason);
     if(!planned.summary.changed)return {saved:false,unchanged:true,error:"No category changes to save."};
+    if(request.expectedActiveCount!==undefined && Number(request.expectedActiveCount)!==planned.summary.activeCount
+      ||request.expectedCompletedCount!==undefined && Number(request.expectedCompletedCount)!==planned.summary.completedCount)
+      throw Error("The number of associated cutting jobs changed since confirmation. Review again.");
     // A second source comparison inside CAS rejects changes after the reviewed preview.
     if(request.expectedOldName!==undefined&&String(request.expectedOldName)!==String(source.jobFolders.find(f=>String(f.id)===String(request.categoryId))?.name??""))
       throw Error("Category name changed since the editor opened.");
