@@ -21453,6 +21453,8 @@ function renderJobs(){
   const noteCancelBtns = content.querySelectorAll("[data-note-cancel]");
   const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   let activeNoteJobId = null;
+  let noteSaveInFlight = false;
+  let noteSaveRequiresReload = false;
   let lastNoteTrigger = null;
   let lastNoteTriggerSelector = "";
   let openFileMenuId = null;
@@ -21788,6 +21790,7 @@ function renderJobs(){
   };
 
   const openJobNoteModal = (jobId, { appendBlank = false, trigger = null } = {})=>{
+    if (noteSaveInFlight) return;
     if (!noteBackdrop || !noteTextarea) return;
     const id = jobId != null ? String(jobId) : "";
     if (!id) return;
@@ -21803,12 +21806,13 @@ function renderJobs(){
     renderNoteHistory(normalized);
     noteBackdrop.hidden = false;
     noteBackdrop.classList.add("open");
+    noteBackdrop.querySelector(".job-note-modal")?.scrollTo(0, 0);
     const resolvedTrigger = trigger || content.querySelector(`[data-job-note="${id}"]`);
     lastNoteTrigger = resolvedTrigger || null;
     lastNoteTriggerSelector = `[data-job-note="${id}"]`;
     requestAnimationFrame(()=>{
       try {
-        noteTextarea.focus();
+        noteTextarea.focus({ preventScroll: true });
         const len = noteTextarea.value.length;
         noteTextarea.setSelectionRange(len, len);
       } catch (_err) { }
@@ -21943,6 +21947,7 @@ function renderJobs(){
   }
 
   const closeJobNoteModal = ()=>{
+    if (noteSaveInFlight) return;
     if (!noteBackdrop) return;
     noteBackdrop.classList.remove("open");
     noteBackdrop.hidden = true;
@@ -21958,26 +21963,44 @@ function renderJobs(){
     lastNoteTriggerSelector = "";
   };
 
-  const handleJobNoteSave = ({ keepOpen = false, prepareNew = false } = {})=>{
-    if (!activeNoteJobId || !noteTextarea) return;
-    const { job, source } = findJobRecord(activeNoteJobId);
+  const handleJobNoteSave = async ({ keepOpen = false, prepareNew = false } = {})=>{
+    if (!activeNoteJobId || !noteTextarea || noteSaveInFlight || noteSaveRequiresReload) return;
+    const id = activeNoteJobId;
+    const { job } = findJobRecord(id);
     if (!job) return;
     const raw = typeof noteTextarea.value === "string" ? noteTextarea.value : "";
     const normalized = raw.replace(/\s+$/, "");
-    job.notes = normalized;
-    if (source === "history"){
-      window.completedCuttingJobs = completedCuttingJobs;
-    } else {
-      window.cuttingJobs = cuttingJobs;
+    noteSaveInFlight = true;
+    const controls = [noteSaveBtn, noteSaveNewBtn, ...noteCancelBtns].filter(Boolean);
+    controls.forEach(control=>{ control.disabled = true; });
+    noteTextarea.readOnly = true;
+    noteBackdrop.setAttribute("aria-busy", "true");
+    try {
+      const result = await saveCuttingJobEdit(id, { notes: normalized });
+      noteSaveRequiresReload = result?.requiresReload === true || result?.indeterminate === true;
+      if (!result?.saved || !result?.verified || noteSaveRequiresReload){
+        toast(result?.error || "Note save was not confirmed. Keep this draft and reload if verification is required.");
+        return result;
+      }
+      cuttingJobs = window.cuttingJobs;
+      completedCuttingJobs = window.completedCuttingJobs;
+    } catch (error){
+      noteSaveRequiresReload = true;
+      toast(`Note save could not be confirmed. Keep this draft and reload before retrying. ${error?.message || error}`);
+      return;
+    } finally {
+      noteSaveInFlight = false;
+      controls.forEach(control=>{ control.disabled = noteSaveRequiresReload && (control === noteSaveBtn || control === noteSaveNewBtn); });
+      noteTextarea.readOnly = false;
+      noteBackdrop.removeAttribute("aria-busy");
     }
-    saveCloudDebounced();
     toast("Notes updated");
     if (keepOpen){
-      window.__pendingJobNoteModal = { jobId: String(job.id), appendBlank: !!prepareNew };
+      window.__pendingJobNoteModal = { jobId: id, appendBlank: !!prepareNew };
       window.__pendingJobNoteReturn = "";
     } else {
       window.__pendingJobNoteModal = null;
-      window.__pendingJobNoteReturn = String(job.id);
+      window.__pendingJobNoteReturn = id;
     }
     renderJobs();
   };

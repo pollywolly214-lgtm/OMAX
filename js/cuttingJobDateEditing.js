@@ -86,6 +86,14 @@
     }
     if(operation.type==="edit"){
       if(!operation.updates||Object.keys(operation.updates).some(key=>!EDIT_FIELDS.has(key)))return fail("Unsupported job edit field.");
+      // Notes use the same guarded edit writer without normalizing dates,
+      // numbering, priorities, categories, or audit history on existing jobs.
+      if(Object.keys(operation.updates).length===1&&Object.hasOwn(operation.updates,"notes")){
+        if(typeof operation.updates.notes!=="string")return fail("Job notes must be text.");
+        const hasChanges=target.notes!==operation.updates.notes;
+        target.notes=operation.updates.notes;
+        return{ok:true,nextState,hasChanges,renumbering:{ok:true,changed:[]},chronologyChanges:[]};
+      }
       Object.assign(target,clone(operation.updates));
       if(Object.hasOwn(operation.updates,"startISO")&&!chronology.validCutDate(target.startISO))return fail("Enter a valid Start Date.");
       if(Object.hasOwn(operation.updates,"completedAtISO")&&(!wasCompleted||!dateKey(target.completedAtISO)))return fail("Enter a valid Completion Date for a completed job.");
