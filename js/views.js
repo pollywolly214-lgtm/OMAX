@@ -4535,10 +4535,19 @@ function viewJobs(){
       <button type="button" data-wjcuts-open-setup>Open WJ Cuts setup</button>
     </div>
 
-    <div class="job-category-modal" id="jobCategoryManager" role="dialog" aria-modal="true" aria-labelledby="jobCategoryManagerTitle" hidden>
+    <div class="job-category-modal" id="jobCategoryManager" role="dialog" aria-modal="true" aria-labelledby="jobCategoryManagerTitle" ${window.jobCategoryManagerOpen ? "" : "hidden"}>
       <div class="job-category-backdrop" data-job-category-close></div>
       <div class="job-category-modal-card">
         <div class="job-category-modal-heading"><h3 id="jobCategoryManagerTitle">Edit Categories</h3><button type="button" data-job-category-close aria-label="Close categories">×</button></div>
+        <form id="jobCategoryEditForm" class="job-category-edit-form" hidden>
+          <h4>Edit existing category</h4>
+          <input type="hidden" name="categoryId">
+          <label>Project Number <input name="projectNumber" type="text" autocomplete="off" required></label>
+          <label>Category Name <input name="categoryName" type="text" maxlength="120" required></label>
+          <p class="small muted">The category keeps its ID. Linked active and completed jobs keep their IDs and history.</p>
+          <p class="job-category-edit-status" role="status" aria-live="polite"></p>
+          <div class="job-category-edit-actions"><button type="button" data-job-category-edit-cancel>Cancel</button><button type="submit" data-job-category-edit-save>Review &amp; Save</button></div>
+        </form>
         <div class="block job-category-panel" data-job-category-panel>
           <div class="job-category-header">
             <h3>Job Categories</h3>
