@@ -2208,30 +2208,15 @@ function showJobBubble(jobId, anchor){
     if (!active && completed){
       const finishedDate = completed.completedAtISO ? parseDateLocal(completed.completedAtISO) : null;
       const finishedText = finishedDate ? finishedDate.toDateString() : "—";
-      const estimateVal = Number(completed.estimateHours);
-      const actualVal = Number(completed.actualHours);
-      const estimateText = Number.isFinite(estimateVal) ? `${estimateVal.toFixed(1)} hr` : "—";
-      const actualText = Number.isFinite(actualVal) ? `${actualVal.toFixed(1)} hr` : "—";
+      const profit = computeCuttingJobProfit(completed);
+      const hoursText = `${profit.hours.toFixed(1)} hr`;
       const materialText = completed.material ? escapeHtml(completed.material) : "—";
       const dueText = completed.dueISO ? (parseDateLocal(completed.dueISO)?.toDateString() || "—") : "—";
       const startText = completed.startISO ? (parseDateLocal(completed.startISO)?.toDateString() || "—") : "—";
-      const effData = completed && completed.efficiency ? completed.efficiency : {};
-      const chargeRateVal = Number.isFinite(Number(effData.chargeRate)) && Number(effData.chargeRate) >= 0
-        ? Number(effData.chargeRate)
-        : (Number.isFinite(Number(completed.chargeRate)) && Number(completed.chargeRate) >= 0 ? Number(completed.chargeRate) : JOB_RATE_PER_HOUR);
-      const materialTotalCompleted = Number(completed.materialCost || 0) * Number(completed.materialQty || 0);
-      const hoursForCost = Number.isFinite(Number(completed.actualHours)) && Number(completed.actualHours) > 0
-        ? Number(completed.actualHours)
-        : (Number.isFinite(Number(completed.estimateHours)) && Number(completed.estimateHours) > 0 ? Number(completed.estimateHours) : 0);
-      const fallbackCost = hoursForCost > 0 ? (materialTotalCompleted / hoursForCost) : 0;
-      const costRateVal = Number.isFinite(Number(effData.costRate))
-        ? Number(effData.costRate)
-        : JOB_BASE_COST_PER_HOUR + fallbackCost;
-      const netRateVal = Number.isFinite(Number(effData.netRate))
-        ? Number(effData.netRate)
-        : chargeRateVal - costRateVal;
-      const hoursForNet = hoursForCost > 0 ? hoursForCost : 0;
-      const netTotalVal = netRateVal * hoursForNet;
+      const chargeRateVal = profit.chargeRate;
+      const costRateVal = -profit.costRate;
+      const netRateVal = profit.netRate;
+      const netTotalVal = profit.totalProfit;
       const rateText = formatRate(netRateVal, { showPlus: true });
       const notesHtml = completed.notes ? `<div class="bubble-kv"><span>Notes:</span><span>${escapeHtml(completed.notes)}</span></div>` : "";
       const netTotalText = Number.isFinite(netTotalVal)
@@ -2243,8 +2228,7 @@ function showJobBubble(jobId, anchor){
         <div class="bubble-kv"><span>Status:</span><span>Completed</span></div>
         <div class="bubble-kv"><span>Finished:</span><span>${escapeHtml(finishedText)}</span></div>
         <div class="bubble-kv"><span>Schedule:</span><span>${escapeHtml(startText)} → ${escapeHtml(dueText)}</span></div>
-        <div class="bubble-kv"><span>Estimate:</span><span>${escapeHtml(estimateText)}</span></div>
-        <div class="bubble-kv"><span>Actual hours:</span><span>${escapeHtml(actualText)}</span></div>
+        <div class="bubble-kv"><span>Hours Taken:</span><span>${escapeHtml(hoursText)}</span></div>
         <div class="bubble-kv"><span>Material:</span><span>${materialText}</span></div>
         <div class="bubble-kv"><span>Charge rate:</span><span>${escapeHtml(formatRate(chargeRateVal))}</span></div>
         <div class="bubble-kv"><span>Cost rate:</span><span>${escapeHtml(formatRate(costRateVal))}</span></div>
@@ -2322,33 +2306,21 @@ function showJobBubble(jobId, anchor){
     const dueDate   = parseDateLocal(j.dueISO);
     const startTxt  = startDate ? startDate.toDateString() : "—";
     const dueTxt    = dueDate   ? dueDate.toDateString()   : "—";
-    const chargeRateVal = Number.isFinite(Number(eff.chargeRate)) && Number(eff.chargeRate) >= 0
-      ? Number(eff.chargeRate)
-      : (Number.isFinite(Number(j.chargeRate)) && Number(j.chargeRate) >= 0 ? Number(j.chargeRate) : JOB_RATE_PER_HOUR);
-    const matTotalActive = (Number(j.materialCost)||0) * (Number(j.materialQty)||0);
-    const estHoursActive = Number(j.estimateHours) || 0;
-    const fallbackCostRateActive = JOB_BASE_COST_PER_HOUR + (estHoursActive > 0 ? (matTotalActive / estHoursActive) : 0);
-    const costRateVal = Number.isFinite(Number(eff.costRate))
-      ? Number(eff.costRate)
-      : fallbackCostRateActive;
-    const netRateVal = Number.isFinite(Number(eff.netRate))
-      ? Number(eff.netRate)
-      : chargeRateVal - costRateVal;
+    const profit = computeCuttingJobProfit(j);
+    const chargeRateVal = profit.chargeRate;
+    const costRateVal = -profit.costRate;
+    const netRateVal = profit.netRate;
     const chargeRateText = formatRate(chargeRateVal);
     const costRateText = formatRate(costRateVal);
     const netRateText = formatRate(netRateVal, { showPlus: true });
-    const actualHoursActive = Number.isFinite(Number(eff.actualHours)) && Number(eff.actualHours) > 0
-      ? Number(eff.actualHours)
-      : 0;
-    const hoursForNetActive = estHoursActive > 0 ? estHoursActive : actualHoursActive;
-    const netTotalVal = hoursForNetActive > 0 ? (netRateVal * hoursForNetActive) : 0;
+    const netTotalVal = profit.totalProfit;
     const netTotalText = Number.isFinite(netTotalVal)
       ? `${netTotalVal >= 0 ? "+" : "−"}$${Math.abs(netTotalVal).toFixed(2)}`
       : "—";
     const netTotalHtml = `${escapeHtml(netTotalText)}${netRateText !== "—" ? ` <span class="muted">@ ${escapeHtml(netRateText)}</span>` : ""}`;
     b.innerHTML = `
       <div class="bubble-title">${j.name}</div>
-      <div class="bubble-kv"><span>Estimate:</span><span>${j.estimateHours} hrs</span></div>
+      <div class="bubble-kv"><span>Hours Taken:</span><span>${profit.hours} hrs</span></div>
       <div class="bubble-kv"><span>Material:</span><span>${j.material || "—"}</span></div>
       <div class="bubble-kv"><span>Schedule:</span><span>${startTxt} → ${dueTxt}</span></div>
       <div class="bubble-kv"><span>Priority:</span><span>Priority ${jobPriority}</span></div>

@@ -332,12 +332,12 @@ function viewDashboard(){
             <label>Job name<input id="dashJobName" required placeholder="Job"></label>
             <label class="job-estimate-label-group">
               <span class="small muted" id="dashJobEstimateBreakdown">0 hrs = 0 hrs 0 min</span>
-              Estimate (hrs)
+              Hours Taken (hrs)
               <input type="number" min="0.01" step="0.01" id="dashJobEstimate" required placeholder="e.g. 12">
             </label>
             <label>Add minutes<input type="number" min="0" step="1" id="dashJobEstimateMinutes" placeholder="e.g. 45"></label>
             <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCharge" value="200"></label>
-            <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" id="dashJobCostRate" value="45"></label>
+            <label>Cost rate ($/hr)<input type="number" step="0.01" id="dashJobCostRate" value="45"></label>
             <label>Material<input id="dashJobMaterial" placeholder="Material" list="dashJobMaterialOptions"></label>
             <label>Material cost ($)<input type="number" min="0" step="0.01" id="dashJobMaterialCost" placeholder="optional"></label>
             <label>Material quantity<input type="number" min="0" step="0.01" id="dashJobMaterialQty" placeholder="optional"></label>
@@ -1541,9 +1541,7 @@ function viewCosts(model){
           const milestoneTitle = job.type === "completed" ? "Completed" : "Due";
           const milestoneLabel = formatDateLabel(milestoneISO);
           const milestoneMarkup = milestoneLabel !== "—" ? `<div class=\"small muted\">${esc(milestoneTitle)}: ${esc(milestoneLabel)}</div>` : "";
-          const actualHours = Number(job.actualHours) > 0 ? Number(job.actualHours) : Number(job.durationHours);
-          const jobActualLabel = formatHoursValue(actualHours);
-          const jobEstimateLabel = formatHoursValue(job.estimateHours);
+          const hoursLabel = formatHoursValue(job.estimateHours);
           const materialLabel = formatCurrencyValue(job.materialCost);
           const laborLabel = formatCurrencyValue(job.laborCost);
           const machineLabel = formatCurrencyValue(job.machineCost);
@@ -1554,8 +1552,7 @@ function viewCosts(model){
               <th scope="row"><div class=\"cost-category-job-name\">${jobName}</div>${milestoneMarkup}</th>
               <td>${jobIdSafe}</td>
               <td>${statusLabel}${statusDetail}</td>
-              <td>${jobActualLabel}</td>
-              <td>${jobEstimateLabel}</td>
+              <td>${hoursLabel}</td>
               <td>${materialLabel}</td>
               <td>${laborLabel}</td>
               <td>${machineLabel}</td>
@@ -1564,7 +1561,7 @@ function viewCosts(model){
             </tr>
           `;
         }).join("")
-      : `<tr><td colspan="10" class="cost-table-placeholder">No jobs in this category.</td></tr>`;
+      : `<tr><td colspan="9" class="cost-table-placeholder">No jobs in this category.</td></tr>`;
     return `
       <div class="cost-category-jobs-table-wrap">
         <table class="cost-table cost-category-jobs-table">
@@ -1573,12 +1570,10 @@ function viewCosts(model){
               <th scope="col" rowspan="2">Job</th>
               <th scope="col" rowspan="2">Job ID</th>
               <th scope="col" rowspan="2">Status</th>
-              <th scope="col" colspan="2">Hours</th>
+              <th scope="col" rowspan="2">Hours Taken</th>
               <th scope="col" colspan="5">Costs</th>
             </tr>
             <tr>
-              <th scope="col">Actual</th>
-              <th scope="col">Estimate</th>
               <th scope="col">Material</th>
               <th scope="col">Labor</th>
               <th scope="col">Machine</th>
@@ -2610,7 +2605,7 @@ function viewCosts(model){
             </label>
             <label>
               <span class="label">Cost / hr (temporary)</span>
-              <input type="number" step="1" min="0" value="${esc((Number.isFinite(Number(calculatorDefaults.costRate)) ? Number(calculatorDefaults.costRate) : 0).toFixed(2))}" data-efficiency-calc-cost>
+              <input type="number" step="1" value="${esc((Number.isFinite(Number(calculatorDefaults.costRate)) ? Number(calculatorDefaults.costRate) : 0).toFixed(2))}" data-efficiency-calc-cost>
             </label>
             <label>
               <span class="label">Time range</span>
@@ -2637,18 +2632,18 @@ function viewCosts(model){
         <div class="cost-jobs-summary">
           <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
           <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
-          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Total net gain</span><span data-efficiency-summary-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
-          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"}`.trim())}"><span class="label">Avg net gain / row</span><span data-efficiency-summary-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
+          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"}`.trim())}"><span class="label">Total net gain</span><span data-efficiency-summary-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
+          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"}`.trim())}"><span class="label">Avg net gain / row</span><span data-efficiency-summary-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
           <div><span class="label">Total run cost</span><span data-efficiency-summary-cost>${esc(efficiencySnapshot.totalCostLabel || "$0.00")}</span></div>
           <div><span class="label">Avg run cost / row</span><span data-efficiency-summary-cost-average>${esc(efficiencySnapshot.averageCostLabel || "$0.00")}</span></div>
         </div>
-        <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
+        <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
         <div class="cost-weekly-table-wrap">
           <table class="cost-table">
             <thead><tr><th>Task</th>
                   <th>Source</th><th>Date</th>
                   <th>Original</th>
-                  <th>Note</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net gain</th><th>Task link</th></tr></thead>
+                  <th>Note</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net gain</th><th>Task link</th></tr></thead>
             <tbody>
               ${efficiencyRows.length ? efficiencyRows.map(row => `
                 <tr data-efficiency-row data-efficiency-id="${esc(row.id || "")}" data-efficiency-date="${esc(row.dateLabel || "")}" data-efficiency-hours="${esc(String(Number(row.hoursValue) || 0))}" data-efficiency-material="${esc(String(Number(row.materialValue || 0)))}">
@@ -2658,7 +2653,7 @@ function viewCosts(model){
                   <td>${esc(row.partCostLabel || "$0.00")}</td>
                   <td data-efficiency-labor-cell>${esc(row.laborCostLabel || "$0.00")}</td>
                   <td data-efficiency-total-cost-cell>${esc(row.totalCostLabel || "$0.00")}</td>
-                  <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.netGainLabel || "$0.00")}</td>
+                  <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.netGainLabel || "$0.00")}</td>
                   <td>${row.settingsLink ? `<button type="button" class="btn secondary" data-efficiency-open-job="${esc(row.id || "")}">Open job</button>` : "Invalid link"}</td>
                 </tr>
               `).join("") : `
@@ -2695,6 +2690,49 @@ function viewCosts(model){
       </div>
     </div>
 `;
+}
+
+function cuttingJobFinancialTone(key, value){
+  if (key === "failurePercent") return value > 0 ? "job-finance-warning" : "job-finance-neutral";
+  if (["cuttingCost", "materialExpense", "revenueLost"].includes(key)) return value > 0 ? "job-finance-negative" : "job-finance-neutral";
+  return value > 0 ? "job-finance-positive" : value < 0 ? "job-finance-negative" : "job-finance-neutral";
+}
+
+function formatCuttingJobFinancialValue(profit, key){
+  if (key === "failurePercent") return `${Math.round(profit[key])}%`;
+  const value = ["cuttingCost", "materialExpense"].includes(key) ? (-profit[key] || 0) : profit[key];
+  return new Intl.NumberFormat(undefined, {style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(value);
+}
+
+function expandedCuttingJobNetIds(){
+  if (!(window.__expandedCuttingJobNetIds instanceof Set)) window.__expandedCuttingJobNetIds = new Set();
+  return window.__expandedCuttingJobNetIds;
+}
+
+function renderCuttingJobNetBreakdown(job){
+  const profit = computeCuttingJobProfit(job);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const id = String(job.id);
+  const expanded = expandedCuttingJobNetIds().has(id);
+  const detailsId = `jobNetDetails_${encodeURIComponent(id)}`;
+  const money = key => esc(formatCuttingJobFinancialValue(profit, key));
+  const tone = key => cuttingJobFinancialTone(key, profit[key]);
+  const rate = value => esc(new Intl.NumberFormat(undefined, {style:"currency",currency:"USD",minimumFractionDigits:0,maximumFractionDigits:20}).format(value));
+  const hours = esc(String(profit.hours));
+  const fields = [["failurePercent","Failure percentage"],["revenue","Original revenue"],["adjustedRevenue","Revenue remaining"],
+    ["cuttingCost","Full cutting expense"],["materialExpense","Full material expense"],["originalNetProfit","Original net profit"],
+    ["totalProfit","Adjusted net profit"],["revenueLost","Revenue lost / potential profit reduction"]];
+  return `<div class="job-net-summary" data-job-net-id="${esc(id)}">
+    <div class="job-net-total">Net Total: <strong class="${tone("totalProfit")}">${money("totalProfit")}</strong></div>
+    <div class="${tone("revenue")}">Revenue: ${rate(profit.chargeRate)}/hr × ${hours} hr = ${money("revenue")}</div>
+    <div class="${tone("materialExpense")}">Material Expense: ${money("materialExpense")}</div>
+    <div class="${tone("cuttingCost")}">Cutting Expense: ${rate(-profit.costRate || 0)}/hr × ${hours} hr = ${money("cuttingCost")}</div>
+    <div class="${tone("failurePercent")}">Failure: ${money("failurePercent")}</div>
+    <button type="button" class="job-net-toggle" data-job-net-toggle aria-expanded="${expanded}" aria-controls="${esc(detailsId)}">${expanded ? "Collapse" : "Expand"}</button>
+    <dl class="job-net-breakdown" id="${esc(detailsId)}" data-job-net-details ${expanded ? "" : "hidden"}>
+      ${fields.map(([key,label])=>`<dt>${label}</dt><dd class="${tone(key)}">${money(key)}</dd>`).join("")}
+    </dl>
+  </div>`;
 }
 
 function viewJobs(){
@@ -3065,44 +3103,10 @@ function viewJobs(){
     : ((typeof DAILY_HOURS === "number" && Number.isFinite(DAILY_HOURS) && DAILY_HOURS > 0)
       ? Number(DAILY_HOURS)
       : 8);
-  const resolveActualHours = (job, eff = {}) => {
-    const actualRaw = job?.actualHours;
-    const actualNum = Number(actualRaw);
-    if (actualRaw !== undefined && actualRaw !== null && actualRaw !== "" && Number.isFinite(actualNum) && actualNum >= 0){
-      return actualNum;
-    }
-    const effRaw = eff?.actualHours;
-    const effNum = Number(effRaw);
-    return (effRaw !== undefined && effRaw !== null && effRaw !== "" && Number.isFinite(effNum) && effNum >= 0)
-      ? effNum
-      : null;
-  };
-
-  const computeJobNetTotal = (job, eff, { preferActual = false } = {}) => {
-    if (!job) return 0;
-    const efficiency = eff || {};
-    const estimateHours = Number(job.estimateHours) || 0;
-    const chargeSource = efficiency.chargeRate != null ? Number(efficiency.chargeRate) : Number(job.chargeRate);
-    const chargeRate = Number.isFinite(chargeSource) && chargeSource >= 0 ? chargeSource : JOB_RATE_PER_HOUR;
-    const materialCost = Number(job.materialCost) || 0;
-    const materialQty = Number(job.materialQty) || 0;
-    const materialTotal = materialCost * materialQty;
-    const actualHours = resolveActualHours(job, efficiency);
-    const hoursFromEstimate = estimateHours > 0 ? estimateHours : 0;
-    const hoursFromActual = Number.isFinite(actualHours) && actualHours > 0 ? actualHours : 0;
-    const hoursForTotal = preferActual
-      ? (hoursFromActual || hoursFromEstimate)
-      : (hoursFromEstimate || hoursFromActual);
-    let costRate;
-    if (efficiency && efficiency.costRate != null && Number.isFinite(Number(efficiency.costRate))){
-      costRate = Number(efficiency.costRate);
-    } else {
-      costRate = JOB_BASE_COST_PER_HOUR;
-    }
-    const netRate = chargeRate - costRate;
-    const totalHours = hoursForTotal > 0 ? hoursForTotal : 0;
-    return (netRate * totalHours) - materialTotal;
-  };
+  const resolveJobHours = job => computeCuttingJobProfit(job).hours;
+  const resolveChargeRate = job => computeCuttingJobProfit(job).chargeRate;
+  const resolveCostRate = job => -computeCuttingJobProfit(job).costRate;
+  const computeJobNetTotal = job => computeCuttingJobProfit(job).totalProfit;
 
   const pendingFiles = Array.isArray(window.pendingNewJobFiles) ? window.pendingNewJobFiles : [];
   const pendingSummary = pendingFiles.length
@@ -3142,23 +3146,13 @@ function viewJobs(){
     if (!job) return false;
     if (!historyQuery) return true;
     if (editingCompletedJobsSet.has(String(job.id))) return true;
-    const eff = job && job.efficiency ? job.efficiency : {};
-    const delta = Number(eff.deltaHours);
-    const netTotal = computeJobNetTotal(job, eff, { preferActual: true });
-    const actualHours = resolveActualHours(job, eff);
-    const estHours = Number(job.estimateHours);
-    const statusLabel = Number.isFinite(delta) && Math.abs(delta) > 0.1
-      ? (delta > 0 ? "Finished ahead" : "Finished behind")
-      : "Finished on estimate";
-    const statusDetail = Number.isFinite(delta) && Math.abs(delta) > 0.1
-      ? `${delta > 0 ? "+" : "-"}${Math.abs(delta).toFixed(1)} hr`
-      : "";
+    const netTotal = computeJobNetTotal(job);
+    const statusLabel = "Completed";
     const completedLabel = formatDate(job?.completedAtISO);
     const startLabel = formatDate(job?.startISO);
     const dueLabel = formatDate(job?.dueISO);
     const categoryLabel = folderMap.get(normalizeCategory(job?.cat))?.name || "";
-    const actualLabel = formatHours(actualHours);
-    const estimateLabel = formatHours(estHours);
+    const hoursLabel = formatHours(resolveJobHours(job));
     const tokens = [
       job.id,
       job.name,
@@ -3169,19 +3163,12 @@ function viewJobs(){
       job.dueISO,
       categoryLabel,
       statusLabel,
-      statusDetail,
-      Number.isFinite(delta) ? delta.toFixed(1) : "",
-      Number.isFinite(delta) ? (delta > 0 ? "ahead" : delta < 0 ? "behind" : "on pace") : "",
       Number.isFinite(netTotal) ? netTotal.toString() : ""
     ];
     [completedLabel, startLabel, dueLabel].forEach(label => {
       if (label && label !== "—") tokens.push(label);
     });
-    if (actualLabel && actualLabel !== "—") tokens.push(actualLabel);
-    if (estimateLabel && estimateLabel !== "—") tokens.push(estimateLabel);
-    if (actualLabel && estimateLabel && actualLabel !== "—" && estimateLabel !== "—"){
-      tokens.push(`${actualLabel} / ${estimateLabel}`);
-    }
+    tokens.push(hoursLabel);
     if (Number.isFinite(netTotal)){
       tokens.push(formatCurrency(netTotal));
       tokens.push(formatCurrency(netTotal, { showPlus: false }));
@@ -3189,12 +3176,7 @@ function viewJobs(){
     const numericFields = [
       job.materialCost,
       job.materialQty,
-      job.actualHours,
-      job.estimateHours,
-      eff.actualHours,
-      eff.expectedHours,
-      eff.expectedRemaining,
-      eff.actualRemaining
+      job.estimateHours
     ];
     numericFields.forEach(value => {
       if (value == null || value === "") return;
@@ -3607,34 +3589,16 @@ function viewJobs(){
   const completedFiltered = completedForCategory.filter(matchesHistorySearch);
   const totalCompletedJobs = Array.isArray(completedSorted) ? completedSorted.length : 0;
   const hiddenCompletedByCategory = Math.max(0, totalCompletedJobs - completedForCategory.length);
-  const resolveChargeRate = (job) => {
-    const chargeRaw = job?.chargeRate;
-    const chargeNum = Number(chargeRaw);
-    if (Number.isFinite(chargeNum) && chargeNum >= 0) return chargeNum;
-    const efficiencyCharge = Number(job?.efficiency?.chargeRate);
-    return (Number.isFinite(efficiencyCharge) && efficiencyCharge >= 0)
-      ? efficiencyCharge
-      : JOB_RATE_PER_HOUR;
-  };
-  const resolveCostRate = (job, estHours, matTotal) => {
-    const costRaw = job?.costRate;
-    const costNum = Number(costRaw);
-    if (Number.isFinite(costNum) && costNum >= 0) return costNum;
-    const efficiencyCost = Number(job?.efficiency?.costRate);
-    if (Number.isFinite(efficiencyCost) && efficiencyCost >= 0) return efficiencyCost;
-    const hoursVal = Number(estHours);
-    return JOB_BASE_COST_PER_HOUR;
-  };
   const completedStats = completedFiltered.reduce((acc, job)=>{
     const eff = computeJobEfficiency(job);
-    const net = computeJobNetTotal(job, eff, { preferActual: true });
+    const net = computeJobNetTotal(job, eff);
     const estHours = Number(job?.estimateHours);
     const matCost = Number(job?.materialCost || 0);
     const matQty = Number(job?.materialQty || 0);
     const matTotal = (matCost * matQty) || 0;
     const chargeRate = resolveChargeRate(job);
-    const costRate = resolveCostRate(job, estHours, matTotal);
-    const netRate = chargeRate - costRate;
+    const costRate = resolveCostRate(job);
+    const netRate = chargeRate + costRate;
 
     acc.total += Number.isFinite(net) ? net : 0;
     acc.estimate += Number.isFinite(estHours) ? estHours : 0;
@@ -3678,8 +3642,8 @@ function viewJobs(){
     ? prioritySchedule.efficiencies
     : new Map();
 
-  const jobOverlapNotice = "Jobs might be overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
-  const jobOverlapBannerText = "Two or more cutting jobs are overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
+  const jobOverlapNotice = "Jobs might be overlapping. Review the job dates and Hours Taken to check the cutting schedule.";
+  const jobOverlapBannerText = "Jobs might be overlapping. Review the job dates and Hours Taken to check the cutting schedule.";
   const avgBanner = renderAverageHoursBanner("cutting-job-history");
   const jobOverlapNoticeEsc = esc(jobOverlapNotice);
   const overlappingJobIds = (()=>{
@@ -3742,7 +3706,7 @@ function viewJobs(){
   const categoryFilterAriaLabel = `Change cutting jobs category (currently ${selectedCategoryName || "All Jobs"})`;
   const historyCategoryFilterAriaLabel = `Change past jobs category (currently ${historyCategoryName || "All Jobs"})`;
 
-  const jobColumnCount = 15;
+  const jobColumnCount = 14;
   const historyColumnCount = jobColumnCount;
   const historySearchDisplay = historySearchValue
     .replace(/&/g, "&amp;")
@@ -3820,10 +3784,7 @@ function viewJobs(){
 
   const completedRows = completedFiltered.map(job => {
     const eff = computeJobEfficiency(job);
-    const delta = Number(eff.deltaHours);
-    const netTotal = computeJobNetTotal(job, eff, { preferActual: true });
-    const actualHours = resolveActualHours(job, eff);
-    const hasActualHours = Number.isFinite(actualHours) && actualHours >= 0;
+    const netTotal = computeJobNetTotal(job);
     const estHours = Number(job.estimateHours);
     const editingHistory = editingCompletedJobsSet.has(String(job.id));
     const priorityValue = priorityForJob(job);
@@ -3865,9 +3826,9 @@ function viewJobs(){
     const matTotal = (matCost * matQty) || 0;
     const chargeRate = resolveChargeRate(job);
     const chargeDisplay = formatRate(chargeRate);
-    const costRate = resolveCostRate(job, estHours, matTotal);
+    const costRate = resolveCostRate(job);
     const costDisplay = formatRate(costRate);
-    const netRate = chargeRate - costRate;
+    const netRate = chargeRate + costRate;
     const netDisplay = formatRate(netRate, { showPlus: true });
     const netClass = netRate >= 0 ? "job-rate-net-positive" : "job-rate-net-negative";
     const netTotalDisplay = formatCurrency(netTotal, { showPlus: true });
@@ -3880,17 +3841,10 @@ function viewJobs(){
     const dueTxt = dueDate ? dueDate.toDateString() : "—";
     const completedTxt = completedDate ? completedDate.toDateString() : "—";
 
-    let statusLabel = "Finished on estimate";
-    if (Number.isFinite(delta) && Math.abs(delta) > 0.1){
-      statusLabel = delta > 0 ? "Finished ahead" : "Finished behind";
-    }
+    const statusLabel = "Completed";
     const statusDetail = completedTxt !== "—" ? `Completed ${completedTxt}` : "";
-    const statusClass = statusLabel.toLowerCase().includes("ahead")
-      ? "job-status-ahead"
-      : (statusLabel.toLowerCase().includes("behind") ? "job-status-behind" : "job-status-onpace");
-
-    const estimateDisplay = formatHours(estHours);
-    const actualDisplay = hasActualHours ? formatHours(actualHours) : "—";
+    const statusClass = "job-status-onpace";
+    const estimateDisplay = formatHours(resolveJobHours(job));
     const needDisplay = "";
 
     const noteContent = (job?.notes || "").trim();
@@ -3900,7 +3854,7 @@ function viewJobs(){
 
     const efficiencySummaryParts = [
       statusLabel,
-      `Actual ${actualDisplay} vs ${estimateDisplay}`.trim(),
+      `Hours Taken: ${estimateDisplay}`,
       completedTxt !== "—" ? `Completed ${completedTxt}` : ""
     ].filter(Boolean);
     const efficiencySummaryText = efficiencySummaryParts.join(" • ") || "Completion details unavailable";
@@ -3929,7 +3883,7 @@ function viewJobs(){
                 <span class="job-main-category-name">${esc(categoryName)}</span>
               </div>
               <div class="job-main-dates" title="Start Date → Completion Date">${startTxt} → ${completedTxt}</div>
-              <div class="job-main-summary small muted">Actual ${actualDisplay} vs ${estimateDisplay}</div>
+              <div class="job-main-summary small muted">Hours Taken: ${estimateDisplay}</div>
             </div>
           </td>
           <td class="job-col job-col-estimate job-col-locked" data-history-requires-edit="${job.id}">${estimateDisplay}</td>
@@ -3940,7 +3894,6 @@ function viewJobs(){
           <td class="job-col job-col-charge">${chargeDisplay}</td>
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
-          <td class="job-col job-col-hours">${actualDisplay}</td>
           <td class="job-col job-col-status">
             <div class="job-status ${statusClass}">${esc(statusLabel)}</div>
             ${statusDetail ? `<div class="job-status-detail">${esc(statusDetail.trim())}</div>` : ""}
@@ -3948,18 +3901,7 @@ function viewJobs(){
           </td>
           <td class="job-col job-col-files">${buildFileCellMarkup(job.id, jobFiles)}</td>
           <td class="job-col job-col-impact">
-            <div class="job-impact-stack">
-              <div class="job-impact-header">
-                <span class="job-impact ${impactClass}">${netTotalDisplay}</span>
-              </div>
-              <div class="job-impact-meta">${esc(efficiencySummaryText)}</div>
-              <dl class="job-impact-metrics">
-                <div><dt>Charge</dt><dd>${chargeDisplay}</dd></div>
-                <div><dt>Cost</dt><dd>${costDisplay}</dd></div>
-                <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
-                <div><dt>Net total</dt><dd class="${impactClass}">${netTotalDisplay}</dd></div>
-              </dl>
-            </div>
+            ${renderCuttingJobNetBreakdown(job)}
           </td>
           <td class="job-col job-col-note">
             ${notePreview.preview
@@ -3978,6 +3920,7 @@ function viewJobs(){
                 <span class="job-actions-trigger-caret" aria-hidden="true">▾</span>
               </button>
               <div class="job-actions-menu" id="${esc(actionMenuId)}" data-history-actions-menu="${job.id}" hidden>
+                <button type="button" data-history-failed-cut="${esc(String(job.id))}">Failed Cut — ${Math.round(computeCuttingJobProfit(job).failurePercent)}%</button>
                 <button type="button" data-history-activate="${job.id}">Make active copy</button>
                 <button type="button" data-history-edit="${job.id}">Edit</button>
                 <button type="button" class="danger" data-history-delete="${job.id}">Delete</button>
@@ -3988,7 +3931,6 @@ function viewJobs(){
       `;
     }
 
-    const actualVal = numberInputValue(actualHours);
     const estimateVal = numberInputValue(estHours);
     const materialCostVal = numberInputValue(job?.materialCost);
     const materialQtyVal = numberInputValue(job?.materialQty);
@@ -4004,14 +3946,13 @@ function viewJobs(){
                 <label>Job name<input type="text" data-history-field="name" data-history-id="${job.id}" value="${esc(job?.name || "")}"></label>
                 <label>Start Date<input type="date" data-history-field="startISO" data-history-id="${job.id}" value="${esc(job?.startISO || "")}"></label>
                 <label>Completion Date<input type="date" data-history-field="completedAtISO" data-history-id="${job.id}" value="${esc(String(job?.completedAtISO || "").slice(0,10))}"></label>
-                <label>Estimate (hrs)<input type="number" min="0" step="0.1" data-history-field="estimateHours" data-history-id="${job.id}" value="${estimateVal}"></label>
-                <label>Actual (hrs)<input type="number" min="0" step="0.1" data-history-field="actualHours" data-history-id="${job.id}" value="${actualVal}"></label>
+                <label>Hours Taken (hrs)<input type="number" min="0" step="0.1" data-history-field="estimateHours" data-history-id="${job.id}" value="${estimateVal}"></label>
                 <label>Priority<select data-history-field="priority" data-history-id="${job.id}">${priorityOptionsMarkup(priorityValue)}</select></label>
                 <label>Material<input type="text" data-history-field="material" data-history-id="${job.id}" value="${esc(job?.material || "")}"></label>
                 <label>Material cost<input type="number" min="0" step="0.01" data-history-field="materialCost" data-history-id="${job.id}" value="${materialCostVal}"></label>
                 <label>Material quantity<input type="number" min="0" step="0.01" data-history-field="materialQty" data-history-id="${job.id}" value="${materialQtyVal}"></label>
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-history-field="chargeRate" data-history-id="${job.id}" value="${chargeRateVal}"></label>
-                <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-history-field="costRate" data-history-id="${job.id}" value="${costRateVal}"></label>
+                <label>Cost rate ($/hr)<input type="number" step="0.01" data-history-field="costRate" data-history-id="${job.id}" value="${costRateVal}"></label>
                 <label>Project #<input type="text" data-history-field="projectNumber" data-history-id="${job.id}" readonly value="${esc(String(job.projectNumber ?? ""))}"><span class="small muted" data-project-category-status aria-live="polite"></span></label>
                 <label>Category<select data-history-field="cat" data-history-id="${job.id}" data-job-category-select>
                   ${categoryOptionsMarkup(job.cat, { includeCreateOption: true, preserveLegacySelection: true })}
@@ -4111,7 +4052,6 @@ function viewJobs(){
             <td><strong>${netRateDisplay}</strong></td>
             ${emptyCell}
             ${emptyCell}
-            ${emptyCell}
             <td><strong>${netTotalDisplay}</strong></td>
             ${emptyCell}
             ${emptyCell}
@@ -4132,7 +4072,7 @@ function viewJobs(){
         <thead>
           <tr>
             <th>Job</th>
-            <th>Estimate</th>
+            <th>Hours Taken</th>
             <th>Material</th>
             <th>Cost / unit</th>
             <th>Quantity</th>
@@ -4140,7 +4080,6 @@ function viewJobs(){
             <th>Charge rate</th>
             <th>Cost rate</th>
             <th>Net profit/hr</th>
-            <th>Hours taken</th>
             <th>Status</th>
             <th>Files</th>
             <th>Net total</th>
@@ -4233,15 +4172,14 @@ function viewJobs(){
     const matQty  = Number(j.materialQty||0);
     const matTotal = (matCost * matQty) || 0;
     const estHours = Number(j.estimateHours) || 0;
-    const chargeRateRaw = Number(j.chargeRate);
-    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-    const costRate = resolveCostRate(j, estHours, matTotal);
-    const netRate = chargeRate - costRate;
+    const chargeRate = resolveChargeRate(j);
+    const costRate = resolveCostRate(j);
+    const netRate = chargeRate + costRate;
     const chargeDisplay = formatRate(chargeRate);
     const costDisplay = formatRate(costRate);
     const netDisplay = formatRate(netRate, { showPlus: true });
     const netClass = netRate >= 0 ? "job-rate-net-positive" : "job-rate-net-negative";
-    const netTotal = computeJobNetTotal(j, eff, { preferActual: false });
+    const netTotal = computeJobNetTotal(j, eff);
     const netTotalDisplay = formatCurrency(netTotal, { showPlus: true });
     const impactClass = netTotal > 0 ? "job-impact-ahead" : (netTotal < 0 ? "job-impact-behind" : "job-impact-neutral");
 
@@ -4368,23 +4306,10 @@ function viewJobs(){
           <td class="job-col job-col-charge">${chargeDisplay}</td>
           <td class="job-col job-col-cost">${costDisplay}</td>
           <td class="job-col job-col-net"><span class="job-rate-net ${netClass}">${netDisplay}</span></td>
-          <td class="job-col job-col-hours">${remainingDisplay}${backlogHours > 0 ? `<div class="small muted">Queue total ${esc(queueTotalDisplay)}</div>` : ''}</td>
           <td class="job-col job-col-status">${statusDisplay}</td>
           <td class="job-col job-col-files">${buildFileCellMarkup(j.id, jobFiles)}</td>
           <td class="job-col job-col-impact">
-            <div class="job-impact-stack">
-              <div class="job-impact-header">
-                <span class="job-impact ${impactClass}">${impactDisplay}</span>
-              </div>
-              <div class="job-impact-meta">${esc(efficiencySummaryText)}</div>
-              <dl class="job-impact-metrics">
-                <div><dt>Charge</dt><dd>${chargeDisplay}</dd></div>
-                <div><dt>Cost</dt><dd>${costDisplay}</dd></div>
-                <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
-                <div><dt>Net total</dt><dd class="${impactClass}">${impactDisplay}</dd></div>
-                <div><dt>Queue ahead</dt><dd>${backlogHours > 0 ? `${backlogHours.toFixed(1)} hr` : 'None'}</dd></div>
-              </dl>
-            </div>
+            ${renderCuttingJobNetBreakdown(j)}
           </td>
           <td class="job-col job-col-note">
             ${notePreview.preview
@@ -4403,13 +4328,11 @@ function viewJobs(){
                 <span class="job-actions-trigger-caret" aria-hidden="true">▾</span>
               </button>
               <div class="job-actions-menu" id="${esc(actionMenuId)}" data-job-actions-menu="${j.id}" hidden>
-                <button type="button" data-log-job="${j.id}">Log time</button>
                 <button type="button" data-edit-job="${j.id}">Edit</button>
                 <button type="button" data-complete-job="${j.id}">Mark complete</button>
                 <button type="button" class="danger" data-remove-job="${j.id}">Remove</button>
               </div>
             </div>
-            <span data-log-job="${j.id}" style="display:none"></span>
           </td>
         </tr>
         `;
@@ -4423,12 +4346,12 @@ function viewJobs(){
               ${jobHasOverlap ? `<div class="job-edit-overlap-hint">${overlapIndicatorButton}<span>${jobOverlapNoticeEsc}</span></div>` : ""}
               <div class="job-edit-grid">
                 <label>Job name<input type="text" data-j="name" data-id="${j.id}" value="${j.name}"></label>
-                <label>Estimate (hrs)<input type="number" min="1" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></label>
+                <label>Hours Taken (hrs)<input type="number" min="0.01" step="0.01" data-j="estimateHours" data-id="${j.id}" value="${j.estimateHours}"></label>
                 <label>Material<input type="text" data-j="material" data-id="${j.id}" value="${j.material||""}"></label>
                 <label>Material cost ($)<input type="number" min="0" step="0.01" data-j="materialCost" data-id="${j.id}" value="${matCost}"></label>
                 <label>Material quantity<input type="number" min="0" step="0.01" data-j="materialQty" data-id="${j.id}" value="${matQty}"></label>
                 <label>Charge rate ($/hr)<input type="number" min="0" step="0.01" data-j="chargeRate" data-id="${j.id}" value="${chargeRate}"></label>
-                <label>Cost rate ($/hr)<input type="number" min="0" step="0.01" data-j="costRate" data-id="${j.id}" value="${Number.isFinite(costRate) ? costRate : 45}"></label>
+                <label>Cost rate ($/hr)<input type="number" step="0.01" data-j="costRate" data-id="${j.id}" value="${j.costRate ?? j.efficiency?.costRate ?? costRate}"></label>
                 <label>Start Date<input type="date" data-j="startISO" data-id="${j.id}" value="${j.startISO||""}"></label>
                 <label>Completion Date<input type="date" value="" disabled aria-label="Completion Date (set when marked complete)"></label>
                 <label>Due date<input type="date" data-j="dueISO" data-id="${j.id}" value="${dueVal}"></label>
@@ -4590,7 +4513,7 @@ function viewJobs(){
           </label>
           <label class="job-estimate-label-group">
             <span class="small muted" id="jobEstBreakdown">0 hrs = 0 hrs 0 min</span>
-            Estimate (hrs)
+            Hours Taken (hrs)
             <input type="number" id="jobEst" required min="0.01" step="0.01" value="${esc(addJobDraftField("estimate"))}">
           </label>
           <label>Add minutes
@@ -4605,7 +4528,7 @@ function viewJobs(){
             <input type="number" id="jobCharge" placeholder="200.00" min="0" step="0.01" value="${esc(addJobDraftField("charge", "200"))}">
           </label>
           <label>Cost rate ($/hr)
-            <input type="number" id="jobCostRate" placeholder="45.00" min="0" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
+            <input type="number" id="jobCostRate" placeholder="45.00" step="0.01" value="${esc(addJobDraftField("costRate", "45"))}">
           </label>
           </div>
           <div class="job-add-column">
@@ -4704,7 +4627,7 @@ function viewJobs(){
         <thead>
           <tr>
             <th>Job</th>
-            <th>Estimate</th>
+            <th>Hours Taken</th>
             <th>Material</th>
             <th>Cost / unit</th>
             <th>Quantity</th>
@@ -4712,7 +4635,6 @@ function viewJobs(){
             <th>Charge rate</th>
             <th>Cost rate</th>
             <th>Net profit/hr</th>
-            <th>Hours remaining</th>
             <th>Status</th>
             <th>Files</th>
             <th>Net total</th>

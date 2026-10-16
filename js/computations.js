@@ -268,7 +268,7 @@ function nextDue(task){
  * actualHoursSoFar    = manual logs → machine totals → 0 when no data
  * actualRemaining     = max(0, plannedHours - actualHoursSoFar)
  * deltaHours          = expectedRemaining - actualRemaining  ( + ahead / − behind )
- * gainLoss            = deltaHours * JOB_RATE_PER_HOUR
+ * gainLoss            = Hours Taken * (chargeRate - abs(costRate))
  */
 
 
@@ -298,6 +298,35 @@ function inclusiveDayCount(startDate, endDate){
   return diff + 1;
 }
 
+// Cutting-job duration keeps its legacy storage key. Historical progress is not duration.
+function computeCuttingJobProfit(job, options = {}){
+  const finiteValue = (values, fallback, nonnegative = false) => {
+    for (const raw of values){
+      if (raw == null || raw === "") continue;
+      const value = Number(raw);
+      if (Number.isFinite(value) && (!nonnegative || value >= 0)) return value;
+    }
+    return fallback;
+  };
+  const hours = finiteValue([job?.estimateHours], 0, true);
+  const chargeRate = finiteValue([job?.chargeRate, job?.efficiency?.chargeRate], JOB_RATE_PER_HOUR, true);
+  // efficiency.costRate remains a positive expense magnitude for subtracting consumers.
+  const costRate = Math.abs(finiteValue([job?.costRate, job?.efficiency?.costRate], JOB_BASE_COST_PER_HOUR));
+  const netRate = chargeRate - costRate;
+  const materialCost = finiteValue([job?.materialCost], 0, true);
+  const materialQty = finiteValue([job?.materialQty], 0, true);
+  const materialExpense = materialCost * materialQty;
+  const failurePercent = Math.min(100, Math.max(0, finiteValue([options.failurePercent ?? job?.failurePercent], 0)));
+  const revenue = chargeRate * hours;
+  const cuttingCost = costRate * hours;
+  const revenueLost = revenue * failurePercent / 100;
+  const adjustedRevenue = revenue * (1 - failurePercent / 100);
+  const originalNetProfit = revenue - cuttingCost - materialExpense;
+  const totalProfit = adjustedRevenue - cuttingCost - materialExpense;
+  return { hours, chargeRate, costRate, netRate, materialCost, materialQty, materialExpense,
+    failurePercent, revenue, adjustedRevenue, revenueLost, cuttingCost, originalNetProfit, totalProfit };
+}
+
 function computeJobEfficiency(job){
   // Priority for actual progress:
   // 1) Manual logs (authoritative)
@@ -315,38 +344,21 @@ function computeJobEfficiency(job){
     && actualOverrideNum >= 0;
   const actualOverride = hasActualOverride ? actualOverrideNum : null;
   const completionFallbackActual = (!hasActualOverride && completionDate) ? planned : null;
-  const materialUnitCost = Number(job?.materialCost) || 0;
-  const materialQty = Number(job?.materialQty) || 0;
-  const materialTotal = materialUnitCost * materialQty;
-  const chargeOverrideRaw = job?.chargeRate;
-  const chargeOverrideNum = Number(chargeOverrideRaw);
-  const chargeEffRaw = job?.efficiency?.chargeRate;
-  const chargeEffNum = Number(chargeEffRaw);
-  const chargeRate = Number.isFinite(chargeOverrideNum) && chargeOverrideNum >= 0
-    ? chargeOverrideNum
-    : (Number.isFinite(chargeEffNum) && chargeEffNum >= 0 ? chargeEffNum : JOB_RATE_PER_HOUR);
-  const costOverrideRaw = job?.costRate;
-  const costOverrideNum = Number(costOverrideRaw);
-  const costEffRaw = job?.efficiency?.costRate;
-  const costEffNum = Number(costEffRaw);
-  const variableCostRate = planned > 0 ? (materialTotal / planned) : 0;
-  const costRate = Number.isFinite(costOverrideNum) && costOverrideNum >= 0
-    ? costOverrideNum
-    : (Number.isFinite(costEffNum) && costEffNum >= 0
-      ? costEffNum
-      : JOB_BASE_COST_PER_HOUR + variableCostRate);
-  const netRate = chargeRate - costRate;
+  const profit = computeCuttingJobProfit(job);
+  const { chargeRate, costRate, netRate } = profit;
   const result = {
     rate: netRate,
     chargeRate,
     costRate,
     netRate,
+    hoursTaken: profit.hours,
+    totalProfit: profit.totalProfit,
     expectedHours: 0,
     actualHours: 0,
     expectedRemaining: 0,
     actualRemaining: 0,
     deltaHours: 0,
-    gainLoss: 0,
+    gainLoss: profit.totalProfit,
     daysElapsed: 0,
     totalDays: 0,
     usedManual: false,
@@ -447,7 +459,6 @@ function computeJobEfficiency(job){
   }else{
     result.deltaHours = result.expectedRemaining - result.actualRemaining;   // + ahead / − behind
   }
-  result.gainLoss        = result.deltaHours * result.rate;
 
   return result;
 }
@@ -474,11 +485,7 @@ function computePrioritySchedule(jobs){
     const priority = getJobPriority(job);
     const eff = computeJobEfficiency(job);
     efficiencies.set(idStr, eff);
-    const planned = Number(job.estimateHours) || 0;
-    const actual = eff && Number.isFinite(eff.actualHours) ? Math.max(0, Number(eff.actualHours)) : 0;
-    const remaining = Math.max(0, eff && Number.isFinite(eff.actualRemaining)
-      ? Number(eff.actualRemaining)
-      : (planned - actual));
+    const remaining = computeCuttingJobProfit(job).hours;
     const list = groups.get(priority) || [];
     list.push({ id: idStr, remaining });
     groups.set(priority, list);
@@ -503,10 +510,7 @@ function computePrioritySchedule(jobs){
 
 function computeRequiredDaily(job, options = {}){
   if (!job || !job.startISO || !job.dueISO) return { remainingHours:0, remainingDays:0, requiredPerDay:0, backlogHours:0, jobRemainingHours:0 };
-  const eff = computeJobEfficiency(job);
-  const planned = Number(job.estimateHours) || 0;
-  const actualForRequirement = eff.usedFromStartAuto ? 0 : eff.actualHours;
-  const jobRemainingHours = Math.max(0, planned - actualForRequirement);
+  const jobRemainingHours = computeCuttingJobProfit(job).hours;
   const backlogHours = Number.isFinite(Number(options.backlogHours))
     ? Math.max(0, Number(options.backlogHours))
     : 0;
