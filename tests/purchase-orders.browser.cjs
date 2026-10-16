@@ -101,6 +101,52 @@ test("PHv2-02C real browser with disposable local backend only",{timeout:120000}
       await h.page.locator('[data-purchase-order-cancel]').click();assert.deepEqual(await h.cloud(),before);assert.deepEqual(h.errors,[]);
     }finally{await h.context.close();}
   });
+  await t.test("PHv2-02D New/Edit layout contains controls and readable financials at desktop and narrow widths",async()=>{
+    const h=await fixture();try{
+      await h.fill();
+      const editor=h.page.locator('[data-purchase-order-editor]'),wrap=editor.locator('.cost-weekly-table-wrap');
+      for(const mode of ["New Purchase Order","Edit Purchase Order"]){
+        assert.equal(await editor.locator('[data-purchase-order-title]').textContent(),mode);
+        const before=await h.cloud();
+        for(const width of [1440,1280,900,740]){
+          await h.page.setViewportSize({width,height:900});
+          assert.equal(await h.page.evaluate(()=>visualViewport.scale),1,"100% browser zoom");
+          const problems=await editor.locator('tbody tr').evaluateAll(rows=>rows.flatMap(row=>{
+            const failures=[];
+            for(const control of row.querySelectorAll('input,select,button[data-order-edit-inventory],button[data-order-remove]')){
+              const a=control.getBoundingClientRect(),b=control.closest('td').getBoundingClientRect();
+              if(a.width<20||a.left<b.left-1||a.right>b.right+1)failures.push(control.outerHTML);
+              if(control.tagName==='BUTTON'){
+                const range=document.createRange();range.selectNodeContents(control);const text=range.getBoundingClientRect();
+                if(text.left<a.left||text.right>a.right)failures.push('button text overflows: '+control.textContent);
+              }
+            }
+            const select=row.querySelector('select').getBoundingClientRect(),button=row.querySelector('[data-order-edit-inventory]').getBoundingClientRect();
+            if(button.top<select.bottom+3)failures.push('inventory controls must stack with a gap');
+            for(const selector of ['[data-order-allocation]','[data-order-tax-allocation]','[data-order-total]']){
+              const cell=row.querySelector(selector),range=document.createRange();range.selectNodeContents(cell);
+              const text=range.getBoundingClientRect(),bounds=cell.getBoundingClientRect();
+              if(text.left<bounds.left||text.right>bounds.right)failures.push(selector+' clips financial text');
+              if(getComputedStyle(cell).textAlign!=='right')failures.push(selector+' is not aligned');
+            }
+            return failures;
+          }));
+          assert.deepEqual(problems,[],`${mode}, ${width}px`);
+          const dimensions=await wrap.evaluate(el=>({overflow:getComputedStyle(el).overflowX,scroll:el.scrollWidth,client:el.clientWidth}));
+          assert.equal(dimensions.overflow,'auto');assert.equal(width>=1280?dimensions.scroll<=dimensions.client+1:dimensions.scroll>dimensions.client,true,`${mode} ${width}px ${JSON.stringify(dimensions)}`);
+          for(const selector of ['input[data-order-field="purchased"]','input[data-order-field="qty"]','select','[data-order-edit-inventory]','[data-order-remove]'])await editor.locator(selector).first().click({trial:true});
+          await editor.locator('[data-order-total]').last().scrollIntoViewIfNeeded();assert.equal(await editor.locator('[data-order-total]').last().isVisible(),true);
+        }
+        assert.deepEqual(await h.cloud(),before,"layout checks do not write data");
+        if(mode==='New Purchase Order'){
+          await h.page.setViewportSize({width:1440,height:900});await h.save();
+          const id=(await h.cloud()).receiptTrackerWeeks.flatMap(week=>week.rows).find(row=>row.orderId).orderId;
+          await h.page.locator(`[data-receipt-edit-order="${id}"]`).click();
+        }
+      }
+      assert.deepEqual(h.errors,[]);
+    }finally{await h.context.close();}
+  });
   await t.test("autocomplete reuses task/inventory precedence, keeps rows independent and saves references plus PO",async()=>{
     const h=await fixture({autofill:true});try{
       const before=await h.cloud();await h.open();const rows=h.page.locator('[data-purchase-order-items] tr');
