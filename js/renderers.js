@@ -13338,6 +13338,101 @@ function setupForecastBreakdownModal(){
   });
 }
 
+function getPurchaseOrderApi(){
+  if (window.purchaseOrderApi) return window.purchaseOrderApi;
+  const orders = window.OMAXPurchaseOrders;
+  const localState = ()=>{
+    const source = window.__lastLoadedCloudState || {}, snapshot = compactStateForStorage(snapshotState({skipLocalFileCacheSync:true}));
+    return Object.fromEntries(Object.keys(source).map(name=> [name, ["schema", "syncMeta", "saveMeta", "syncProcessLog"].includes(name) ? source[name] : Object.prototype.hasOwnProperty.call(snapshot, name) ? snapshot[name] : source[name]]));
+  };
+  const targetMatches = token=> FB.ready && FB.db === token.db && FB.docRef === token.docRef && FB.user?.uid === token.actor
+    && String(FB.app?.options?.projectId || "") === token.projectId && FB.docRef?.path === token.path;
+  const matches = (source, token)=> targetMatches(token) && canWriteCloud("purchase order") && !isVercelPreviewRuntime()
+    && !window.__lastIndeterminateSave && !window.__inventoryMaterialMutationPending && !window.__pumpBaselineMutationPending && lastLocalMutationAt === token.version
+    && window.__loadedCloudRevisionForSaveGuard === token.revision && token.revision === source.syncMeta.rev
+    && orders.businessKey(localState()) === orders.businessKey(source);
+  window.purchaseOrderApi = orders.createApi({
+    canWrite:()=> canWriteCloud("purchase order") && FB.ready && Boolean(FB.user) && !isVercelPreviewRuntime()
+      && !window.__lastIndeterminateSave && !window.__inventoryMaterialMutationPending && !window.__pumpBaselineMutationPending,
+    settle:async()=>{
+      await cloudSaveQueue;
+      if (hasPendingLocalChanges) throw Error("Other changes are pending. Wait for their save or reload before saving the order.");
+    },
+    capture:()=> ({db:FB.db, docRef:FB.docRef, path:FB.docRef?.path, actor:FB.user?.uid, projectId:String(FB.app?.options?.projectId || ""), version:lastLocalMutationAt, revision:window.__loadedCloudRevisionForSaveGuard}),
+    matches,
+    read:async token=>{
+      if (!targetMatches(token) || typeof token.db?.runTransaction !== "function") throw Error("The order backend changed or cannot perform an independent server read.");
+      let timer;
+      try {
+        return await Promise.race([
+          token.db.runTransaction(async transaction=>{
+            const snapshot = await transaction.get(token.docRef);
+            if (!targetMatches(token) || !snapshot?.exists || snapshot.metadata?.fromCache || snapshot.metadata?.hasPendingWrites
+              || (snapshot.ref?.path && snapshot.ref.path !== token.path) || (snapshot.ref?.firestore && snapshot.ref.firestore !== token.db)) throw Error("A complete authoritative order snapshot is unavailable.");
+            return snapshot.data();
+          }),
+          new Promise((_, reject)=>{ timer = setTimeout(()=> reject(Error("Order server verification timed out. Review before retrying.")), 15000); })
+        ]);
+      } finally { clearTimeout(timer); }
+    },
+    validate:(source, order)=>{
+      for (const row of order.rows){
+        if (row.inventoryItemId && (source.inventory || []).filter(item=> item.id === row.inventoryItemId).length !== 1) throw Error("An inventory link changed. Review the item before saving.");
+        if (row.taskId && [...(source.tasksInterval || []), ...(source.tasksAsReq || [])].filter(item=> item.id === row.taskId).length !== 1) throw Error("An item task link changed. Review before saving.");
+      }
+      if (scanAuthoritativeCutFileContent(order).contaminated) throw Error("The order contains unsupported file content.");
+    },
+    reserve:token=>{
+      if (hasPendingLocalChanges || lastLocalMutationAt !== token.version) throw Error("Local changes arrived before the order save.");
+      // Existing pending-intent protection prevents realtime adoption before verification.
+      // No order draft is ever appended to live state or available to generic autosaves.
+      hasPendingLocalChanges = true;
+    },
+    backup:(source, edit)=>{
+      persistLocalStateBackup(source);
+      if (edit){
+        // The existing Trash has no purchase-order restore type. Keep one exact
+        // local before-image, independently of the rolling workspace backup.
+        const evidence = {atISO:new Date().toISOString(), path:FB.docRef.path, projectId:String(FB.app?.options?.projectId || ""), expected:edit.expected, confirmedRemovedLineIds:edit.confirmedRemovedLineIds};
+        if (!window.localStorage) throw Error("A local order recovery copy is unavailable. Your edit draft is retained.");
+        window.localStorage.setItem("omax_purchase_order_edit_backup_v1", JSON.stringify(evidence));
+        window.__lastPurchaseOrderEditBackup = evidence;
+      }
+    },
+    write:(pending, source, token)=>{
+      const sourceKey = orders.key(source), preparedKey = orders.key(pending);
+      const queued = cloudSaveQueue.then(()=>{
+        if (!matches(source, token)) return cloudSaveNoWriteFailure("order_source_changed", "Local or backend state changed before the order transaction.");
+        return writeAuthoritativeStateSnapshot(pending, {merge:true}, {expectedRevision:source.syncMeta.rev,
+          validateSourceState:remote=> orders.key(remote) === sourceKey && matches(source, token),
+          validatePreparedState:next=> orders.key(next) === preparedKey && matches(source, token)});
+      });
+      cloudSaveQueue = queued.catch(()=>{});
+      return queued;
+    },
+    adopt:(verified, token)=>{
+      if (!targetMatches(token) || lastLocalMutationAt !== token.version) return false;
+      const result = adoptIdentityCheckedAuthoritativeState(verified);
+      if (result?.recovery !== false || orders.businessKey(localState()) !== orders.businessKey(verified)) return false;
+      persistLocalStateBackup(verified);
+      return true;
+    },
+    release:(token, uncertain)=>{
+      if (!uncertain && lastLocalMutationAt === token.version) hasPendingLocalChanges = false;
+    },
+    suspend:result=>{
+      window.__autosaveDisabled = true; window.__recoveryInspectMode = true;
+      window.__lastIndeterminateSave = {...result};
+      window.__lastPurchaseOrderSaveEvidence = {...result};
+      renderRecoveryDiagnosticsPanel();
+    }
+  });
+  window.addEventListener("beforeunload", event=>{
+    if (window.purchaseOrderApi?.isBusy()){ event.preventDefault(); event.returnValue = ""; }
+  });
+  return window.purchaseOrderApi;
+}
+
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -14387,14 +14482,23 @@ function renderCosts(){
       return monday;
     };
     const weekKey = (year, week)=> `${year}-W${String(week).padStart(2, "0")}`;
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const weekOptions = Array.from({ length: 52 }, (_, i)=>{
+    const currentReceiptWeek = ()=>{
+      const today = new Date();
+      // UTC arithmetic represents local calendar parts, never the current UTC day.
+      const day = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+      day.setUTCDate(day.getUTCDate() + 4 - (day.getUTCDay() || 7));
+      const year = day.getUTCFullYear();
+      const week = Math.floor((day - weekStartFromIndex(year, 1)) / 604800000) + 1;
+      return { year, week, key: weekKey(year, week) };
+    };
+    const buildReceiptWeeks = (year)=> Array.from({ length: Math.round((weekStartFromIndex(year + 1, 1) - weekStartFromIndex(year, 1)) / 604800000) }, (_, i)=>{
       const week = i + 1;
       const start = weekStartFromIndex(year, week);
       const end = new Date(start); end.setUTCDate(start.getUTCDate() + 6);
       return { key: weekKey(year, week), year, week, startISO: start.toISOString().slice(0, 10), endISO: end.toISOString().slice(0, 10) };
     });
+    let selectedReceiptYear = currentReceiptWeek().year;
+    let weekOptions = buildReceiptWeeks(selectedReceiptYear);
     if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
     const persistReceiptState = ()=>{
       if (typeof saveCloudDebounced === "function"){
@@ -14430,6 +14534,7 @@ function renderCosts(){
           flatRows.push({
             dateISO: toIsoDate(row.date) || "",
             purchased: String(row.purchased || ""),
+            poNumber: String(row.poNumber ?? "").trim(),
             partNumber: String(row.partNumber || ""),
             qty: financials.qty,
             cost: financials.unitCost,
@@ -14445,13 +14550,14 @@ function renderCosts(){
       });
       flatRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
       if (!flatRows.length){
-        spendBody.innerHTML = '<tr><td colspan="10" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
+        spendBody.innerHTML = '<tr><td colspan="11" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
         return;
       }
       spendBody.innerHTML = flatRows.map(row => `
-        <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${escapeHtml(String(row.dateISO || ""))}" data-spend-week-key="${escapeHtml(String(row.weekKey || ""))}" data-spend-row-index="${escapeHtml(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+        <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${escapeHtml(String(row.dateISO || ""))}" data-spend-week-key="${escapeHtml(String(row.weekKey || ""))}" data-spend-row-index="${escapeHtml(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.poNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
           <td>${escapeHtml(row.dateISO || "—")}</td>
           <td>${escapeHtml(row.purchased || "—")}</td>
+          <td>${escapeHtml(row.poNumber || "N/A")}</td>
           <td>${escapeHtml(row.weekLabel || "—")}</td>
           <td>${escapeHtml(row.partNumber || "—")}</td>
           <td class="purchase-number">${escapeHtml(String(row.qty || 0))}</td>
@@ -14466,10 +14572,9 @@ function renderCosts(){
     const getWeekEntry = (key)=>{
       const existing = window.receiptTrackerWeeks.find(entry => String(entry?.key || "") === key);
       if (existing) return existing;
-      const meta = weekOptions.find(item => item.key === key);
-      const created = { key, year: meta?.year || year, week: meta?.week || 1, startISO: meta?.startISO || "", endISO: meta?.endISO || "", rows: [] };
-      window.receiptTrackerWeeks.push(created);
-      return created;
+      const match = /^(\d{4})-W(\d{2})$/.exec(key);
+      const meta = match && buildReceiptWeeks(Number(match[1])).find(item => item.key === key);
+      return { ...(meta || { key, year:selectedReceiptYear, week:1, startISO:"", endISO:"" }), rows:[] };
     };
     const clampDateToWeek = (dateIso, entry)=>{
       const value = toIsoDate(dateIso);
@@ -14490,6 +14595,7 @@ function renderCosts(){
       body{font-family:Arial,sans-serif;padding:16px;color:#1e2b45;} h2{margin:0 0 6px;} .summary{margin:0 0 14px;}
       table{border-collapse:collapse;width:100%;margin-bottom:12px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
       th{background:#eef3fb;font-weight:700;} .right{text-align:right;} .totals td{font-weight:700;background:#f7f9fd;}
+      tbody td:nth-child(3){mso-number-format:"\\@";text-align:left;}
     </style></head><body>
       <h2>${escWorkbookHtml(title || "Export")}</h2>
       <div class="summary">${escWorkbookHtml(subtitle || "")}</div>
@@ -14530,9 +14636,10 @@ function renderCosts(){
       return { start, end: today };
     };
     const formatDateRangeLabel = (start, end)=> {
-      const endIso = end instanceof Date && !Number.isNaN(end.getTime()) ? end.toISOString().slice(0, 10) : "";
+      const localDate = date=> `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const endIso = end instanceof Date && !Number.isNaN(end.getTime()) ? localDate(end) : "";
       if (!start) return endIso ? `Range: All time through ${endIso}` : "Range: All time";
-      const startIso = start instanceof Date && !Number.isNaN(start.getTime()) ? start.toISOString().slice(0, 10) : "";
+      const startIso = start instanceof Date && !Number.isNaN(start.getTime()) ? localDate(start) : "";
       return startIso && endIso ? `Range: ${startIso} to ${endIso}` : "Range: Date window unavailable";
     };
     const buildRangeRows = (months)=>{
@@ -14554,6 +14661,7 @@ function renderCosts(){
     const modal = document.getElementById("costReceiptModal");
     if (receiptOpenBtn instanceof HTMLElement && modal instanceof HTMLElement){
       const weekSelect = modal.querySelector("[data-receipt-week-select]");
+      const yearSelect = modal.querySelector("[data-receipt-year-select]");
       const weekRangeLabel = modal.querySelector("[data-receipt-week-range]");
       const weekAllocationNote = modal.querySelector("[data-receipt-week-allocation-note]");
       const weekRowsBody = modal.querySelector("[data-receipt-week-rows]");
@@ -14576,7 +14684,9 @@ function renderCosts(){
         purchasedDatalist.id = purchasedDatalistId;
         modal.appendChild(purchasedDatalist);
       }
-      let activeWeekKey = String((window.receiptTrackerWeekSelected || weekOptions[0]?.key || ""));
+      let activeWeekKey = window.costPurchaseHistoryModalOpen && /^\d{4}-W\d{2}$/.test(String(window.receiptTrackerWeekSelected || ""))
+        ? window.receiptTrackerWeekSelected : currentReceiptWeek().key;
+      selectedReceiptYear = Number(activeWeekKey.slice(0, 4));
       let activeRange = String(window.receiptTrackerRangeSelected || "1");
       let hasUnsavedReceiptChanges = false;
       let hasExplicitSaveSinceEdit = false;
@@ -14584,6 +14694,13 @@ function renderCosts(){
       window.receiptTrackerWeekSelected = activeWeekKey;
       window.receiptTrackerRangeSelected = activeRange;
       let saveStatusTimer = null;
+      let receiptEditVersion = 0;
+      // Detached DOM rows retain incomplete/invalid edits during view navigation.
+      const receiptDraftRows = new Map();
+      const receiptRowSources = new WeakMap();
+      const receiptColumns = ["date", "purchased", "partNumber", "qty", "cost", "shipping", "tax"];
+      const readReceiptInputs = tr=> Object.fromEntries(receiptColumns.map(col=> [col, tr.querySelector(`[data-col="${col}"]`)?.value || ""]));
+      const rememberReceiptRow = (tr, original)=> receiptRowSources.set(tr, { original, inputs:readReceiptInputs(tr) });
 
       const ensureSaveStatusChip = ()=>{
         if (!(saveWeekBtn instanceof HTMLElement)) return null;
@@ -14612,8 +14729,17 @@ function renderCosts(){
       };
 
       const renderWeekOptions = ()=>{
+        const current = currentReceiptWeek();
+        weekOptions = buildReceiptWeeks(selectedReceiptYear);
+        if (yearSelect instanceof HTMLSelectElement){
+          const storedYears = (window.receiptTrackerWeeks || []).map(entry=> Number(String(entry?.key || "").slice(0, 4))).filter(value=> Number.isInteger(value) && value >= 1 && value <= 9999);
+          const first = Math.min(current.year - 5, selectedReceiptYear, ...storedYears);
+          const last = Math.max(current.year + 1, selectedReceiptYear, ...storedYears);
+          yearSelect.innerHTML = Array.from({length:last - first + 1}, (_, i)=> `<option value="${first + i}">${first + i}</option>`).join("");
+          yearSelect.value = String(selectedReceiptYear);
+        }
         if (!(weekSelect instanceof HTMLSelectElement)) return;
-        weekSelect.innerHTML = weekOptions.map(opt => `<option value="${escapeHtml(opt.key)}">Week ${escapeHtml(String(opt.week))} (${escapeHtml(opt.startISO)} to ${escapeHtml(opt.endISO)})</option>`).join("");
+        weekSelect.innerHTML = weekOptions.map(opt => `<option value="${escapeHtml(opt.key)}"${opt.key === current.key ? ' data-current-week="true" style="font-weight:bold"' : ""}>Week ${escapeHtml(String(opt.week))}${opt.key === current.key ? " — Current week" : ""} (${escapeHtml(opt.startISO)} to ${escapeHtml(opt.endISO)})</option>`).join("");
         if (!weekOptions.some(item => item.key === activeWeekKey)) activeWeekKey = weekOptions[0]?.key || "";
         weekSelect.value = activeWeekKey;
       };
@@ -14623,24 +14749,85 @@ function renderCosts(){
         const tasks = (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).concat(Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []);
         return tasks.find(task => String(task?.name || "").trim().toLowerCase() === key) || null;
       }
-      const saveWeekRowsFromDom = ()=>{
-        const entry = getWeekEntry(activeWeekKey);
-        if (!(weekRowsBody instanceof HTMLElement)) return entry;
-        const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).map(tr => ({
-          ...(entry.rows || [])[Number(tr.dataset.receiptRowIndex)],
-          date: clampDateToWeek(tr.querySelector('[data-col=\"date\"]')?.value || "", entry),
-          purchased: String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim(),
-          cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
-          qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
-          partNumber: String(tr.querySelector('[data-col=\"partNumber\"]')?.value || "").trim(),
-          taskId: String(findTaskByNameExact(String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim())?.id || ""),
-          shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
-          tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
-        }));
-        entry.rows = normalizeRows(rows);
-        persistReceiptState();
-        renderCentralSpendRows();
-        return entry;
+      // Shared with the legacy editor: task PN/price take precedence over inventory.
+      function purchaseSelection(name){
+        const typed = String(name || "").trim().toLowerCase();
+        if (!typed) return {task:null, inv:null, partNumber:"", price:null};
+        const task = findTaskByNameExact(name);
+        const items = Array.isArray(window.inventory) ? window.inventory : [];
+        const inv = (task?.inventoryId != null && items.find(item=> String(item?.id || "") === String(task.inventoryId)))
+          || items.find(item=> String(item?.name || "").trim().toLowerCase() === typed);
+        return {task, inv, partNumber:String(task?.pn || "").trim() || String(inv?.pn || "").trim(),
+          price:Number.isFinite(Number(task?.price)) ? Number(task.price) : Number.isFinite(Number(inv?.price)) ? Number(inv.price) : null};
+      }
+      const openPurchaseInventoryEditor = (purchased, inventoryItemId)=>{
+        const items = Array.isArray(window.inventory) ? window.inventory : [];
+        const inv = items.find(item=> inventoryItemId && String(item.id) === String(inventoryItemId))
+          || items.find(item=> String(item?.name || "").trim().toLowerCase() === String(purchased || "").trim().toLowerCase());
+        const taskId = inv?.linkedTaskId != null ? String(inv.linkedTaskId) : "";
+        if (taskId && typeof openSettingsAndReveal === "function") openSettingsAndReveal(taskId);
+        else if (typeof window.showScreen === "function") window.showScreen("settings");
+      };
+      const saveWeekRowsFromDom = ({ persist = true, includeDrafts = false, showValidation = false } = {})=>{
+        if (!(weekRowsBody instanceof HTMLElement)) return getWeekEntry(activeWeekKey);
+        const groups = includeDrafts ? new Map(receiptDraftRows) : new Map();
+        groups.set(activeWeekKey, Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")));
+        const pending = [];
+        for (const [key, elements] of groups){
+          const entry = getWeekEntry(key), rows = [], sources = [];
+          for (const tr of elements){
+            const source = receiptRowSources.get(tr) || { inputs:{} };
+            const values = readReceiptInputs(tr);
+            if (source.original?.orderId && receiptColumns.some(col=> values[col] !== source.inputs[col])){
+              if (showValidation && typeof toast === "function") toast("Saved orders must be edited as a whole. Whole-order editing is not available yet.");
+              return null;
+            }
+            const meaningful = receiptColumns.some(col=> ["qty", "cost", "shipping", "tax"].includes(col) ? Number(values[col]) !== 0 : values[col].trim());
+            if (!source.original && !meaningful) continue;
+            const qtyInput = tr.querySelector('[data-col="qty"]');
+            const qtyChanged = !source.original || values.qty !== source.inputs.qty;
+            const invalidQty = qtyChanged && (!values.qty.trim() || !Number.isSafeInteger(Number(values.qty)) || Number(values.qty) < 0);
+            qtyInput?.setCustomValidity(invalidQty ? "Quantity must be a whole number of 0 or greater." : "");
+            if (invalidQty){
+              if (showValidation){ navigateReceiptWeek(key); qtyInput?.reportValidity(); }
+              return null;
+            }
+            let row = source.original;
+            for (const col of receiptColumns){
+              if (source.original && values[col] === source.inputs[col]) continue;
+              if (row === source.original) row = { ...source.original };
+              if (["qty", "cost", "shipping", "tax"].includes(col)) row[col] = Number(values[col]) || 0;
+              else row[col] = col === "date" ? clampDateToWeek(values[col], entry) : values[col].trim();
+              if (col === "purchased") row.taskId = String(findTaskByNameExact(row.purchased)?.id || "");
+            }
+            rows.push(row);
+            sources.push([tr, row]);
+          }
+          if (entry.rows.some(row=> row?.orderId && !rows.includes(row))){
+            if (showValidation && typeof toast === "function") toast("Saved order items cannot be removed individually. Whole-order editing is not available yet.");
+            return null;
+          }
+          // Tables group orders visually; retain the authoritative flat source order.
+          const positions = new Map(sources.map(([tr, row])=> [row, entry.rows.indexOf(receiptRowSources.get(tr)?.original)]));
+          rows.sort((a,b)=> (positions.get(a) < 0 ? Number.MAX_SAFE_INTEGER : positions.get(a)) - (positions.get(b) < 0 ? Number.MAX_SAFE_INTEGER : positions.get(b)));
+          pending.push({ entry, rows, sources });
+        }
+        let changed = false;
+        for (const { entry, rows, sources } of pending){
+          if (rows.length !== entry.rows.length || rows.some((row, index)=> row !== entry.rows[index])){
+            entry.rows = rows;
+            if (!window.receiptTrackerWeeks.includes(entry)) window.receiptTrackerWeeks.push(entry);
+            changed = true;
+          }
+          sources.forEach(([tr, row])=> rememberReceiptRow(tr, row));
+        }
+        if (changed){
+          hasUnsavedReceiptChanges = true;
+          hasExplicitSaveSinceEdit = false;
+          if (persist) persistReceiptState();
+          renderCentralSpendRows();
+        }
+        return getWeekEntry(activeWeekKey);
       };
       const refreshCostDashboard = ({ keepReceiptModalOpen = false } = {})=>{
         if (typeof renderCosts !== "function") return;
@@ -14648,46 +14835,36 @@ function renderCosts(){
           window.costPurchaseHistoryModalOpen = !!keepReceiptModalOpen;
         }
         setTimeout(()=>{
+          if (hasUnsavedReceiptChanges) return;
           try { renderCosts(); } catch (err){ console.warn("Failed to refresh cost view after purchase-history save", err); }
         }, 0);
       };
       const savePurchaseHistoryWeek = async ({ showInlineStatus = false, refreshDashboard = true, keepReceiptModalOpen = true } = {})=>{
-        saveWeekRowsFromDom();
+        if (!saveWeekRowsFromDom({ persist:false, includeDrafts:true, showValidation:true })) return false;
         rebuildPurchaseTemplates();
         renderRangeTable();
         renderCentralSpendRows();
+        const version = receiptEditVersion;
         try {
-          if (typeof saveCloudNow === "function"){
-            const maybePromise = saveCloudNow();
-            if (maybePromise && typeof maybePromise.then === "function"){
-              await maybePromise;
-            }
-            if (typeof saveCloudDebounced === "function"){
-              saveCloudDebounced();
-            }
+          const result = typeof saveCloudNow === "function" ? await saveCloudNow() : null;
+          if (result?.saved !== true || result.stateWriteCompleted !== true || result.blocked || result.indeterminate){
+            if (showInlineStatus) showSaveStatusChip("Save not confirmed", true);
+            if (typeof toast === "function") toast(result?.error || "Purchase history save was not confirmed. Your edits remain available.");
+            return false;
+          }
+          if (version === receiptEditVersion){
             hasUnsavedReceiptChanges = false;
             hasExplicitSaveSinceEdit = true;
-            if (showInlineStatus) showSaveStatusChip("Save complete");
             if (refreshDashboard) refreshCostDashboard({ keepReceiptModalOpen });
-            return true;
           }
-          if (typeof saveCloudDebounced === "function"){
-            saveCloudDebounced();
-            hasUnsavedReceiptChanges = false;
-            hasExplicitSaveSinceEdit = true;
-            if (showInlineStatus) showSaveStatusChip("Save complete");
-            if (refreshDashboard) refreshCostDashboard({ keepReceiptModalOpen });
-            return true;
-          }
-          if (typeof toast === "function") toast("Unable to save purchase history right now.");
+          if (showInlineStatus) showSaveStatusChip(version === receiptEditVersion ? "Save complete" : "Earlier edits saved; newer edits pending");
+          return version === receiptEditVersion;
         } catch (err) {
           console.error("Purchase history save failed:", err);
-          if (typeof toast === "function"){
-            toast("Purchase history save failed. Please try again.");
-          }
+          if (typeof toast === "function") toast("Purchase history save failed. Your edits remain available.");
           if (showInlineStatus) showSaveStatusChip("Save failed", true);
+          return false;
         }
-        return false;
       };
       const setUndoClearEnabled = (enabled)=>{
         if (!(undoClearBtn instanceof HTMLButtonElement)) return;
@@ -14697,7 +14874,7 @@ function renderCosts(){
         return Array.isArray(window.receiptTrackerWeeks)
           ? window.receiptTrackerWeeks.map(week => ({
               ...week,
-              rows: normalizeRows(week?.rows).map(row => ({ ...row }))
+              rows: (Array.isArray(week?.rows) ? week.rows : []).map(row => ({ ...row }))
             }))
           : [];
       };
@@ -14735,8 +14912,9 @@ const appendEmptyRow = (focusFirst = false)=>{
         tr.innerHTML = `
           <td><input type="date" data-col="date" min="${escapeHtml(String(getWeekEntry(activeWeekKey)?.startISO || ""))}" max="${escapeHtml(String(getWeekEntry(activeWeekKey)?.endISO || ""))}"></td>
           <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" placeholder="Select existing item"></td>
+          <td>N/A</td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
-          <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
+          <td class="purchase-number"><input type="number" min="0" step="1" data-col="qty" placeholder="0"></td>
           <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
           <td class="purchase-number" data-col="merchandiseSubtotal">${formatUsd(0)}</td>
           <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00" style="min-width:86px"></td>
@@ -14744,7 +14922,8 @@ const appendEmptyRow = (focusFirst = false)=>{
           <td class="purchase-number" data-col="total">${formatUsd(0)}</td>
           <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
           <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>`;
-        weekRowsBody.appendChild(tr);
+        (weekRowsBody.querySelector("[data-receipt-legacy-rows]") || weekRowsBody).appendChild(tr);
+        rememberReceiptRow(tr, undefined);
         if (focusFirst){
           const first = tr.querySelector("[data-col='date']");
           if (first instanceof HTMLElement) first.focus();
@@ -14770,20 +14949,63 @@ const appendEmptyRow = (focusFirst = false)=>{
         });
         if (weekSubtotal) weekSubtotal.textContent = formatUsd(subtotal);
       };
+      const layoutWeekOrderTables = ()=>{
+        if (!weekRowsBody.hasAttribute?.("data-receipt-week-groups")) return;
+        const groups = new Map(), legacy = [];
+        Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).forEach(tr=>{
+          const original = receiptRowSources.get(tr)?.original;
+          if (!original?.orderId){ legacy.push(tr); return; }
+          if (!groups.has(original.orderId)) groups.set(original.orderId, []);
+          groups.get(original.orderId).push(tr);
+        });
+        const sections = [];
+        const table = (title, elements, summary, orderId)=>{
+          const section = document.createElement("section");
+          section.className = "purchase-order-group";
+          if (orderId) section.dataset.receiptOrderId = orderId;
+          section.innerHTML = `<h4>${escapeHtml(title)}</h4>${summary ? `<p>${escapeHtml(summary)}</p>` : ""}<div class="cost-weekly-table-wrap"><table class="cost-table cost-receipt-week-table"><thead><tr><th>Date</th><th>Purchased Item</th><th>PO Num.</th><th>Part #</th><th class="purchase-number">Qty</th><th class="purchase-number">Unit Cost</th><th class="purchase-number">Item Subtotal</th><th class="purchase-number">Shipping</th><th class="purchase-number">Tax</th><th class="purchase-number">Total Spend</th><th>Inventory link</th><th>Actions</th></tr></thead><tbody${orderId ? "" : " data-receipt-legacy-rows"}></tbody></table></div>`;
+          if (orderId){
+            const edit = document.createElement("button");
+            edit.type = "button"; edit.className = "btn secondary"; edit.dataset.receiptEditOrder = orderId; edit.textContent = "Edit Order";
+            section.querySelector("h4").appendChild(edit);
+          }
+          section.querySelector("tbody").replaceChildren(...elements);
+          sections.push(section);
+        };
+        groups.forEach((elements, orderId)=>{
+          const originals = elements.map(tr=> receiptRowSources.get(tr).original), first = originals[0];
+          const totals = originals.reduce((sum,row)=>{
+            const values = getPurchaseFinancials(row);
+            sum.shipping += values.shipping; sum.tax += values.tax; sum.total += values.totalSpend; return sum;
+          }, {shipping:0,tax:0,total:0});
+          table(`Order ${sections.length + 1} — ${first.orderDateISO || first.date || "Undated"}`, elements,
+            `PO Num: ${String(first.poNumber ?? "").trim() || "N/A"} · Order Shipping: ${formatUsd(totals.shipping)} · Order Tax: ${formatUsd(totals.tax)} · Order Total: ${formatUsd(totals.total)} · View only`, orderId);
+        });
+        table("Other / Legacy Purchases", legacy);
+        weekRowsBody.replaceChildren(...sections);
+      };
       const renderWeekRows = ()=>{
         const entry = getWeekEntry(activeWeekKey);
-        const rows = normalizeRows(entry.rows);
+        const rows = (Array.isArray(entry.rows) ? entry.rows : []).map(row=> normalizeRows([row])[0] || row);
         if (weekAllocationNote) weekAllocationNote.hidden = !rows.some(isHistoricalPurchase);
         if (weekRangeLabel){
           weekRangeLabel.textContent = entry.startISO && entry.endISO ? `Date range: ${entry.startISO} to ${entry.endISO}` : "Date range unavailable";
         }
         if (!(weekRowsBody instanceof HTMLElement)) return;
-        weekRowsBody.innerHTML = rows.map((row, idx) => `
+        if (receiptDraftRows.has(activeWeekKey)){
+          weekRowsBody.replaceChildren(...receiptDraftRows.get(activeWeekKey));
+          receiptDraftRows.delete(activeWeekKey);
+          layoutWeekOrderTables();
+          recomputeWeekTotals();
+          return;
+        }
+        weekRowsBody.innerHTML = '<table><tbody>' + rows.map((row, idx) => `
           <tr data-receipt-row="1" data-receipt-row-index="${idx}">
             <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}" min="${escapeHtml(String(entry.startISO || ""))}" max="${escapeHtml(String(entry.endISO || ""))}"></td>
-            <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" value="${escapeHtml(row.purchased || "")}"></td>
+            <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" value="${escapeHtml(row.purchased || "")}">${row.orderId ? `<small title="${escapeHtml(row.orderId)}">View only</small>` : ""}</td>
+            <td>${escapeHtml(String(row.poNumber ?? "").trim() || "N/A")}</td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
-            <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
+            <td class="purchase-number"><input type="number" min="0" step="1" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
             <td class="purchase-number" data-col="merchandiseSubtotal">${formatUsd(getPurchaseFinancials(row).merchandiseSubtotal)}</td>
             <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}" style="min-width:86px"></td>
@@ -14791,8 +15013,16 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td class="purchase-number" data-col="total">${formatUsd(computeRowTotal(row))}</td>
             <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
             <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>
-          </tr>`).join("");
+          </tr>`).join("") + '</tbody></table>';
+        Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).forEach((tr, index)=>{
+          rememberReceiptRow(tr, entry.rows[index]);
+          if (entry.rows[index]?.orderId){
+            tr.querySelectorAll("input").forEach(input=>{ input.readOnly = true; });
+            tr.querySelectorAll("button").forEach(button=>{ button.disabled = true; });
+          }
+        });
         appendEmptyRow();
+        layoutWeekOrderTables();
         recomputeWeekTotals();
       };
       const findInventoryByPartNumber = (partNumber)=>{
@@ -14813,6 +15043,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         (window.receiptTrackerWeeks || []).forEach(week => {
           if (!Array.isArray(week?.rows)) return;
           week.rows = week.rows.map(row => {
+            if (row?.orderId) return row;
             const rowPart = String(row?.partNumber || "").trim().toLowerCase();
             if (!rowPart || rowPart !== partKey) return row;
             updates += 1;
@@ -14893,7 +15124,8 @@ const appendEmptyRow = (focusFirst = false)=>{
           return `
           <tr>
             <td>${escapeHtml(row.date || "—")}</td>
-            <td>${escapeHtml(row.purchased || "—")}</td>
+            <td>${escapeHtml(row.purchased || "—")}${row.orderId ? `<small title="${escapeHtml(row.orderId)}"> · Order ${escapeHtml(String(row.orderId).slice(-8))} (view only)</small>` : ""}</td>
+            <td>${escapeHtml(String(row.poNumber ?? "").trim() || "N/A")}</td>
             <td>${escapeHtml(row.partNumber || "—")}</td>
             <td class="purchase-number">${escapeHtml(String(financials.qty))}</td>
             <td class="purchase-number">${formatUsd(financials.unitCost)}</td>
@@ -14903,7 +15135,7 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td class="purchase-number">${formatUsd(financials.totalSpend)}</td>
             <td><span class="small muted">${stateLabel}</span></td>
           </tr>`;
-        }).join("") : '<tr><td colspan="10" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
+        }).join("") : '<tr><td colspan="11" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
         if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
         if (rangeLabel) rangeLabel.textContent = formatDateRangeLabel(start, end);
       };
@@ -14931,6 +15163,7 @@ const appendEmptyRow = (focusFirst = false)=>{
             if (next instanceof HTMLElement) next.focus();
           }
           recomputeWeekTotals();
+          receiptEditVersion += 1;
           hasUnsavedReceiptChanges = true;
           hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
@@ -14943,27 +15176,17 @@ const appendEmptyRow = (focusFirst = false)=>{
             const row = inputEl.closest("tr[data-receipt-row]");
             const typed = String(inputEl.value || "").trim();
             if (row && typed){
-              const task = findTaskByNameExact(typed);
-              const invFromTask = task && task.inventoryId != null && Array.isArray(window.inventory)
-                ? window.inventory.find(item => String(item?.id || "") === String(task.inventoryId))
-                : null;
-              const inv = invFromTask || (Array.isArray(window.inventory) ? window.inventory.find(item => String(item?.name || "").trim().toLowerCase() === typed.toLowerCase()) : null);
+              const {task, inv, partNumber, price} = purchaseSelection(typed);
               const partEl = row.querySelector('[data-col="partNumber"]');
               const costEl = row.querySelector('[data-col="cost"]');
               if (task || inv){
-                const taskPn = String(task?.pn || "").trim();
-                const taskPrice = Number(task?.price);
-                const invPn = String(inv?.pn || "").trim();
-                const invPrice = Number(inv?.price);
-                if (partEl instanceof HTMLInputElement) partEl.value = String(taskPn || invPn || partEl.value || "");
-                if (costEl instanceof HTMLInputElement){
-                  if (Number.isFinite(taskPrice)) costEl.value = String(taskPrice);
-                  else if (Number.isFinite(invPrice)) costEl.value = String(invPrice);
-                }
+                if (partEl instanceof HTMLInputElement) partEl.value = partNumber || partEl.value || "";
+                if (costEl instanceof HTMLInputElement && price !== null) costEl.value = String(price);
               }
             }
           }
           recomputeWeekTotals();
+          receiptEditVersion += 1;
           hasUnsavedReceiptChanges = true;
           hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
@@ -14971,6 +15194,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           renderRangeTable();
         });
         weekRowsBody.addEventListener("change", ()=>{
+          receiptEditVersion += 1;
           hasUnsavedReceiptChanges = true;
           hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
@@ -14980,19 +15204,23 @@ const appendEmptyRow = (focusFirst = false)=>{
           const target = event.target instanceof HTMLElement ? event.target : null;
           if (!target) return;
           if (target.getAttribute("data-col") === "removeRow"){
+            if (receiptRowSources.get(target.closest("tr[data-receipt-row]"))?.original?.orderId){
+              if (typeof toast === "function") toast("Saved order items cannot be removed individually. Whole-order editing is not available yet.");
+              return;
+            }
             const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"));
             if (rows.length <= 1){ if (typeof toast === "function") toast("At least one row is required."); return; }
             target.closest("tr[data-receipt-row]")?.remove();
+            receiptEditVersion += 1;
+            hasUnsavedReceiptChanges = true;
+            hasExplicitSaveSinceEdit = false;
             recomputeWeekTotals(); saveWeekRowsFromDom(); renderRangeTable(); renderCentralSpendRows();
             return;
           }
           if (target.getAttribute("data-col") === "goTask"){
             const row = target.closest("tr[data-receipt-row]");
             const purchased = String(row?.querySelector('[data-col="purchased"]')?.value || "").trim().toLowerCase();
-            const inv = (Array.isArray(inventory) ? inventory : []).find(item => String(item?.name || "").trim().toLowerCase() === purchased);
-            const taskId = inv && inv.linkedTaskId != null ? String(inv.linkedTaskId) : "";
-            if (taskId && typeof openSettingsAndReveal === "function"){ openSettingsAndReveal(taskId); }
-            else if (typeof window.showScreen === "function"){ window.showScreen("settings"); }
+            openPurchaseInventoryEditor(purchased);
           }
         });
       };
@@ -15008,18 +15236,26 @@ const appendEmptyRow = (focusFirst = false)=>{
           activeRange = rangeSelect.value || "1";
           window.receiptTrackerRangeSelected = activeRange;
           renderRangeTable();
-          persistReceiptState();
         });
       }
+      const navigateReceiptWeek = (key)=>{
+        if (!(weekRowsBody instanceof HTMLElement)) return;
+        receiptDraftRows.set(activeWeekKey, Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")));
+        activeWeekKey = key;
+        selectedReceiptYear = Number(key.slice(0, 4));
+        window.receiptTrackerWeekSelected = activeWeekKey;
+        renderWeekOptions();
+        renderWeekRows();
+      };
       if (weekSelect instanceof HTMLSelectElement){
-        weekSelect.addEventListener("change", ()=>{
-          saveWeekRowsFromDom();
-          hasUnsavedReceiptChanges = true;
-          hasExplicitSaveSinceEdit = false;
-          activeWeekKey = weekSelect.value;
-          window.receiptTrackerWeekSelected = activeWeekKey;
-          renderWeekRows();
-          renderRangeTable();
+        weekSelect.addEventListener("change", ()=> navigateReceiptWeek(weekSelect.value));
+      }
+      if (yearSelect instanceof HTMLSelectElement){
+        yearSelect.addEventListener("change", ()=>{
+          const year = Number(yearSelect.value), current = currentReceiptWeek();
+          const options = buildReceiptWeeks(year);
+          const week = year === current.year ? current.week : Math.min(Number(activeWeekKey.slice(-2)), options.length);
+          navigateReceiptWeek(weekKey(year, week));
         });
       }
       if (saveWeekBtn instanceof HTMLButtonElement){
@@ -15035,9 +15271,8 @@ const appendEmptyRow = (focusFirst = false)=>{
       const quickAddBtn = modal.querySelector("[data-receipt-quick-add-task]");
       if (quickAddBtn instanceof HTMLButtonElement){
         quickAddBtn.addEventListener("click", ()=>{
+          if (!saveWeekRowsFromDom({ showValidation:true })) return;
           ensureMaintenanceTaskModalAPI();
-          saveWeekRowsFromDom();
-          persistReceiptState();
           const focusRowIndex = Math.max(0, (weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelectorAll("tr[data-receipt-row]").length : 1) - 1);
           const opener = typeof window.__openMaintenanceTaskModal === "function" ? window.__openMaintenanceTaskModal : null;
           if (opener){
@@ -15048,11 +15283,11 @@ const appendEmptyRow = (focusFirst = false)=>{
                 renderWeekRows();
                 renderRangeTable();
                 renderCentralSpendRows();
-                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                const field = weekRowsBody instanceof HTMLElement ? Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"))[focusRowIndex]?.querySelector('[data-col="purchased"]') : null;
                 if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
               },
               onClosed: ()=>{
-                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                const field = weekRowsBody instanceof HTMLElement ? Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"))[focusRowIndex]?.querySelector('[data-col="purchased"]') : null;
                 if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
               }
             });
@@ -15068,7 +15303,13 @@ const appendEmptyRow = (focusFirst = false)=>{
       }
       if (clearAllBtn instanceof HTMLButtonElement){
         clearAllBtn.addEventListener("click", async ()=>{
+          if ((window.receiptTrackerWeeks || []).some(week=> (week.rows || []).some(row=> row?.orderId))){
+            if (typeof toast === "function") toast("Clear all is unavailable when Purchase History contains saved orders. Whole-order deletion is not available yet.");
+            return;
+          }
+          receiptEditVersion += 1;
           purchaseHistoryUndoSnapshot = snapshotPurchaseHistory();
+          receiptDraftRows.clear();
           setUndoClearEnabled(Array.isArray(purchaseHistoryUndoSnapshot) && purchaseHistoryUndoSnapshot.length > 0);
           if (Array.isArray(window.receiptTrackerWeeks)){
             window.receiptTrackerWeeks = window.receiptTrackerWeeks.map(week => ({ ...week, rows: [] }));
@@ -15082,16 +15323,17 @@ const appendEmptyRow = (focusFirst = false)=>{
           renderWeekRows();
           renderRangeTable();
           renderCentralSpendRows();
-          await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true });
-          if (typeof toast === "function") toast("Purchase history cleared. Use Undo clear to restore.");
+          if (await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true }) && typeof toast === "function") toast("Purchase history cleared. Use Undo clear to restore.");
         });
       }
       if (undoClearBtn instanceof HTMLButtonElement){
         undoClearBtn.addEventListener("click", async ()=>{
           if (!Array.isArray(purchaseHistoryUndoSnapshot)) return;
+          receiptEditVersion += 1;
+          receiptDraftRows.clear();
           window.receiptTrackerWeeks = purchaseHistoryUndoSnapshot.map(week => ({
             ...week,
-            rows: normalizeRows(week?.rows).map(row => ({ ...row }))
+            rows: (Array.isArray(week?.rows) ? week.rows : []).map(row => ({ ...row }))
           }));
           purchaseHistoryUndoSnapshot = null;
           setUndoClearEnabled(false);
@@ -15103,14 +15345,14 @@ const appendEmptyRow = (focusFirst = false)=>{
           renderWeekRows();
           renderRangeTable();
           renderCentralSpendRows();
-          await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true });
-          if (typeof toast === "function") toast("Purchase history restore complete.");
+          if (await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true }) && typeof toast === "function") toast("Purchase history restore complete.");
         });
       }
       setUndoClearEnabled(false);
       if (exportWeekBtn instanceof HTMLElement){
         exportWeekBtn.addEventListener("click", ()=>{
-          const entry = saveWeekRowsFromDom();
+          const entry = saveWeekRowsFromDom({ showValidation:true });
+          if (!entry) return;
           const rows = normalizeRows(entry.rows);
           const subtotal = rows.reduce((sum, row) => sum + computeRowTotal(row), 0);
           const weekRange = entry.startISO && entry.endISO
@@ -15119,10 +15361,11 @@ const appendEmptyRow = (focusFirst = false)=>{
           const workbook = buildWorkbookFromTable({
             title: "Purchase History — Weekly Export",
             subtitle: weekRange,
-            headerRows: [["Date", "Purchased Item", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
+            headerRows: [["Date", "Purchased Item", "PO Num.", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
             bodyRows: rows.map(row => [
               row.date || "—",
               row.purchased || "—",
+              String(row.poNumber ?? "").trim() || "N/A",
               row.partNumber || "—",
               getPurchaseFinancials(row).qty.toFixed(2),
               getPurchaseFinancials(row).unitCost.toFixed(2),
@@ -15131,7 +15374,7 @@ const appendEmptyRow = (focusFirst = false)=>{
               getPurchaseFinancials(row).tax.toFixed(2),
               getPurchaseFinancials(row).totalSpend.toFixed(2)
             ]),
-            footerRows: [["", "", "", "", "", "", "", "Week Total Spend", Number(subtotal || 0).toFixed(2)]]
+            footerRows: [["", "", "", "", "", "", "", "", "Week Total Spend", Number(subtotal || 0).toFixed(2)]]
           });
           downloadWorkbook(`receipt-week-${entry.key || "week"}.xls`, workbook);
         });
@@ -15173,6 +15416,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         (window.receiptTrackerWeeks || []).forEach(week => {
           if (!Array.isArray(week?.rows)) return;
           week.rows = week.rows.map((row, idx) => {
+            if (row?.orderId) return row;
             const samePn = group.partNumber && String(row?.partNumber||"").trim().toLowerCase() === String(group.partNumber).toLowerCase();
             const sameRow = !group.partNumber && group.rows.some(x => x.weekKey===week.key && Number(x.rowIndex)===idx);
             if (!samePn && !sameRow) return row;
@@ -15293,10 +15537,11 @@ const appendEmptyRow = (focusFirst = false)=>{
           const workbook = buildWorkbookFromTable({
             title: "Purchase History — Date Range Export",
             subtitle: formatDateRangeLabel(start, end),
-            headerRows: [["Date", "Purchased Item", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
+            headerRows: [["Date", "Purchased Item", "PO Num.", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
             bodyRows: rows.map(row => [
               row.date || "—",
               row.purchased || "—",
+              String(row.poNumber ?? "").trim() || "N/A",
               row.partNumber || "—",
               getPurchaseFinancials(row).qty.toFixed(2),
               getPurchaseFinancials(row).unitCost.toFixed(2),
@@ -15305,12 +15550,261 @@ const appendEmptyRow = (focusFirst = false)=>{
               getPurchaseFinancials(row).tax.toFixed(2),
               getPurchaseFinancials(row).totalSpend.toFixed(2)
             ]),
-            footerRows: [["", "", "", "", "", "", "", "Range Total Spend", Number(subtotal || 0).toFixed(2)]]
+            footerRows: [["", "", "", "", "", "", "", "", "Range Total Spend", Number(subtotal || 0).toFixed(2)]]
           });
           downloadWorkbook(`receipt-range-${activeRange}.xls`, workbook);
         });
       }
-      const openModal = ()=>{
+      const newOrderBtn = modal.querySelector("[data-receipt-new-order]");
+      const orderEditor = modal.querySelector("[data-purchase-order-editor]");
+      if (newOrderBtn instanceof HTMLElement && orderEditor instanceof HTMLElement){
+        const orders = window.OMAXPurchaseOrders;
+        const dateInput = orderEditor.querySelector("[data-purchase-order-date]");
+        const shippingInput = orderEditor.querySelector("[data-purchase-order-shipping]");
+        const taxInput = orderEditor.querySelector("[data-purchase-order-tax]");
+        const poInput = orderEditor.querySelector("[data-purchase-order-po]");
+        const itemsBody = orderEditor.querySelector("[data-purchase-order-items]");
+        const previewLabel = orderEditor.querySelector("[data-purchase-order-preview]");
+        const status = orderEditor.querySelector("[data-purchase-order-status]");
+        const addButton = orderEditor.querySelector("[data-purchase-order-add]");
+        const saveButton = orderEditor.querySelector("[data-purchase-order-save]");
+        const cancelButton = orderEditor.querySelector("[data-purchase-order-cancel]");
+        let session = window.__purchaseOrderDraftSession || null, draft = session?.draft || null, saving = false;
+        const disabledBeforeOrder = new Map();
+        const lockHistory = locked=>{
+          if (locked){
+            modal.querySelectorAll("input, select, button").forEach(element=>{
+              if (!orderEditor.contains(element)){ disabledBeforeOrder.set(element, element.disabled); element.disabled = true; }
+            });
+          } else {
+            disabledBeforeOrder.forEach((disabled, element)=>{ element.disabled = disabled; });
+            disabledBeforeOrder.clear();
+          }
+        };
+        const readDraft = ()=>{
+          draft.date = dateInput.value; draft.shipping = shippingInput.value; draft.tax = taxInput.value; draft.poNumber = poInput.value;
+          itemsBody.querySelectorAll("tr[data-order-line]").forEach(tr=>{
+            const item = draft.items.find(item=> item.lineId === tr.dataset.orderLine);
+            for (const field of ["purchased", "partNumber", "qty", "cost", "inventoryItemId"]) item[field] = tr.querySelector(`[data-order-field="${field}"]`).value;
+          });
+        };
+        const updatePreview = ()=>{
+          if (!draft) return;
+          readDraft();
+          try {
+            const planned = orders.plan(draft);
+            previewLabel.textContent = `Merchandise ${formatUsd(orders.dollars(planned.merchandiseCents))} · Shipping ${formatUsd(orders.dollars(planned.shippingCents))} · Tax ${formatUsd(orders.dollars(planned.taxCents))} · Total spend ${formatUsd(orders.dollars(planned.totalCents))}`;
+            planned.rows.forEach(row=>{
+              const tr = itemsBody.querySelector(`[data-order-line="${row.lineId}"]`);
+              tr.querySelector("[data-order-allocation]").textContent = formatUsd(row.shipping);
+              tr.querySelector("[data-order-tax-allocation]").textContent = formatUsd(row.tax);
+              tr.querySelector("[data-order-total]").textContent = formatUsd(getPurchaseFinancials(row).totalSpend);
+            });
+            saveButton.disabled = saving || getPurchaseOrderApi().isUncertain();
+          } catch (error){
+            previewLabel.textContent = error.message;
+            itemsBody.querySelectorAll("[data-order-allocation], [data-order-tax-allocation], [data-order-total]").forEach(cell=>{ cell.textContent = "—"; });
+            saveButton.disabled = true;
+          }
+        };
+        const renderItems = ()=>{
+          itemsBody.innerHTML = draft.items.map(item=> `<tr data-order-line="${escapeHtml(item.lineId)}">
+            <td class="purchase-order-name"><input data-order-field="purchased" value="${escapeHtml(item.purchased)}" aria-label="Item description" role="combobox" aria-autocomplete="list" aria-controls="${escapeHtml(item.lineId)}-suggestions" aria-expanded="false" autocomplete="off" required><div id="${escapeHtml(item.lineId)}-suggestions" data-order-suggestions role="listbox" aria-label="Purchase items" hidden></div></td>
+            <td><input data-order-field="partNumber" value="${escapeHtml(item.partNumber)}" aria-label="Part number"></td>
+            <td><input type="number" min="1" step="1" data-order-field="qty" value="${escapeHtml(item.qty)}" aria-label="Quantity" required></td>
+            <td><input type="number" min="0" step="0.01" data-order-field="cost" value="${escapeHtml(item.cost)}" aria-label="Unit cost" required></td>
+            <td><select data-order-field="inventoryItemId" aria-label="Optional inventory link"><option value="">No link</option>${item.inventoryItemId && !(window.inventory || []).some(inv=> String(inv.id) === item.inventoryItemId) ? `<option value="${escapeHtml(item.inventoryItemId)}" selected>Missing link — review</option>` : ""}${(window.inventory || []).map(inv=> `<option value="${escapeHtml(String(inv.id))}"${item.inventoryItemId === String(inv.id) ? " selected" : ""}>${escapeHtml(inv.name || inv.pn || String(inv.id))}</option>`).join("")}</select><button type="button" class="btn secondary" data-order-edit-inventory="${escapeHtml(item.lineId)}">Edit Inventory</button></td>
+            <td data-order-allocation>—</td><td data-order-tax-allocation>—</td><td data-order-total>—</td>
+            <td><button type="button" class="btn danger" data-order-remove="${escapeHtml(item.lineId)}">Remove Item</button></td>
+          </tr>`).join("");
+          updatePreview();
+        };
+        const showDraft = ()=>{
+          dateInput.value = draft.date; shippingInput.value = draft.shipping; taxInput.value = draft.tax; poInput.value = draft.poNumber || ""; status.textContent = "";
+          orderEditor.querySelector("[data-purchase-order-title]").textContent = session.edit ? "Edit Purchase Order" : "New Purchase Order";
+          orderEditor.setAttribute("aria-label", session.edit ? "Edit purchase order" : "New purchase order");
+          saveButton.textContent = session.edit ? "Save Changes" : "Save Order";
+          orderEditor.hidden = false; lockHistory(true); rebuildPurchaseTemplates(); renderItems(); dateInput.focus();
+          window.costPurchaseHistoryModalOpen = true;
+          if (getPurchaseOrderApi().isUncertain()){
+            orderEditor.querySelectorAll("input, select, button").forEach(element=>{ element.disabled = true; }); cancelButton.disabled = false;
+            status.textContent = "The last save needs server verification. Review Recovery Mode before retrying.";
+          }
+        };
+        const startOrder = async orderId=>{
+          if (saving || getPurchaseOrderApi().isBusy()) return;
+          if (getPurchaseOrderApi().isUncertain()){
+            if (typeof toast === "function") toast("The previous order needs server verification before another order can be entered.");
+            return;
+          }
+          if (hasUnsavedReceiptChanges && !await savePurchaseHistoryWeek({refreshDashboard:false})) return;
+          try {
+            const today = new Date();
+            const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+            const saved = orderId ? orders.openSaved({receiptTrackerWeeks:window.receiptTrackerWeeks}, orderId) : null;
+            draft = saved ? saved.draft : orders.newDraft(date, window.crypto);
+            session = {draft, edit:saved ? {expected:saved.expected, confirmedRemovedLineIds:[]} : null};
+            window.__purchaseOrderDraftSession = session;
+            showDraft();
+          } catch (error){ if (typeof toast === "function") toast(error.message); }
+        };
+        newOrderBtn.addEventListener("click", ()=> startOrder());
+        weekRowsBody.addEventListener("click", event=>{
+          const id = event.target.closest?.("[data-receipt-edit-order]")?.dataset.receiptEditOrder;
+          if (id) void startOrder(id);
+        });
+        const applyOrderSelection = input=>{
+          const tr = input.closest("tr[data-order-line]"), selected = purchaseSelection(input.value), item = draft.items.find(item=> item.lineId === tr.dataset.orderLine);
+          tr.querySelector('[data-order-field="inventoryItemId"]').value = selected.inv ? String(selected.inv.id) : "";
+          if (selected.task) item.taskId = String(selected.task.id); else delete item.taskId;
+          if (selected.task || selected.inv){
+            const part = tr.querySelector('[data-order-field="partNumber"]');
+            part.value = selected.partNumber || part.value;
+            if (selected.price !== null) tr.querySelector('[data-order-field="cost"]').value = String(selected.price);
+          }
+        };
+        const hideSuggestions = tr=>{
+          tr.querySelector("[data-order-suggestions]").hidden = true;
+          const input = tr.querySelector('[data-order-field="purchased"]');
+          input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant");
+        };
+        const suggest = input=>{
+          const tr = input.closest("tr[data-order-line]"), list = tr.querySelector("[data-order-suggestions]"), query = input.value.trim().toLowerCase();
+          itemsBody.querySelectorAll("tr[data-order-line]").forEach(row=>{ if (row !== tr) hideSuggestions(row); });
+          // New Order owns its visible matches; a shared native datalist popup can
+          // retain the previous selection even though this row's text changed.
+          const names = Array.from(purchasedDatalist.options).map(option=> option.value).filter(name=> query && name.toLowerCase().includes(query));
+          list.innerHTML = names.map((name,index)=> `<button type="button" role="option" id="${escapeHtml(tr.dataset.orderLine)}-option-${index}" aria-selected="false" tabindex="-1" data-order-suggestion="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join("");
+          tr.dataset.suggestionIndex = "-1"; list.hidden = !names.length; input.setAttribute("aria-expanded", String(!!names.length)); input.removeAttribute("aria-activedescendant");
+        };
+        const choose = (tr, name)=>{
+          const input = tr.querySelector('[data-order-field="purchased"]');
+          input.value = name; applyOrderSelection(input); updatePreview(); input.focus(); hideSuggestions(tr);
+        };
+        orderEditor.addEventListener("input", event=>{
+          if (saving || !draft) return;
+          const input = event.target;
+          if (input.dataset.orderField === "purchased"){
+            applyOrderSelection(input); suggest(input);
+          }
+          updatePreview();
+        });
+        orderEditor.addEventListener("change", event=>{
+          if (saving || !draft) return;
+          const input = event.target;
+          if (input.dataset.orderField === "inventoryItemId"){
+            const inv = (window.inventory || []).find(item=> String(item.id) === input.value), tr = input.closest("tr[data-order-line]");
+            if (inv){
+              tr.querySelector('[data-order-field="purchased"]').value = String(inv.name || "");
+              tr.querySelector('[data-order-field="partNumber"]').value = String(inv.pn || "");
+              if (Number.isFinite(Number(inv.price))) tr.querySelector('[data-order-field="cost"]').value = String(inv.price);
+            }
+            const item = draft.items.find(item=> item.lineId === tr.dataset.orderLine), task = inv && (findTaskByNameExact(inv.name) || [...(window.tasksInterval || []), ...(window.tasksAsReq || [])].find(task=> String(task.id) === String(inv.linkedTaskId)));
+            if (task) item.taskId = String(task.id); else delete item.taskId;
+          }
+          updatePreview();
+        });
+        addButton.addEventListener("click", ()=>{
+          if (saving || !draft) return;
+          readDraft(); draft.items.push(orders.newItem(window.crypto)); renderItems();
+        });
+        itemsBody.addEventListener("click", event=>{
+          const suggestion = event.target.closest("[data-order-suggestion]");
+          if (suggestion && !saving){ choose(suggestion.closest("tr[data-order-line]"), suggestion.dataset.orderSuggestion); return; }
+          const editInventory = event.target.closest("[data-order-edit-inventory]");
+          if (editInventory && !saving){
+            readDraft();
+            const item = draft.items.find(item=> item.lineId === editInventory.dataset.orderEditInventory);
+            session.inventoryRefresh = {lineId:item.lineId, item:{...item}, selection:purchaseSelection(item.purchased)};
+            session.inventoryRefresh = JSON.parse(JSON.stringify(session.inventoryRefresh));
+            modal.hidden = true; window.costPurchaseHistoryModalOpen = false; document.body.classList.remove("cost-receipt-modal-open");
+            openPurchaseInventoryEditor(item.purchased, item.inventoryItemId); return;
+          }
+          const lineId = event.target.getAttribute("data-order-remove");
+          if (!lineId || saving || !draft) return;
+          if (session.edit?.expected.rows.some(row=> row.lineId === lineId)){
+            if (!confirm("Remove this previously saved item from the order? It will be removed only when you save changes. A local before-image will be retained for recovery.")) return;
+            session.edit.confirmedRemovedLineIds.push(lineId);
+          }
+          readDraft(); draft.items = draft.items.filter(item=> item.lineId !== lineId); renderItems();
+        });
+        itemsBody.addEventListener("pointerdown", event=>{ if (event.target.closest("[data-order-suggestion]")) event.preventDefault(); });
+        itemsBody.addEventListener("focusin", event=>{ if (event.target.dataset.orderField === "purchased" && !saving) suggest(event.target); });
+        itemsBody.addEventListener("focusout", event=>{
+          const tr = event.target.closest("tr[data-order-line]");
+          if (tr) setTimeout(()=>{ if (!tr.contains(document.activeElement)) hideSuggestions(tr); }, 0);
+        });
+        itemsBody.addEventListener("keydown", event=>{
+          const input = event.target;
+          if (saving || input.dataset.orderField !== "purchased") return;
+          const tr = input.closest("tr[data-order-line]"), list = tr.querySelector("[data-order-suggestions]");
+          if (event.key === "Escape"){ event.preventDefault(); event.stopPropagation(); hideSuggestions(tr); return; }
+          if (!["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
+          if (list.hidden && event.key !== "Enter") suggest(input);
+          const options = Array.from(list.querySelectorAll("[data-order-suggestion]"));
+          if (list.hidden || !options.length) return;
+          let index = Number(tr.dataset.suggestionIndex);
+          if (event.key === "Enter"){
+            if (index < 0) return;
+            event.preventDefault(); choose(tr, options[index].dataset.orderSuggestion); return;
+          }
+          event.preventDefault(); event.stopPropagation();
+          index = event.key === "ArrowDown" ? (index + 1) % options.length : (index <= 0 ? options.length - 1 : index - 1);
+          tr.dataset.suggestionIndex = String(index); options.forEach((option,i)=> option.setAttribute("aria-selected", String(i === index)));
+          input.setAttribute("aria-activedescendant", options[index].id); options[index].scrollIntoView({block:"nearest"});
+        });
+        cancelButton.addEventListener("click", ()=>{
+          if (saving) return;
+          draft = null; session = null; delete window.__purchaseOrderDraftSession; orderEditor.hidden = true; lockHistory(false);
+        });
+        saveButton.addEventListener("click", async()=>{
+          if (saving || !draft) return;
+          readDraft();
+          try { orders.plan(draft); } catch (error){ status.textContent = error.message; return; }
+          saving = true;
+          orderEditor.querySelectorAll("input, select, button").forEach(element=>{ element.disabled = true; });
+          status.textContent = "Saving order and verifying the server…";
+          const result = await getPurchaseOrderApi().save(draft, session.edit);
+          saving = false;
+          if (!result.saved || !result.verificationCompleted){
+            const uncertain = result.indeterminate || getPurchaseOrderApi().isUncertain();
+            orderEditor.querySelectorAll("input, select, button").forEach(element=>{ element.disabled = !!uncertain; });
+            cancelButton.disabled = false;
+            status.textContent = result.error || "The order was not confirmed. Your draft remains available.";
+            if (!uncertain) updatePreview();
+            return;
+          }
+          draft = null; session = null; delete window.__purchaseOrderDraftSession; orderEditor.hidden = true; lockHistory(false);
+          orderEditor.querySelectorAll("input, select, button").forEach(element=>{ element.disabled = false; });
+          receiptDraftRows.clear();
+          activeWeekKey = result.weekKey; selectedReceiptYear = Number(activeWeekKey.slice(0, 4));
+          window.receiptTrackerWeekSelected = activeWeekKey;
+          hasUnsavedReceiptChanges = false; hasExplicitSaveSinceEdit = true;
+          renderWeekOptions(); renderWeekRows(); renderRangeTable(); renderCentralSpendRows();
+          refreshCostDashboard({keepReceiptModalOpen:true});
+          if (typeof toast === "function") toast("Order saved and verified.");
+        });
+        if (draft){
+          const refresh = session.inventoryRefresh;
+          if (refresh){
+            const item = draft.items.find(item=> item.lineId === refresh.lineId), prior = refresh.selection;
+            const inv = (window.inventory || []).find(inv=> String(inv.id) === refresh.item.inventoryItemId);
+            const task = [...(window.tasksInterval || []), ...(window.tasksAsReq || [])].find(task=> String(task.id) === refresh.item.taskId);
+            if (item){
+              if (task && item.purchased === prior.task?.name) item.purchased = task.name;
+              else if (inv && item.purchased === prior.inv?.name) item.purchased = inv.name;
+              const selected = purchaseSelection(item.purchased);
+              if (selected.inv && prior.inv && String(item.inventoryItemId) === String(prior.inv.id)) item.inventoryItemId = String(selected.inv.id);
+              if (item.partNumber === prior.partNumber) item.partNumber = selected.partNumber || item.partNumber;
+              if (prior.price !== null && Number(item.cost) === prior.price && selected.price !== null) item.cost = String(selected.price);
+            }
+            delete session.inventoryRefresh;
+          }
+          showDraft();
+        }
+      }
+      const openModal = ({ preserveTarget = false } = {})=>{
+        if (!preserveTarget) navigateReceiptWeek(currentReceiptWeek().key);
         modal.hidden = false;
         modal.setAttribute("aria-hidden", "false");
         document.body.classList.add("cost-receipt-modal-open");
@@ -15335,10 +15829,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         const rowIndex = Number(target.rowIndex);
         if (!weekKey) return false;
         if (weekSelect.value !== weekKey){
-          weekSelect.value = weekKey;
-          activeWeekKey = weekKey;
-          window.receiptTrackerWeekSelected = activeWeekKey;
-          renderWeekRows();
+          navigateReceiptWeek(weekKey);
         }
         if (!Number.isFinite(rowIndex) || rowIndex < 0) return false;
         const row = weekRowsBody.querySelector(`[data-receipt-row-index="${rowIndex}"]`);
@@ -15347,9 +15838,8 @@ const appendEmptyRow = (focusFirst = false)=>{
         return true;
       };
       const closeModal = async ()=>{
-        saveWeekRowsFromDom();
         if (hasUnsavedReceiptChanges && !hasExplicitSaveSinceEdit){
-          await savePurchaseHistoryWeek({ refreshDashboard: false, keepReceiptModalOpen: false });
+          if (!await savePurchaseHistoryWeek({ refreshDashboard: false, keepReceiptModalOpen: false })) return;
           if (typeof toast === "function") toast("Saved");
           refreshCostDashboard({ keepReceiptModalOpen: false });
         }
@@ -15364,15 +15854,17 @@ const appendEmptyRow = (focusFirst = false)=>{
       };
       if (typeof window !== "undefined"){
         window.__openPurchaseHistoryModalAtEntry = (target = {})=>{
-          openModal();
+          openModal({ preserveTarget:true });
           setTimeout(()=>{ focusReceiptWeekRow(target); }, 10);
           return true;
         };
       }
-      receiptOpenBtn.addEventListener("click", openModal);
+      receiptOpenBtn.addEventListener("click", ()=> openModal());
       closeControls.forEach(control => control.addEventListener("click", closeModal));
       if (window.costPurchaseHistoryModalOpen){
-        openModal();
+        const selected = String(window.receiptTrackerWeekSelected || "");
+        if (/^\d{4}-W\d{2}$/.test(selected)) navigateReceiptWeek(selected);
+        openModal({ preserveTarget:true });
       }
     }
 
@@ -19813,7 +20305,7 @@ function computeCostModel(){
       const purchased = String(row?.purchased || "").trim();
       const partNumber = String(row?.partNumber || "").trim();
       const financials = getPurchaseFinancials(row);
-      return { dateValue, purchased, partNumber, cost:financials.unitCost, qty:financials.qty, merchandiseSubtotal:financials.merchandiseSubtotal, shipping:financials.shipping, tax:financials.tax, total:financials.totalSpend };
+      return { dateValue, purchased, partNumber, poNumber:String(row?.poNumber ?? "").trim(), cost:financials.unitCost, qty:financials.qty, merchandiseSubtotal:financials.merchandiseSubtotal, shipping:financials.shipping, tax:financials.tax, total:financials.totalSpend };
     });
   };
   (Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks : []).forEach(weekEntry => {
@@ -19844,6 +20336,7 @@ function computeCostModel(){
         tax,
         total,
         merchandiseSubtotal,
+        poNumber:rawRow.poNumber,
         weekLabel,
         weekKey: key,
         rowIndex
@@ -19855,6 +20348,7 @@ function computeCostModel(){
     id: `spend_${idx}_${row.dateISO || "undated"}`,
     dateISO: row.dateISO || "—",
     purchased: row.purchased || "—",
+    poNumber: row.poNumber || "",
     weekLabel: row.weekLabel || "—",
     weekKey: row.weekKey || "",
     rowIndex: Number.isFinite(row.rowIndex) ? row.rowIndex : -1,
