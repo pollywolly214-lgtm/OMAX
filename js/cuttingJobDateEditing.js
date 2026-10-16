@@ -63,7 +63,7 @@
     if(!state||!Array.isArray(state.cuttingJobs)||!Array.isArray(state.completedCuttingJobs))return fail("Cutting-job state is unavailable.");
     const original=[...state.cuttingJobs,...state.completedCuttingJobs],ids=new Set();
     for(const job of original){if(!job||typeof job.id!=="string"||!job.id.trim()||ids.has(job.id))return fail("Unique stable cutting-job identities are required.");ids.add(job.id);}
-    if(!operation||!["edit","complete","create"].includes(operation.type))return fail("Unsupported cutting-job operation.");
+    if(!operation||!["edit","complete","create","failure"].includes(operation.type))return fail("Unsupported cutting-job operation.");
     const nextState=clone(state),jobs=[...nextState.cuttingJobs,...nextState.completedCuttingJobs];let target=jobs.find(job=>job.id===operation.id);
     if(operation.type==="create"){
       target=clone(operation.job);
@@ -71,8 +71,29 @@
       nextState.cuttingJobs.push(target);
     }else if(!target)return fail("This cutting job no longer exists.");
     const wasCompleted=nextState.completedCuttingJobs.some(job=>job.id===target.id);
+    if(operation.type==="failure"){
+      const percent=operation.failurePercent;
+      if(!wasCompleted||typeof percent!=="number"||!Number.isFinite(percent)||percent<0||percent>100)return fail("Enter a failure percentage from 0 to 100 for a completed cutting job.");
+      const before=target.failurePercent??0;
+      if(before===percent)return{ok:true,nextState,hasChanges:false,renumbering:{ok:true,changed:[]},chronologyChanges:[]};
+      if(!audit||typeof audit.operationId!=="string"||!audit.operationId.trim()||!audit.actorUid||!dateKey(audit.atISO))return fail("Cutting-job audit identity is unavailable.");
+      if(target.cutChronologyHistory!==undefined&&!Array.isArray(target.cutChronologyHistory))return fail("Invalid cutting-job audit history.");
+      if((target.cutChronologyHistory||[]).some(entry=>entry?.operationId===audit.operationId))return fail("This cutting-job operation was already recorded.");
+      target.failurePercent=percent;
+      target.cutChronologyHistory=[...(target.cutChronologyHistory||[]),{...clone(audit),jobId:target.id,kind:"failure",before:{failurePercent:before},after:{failurePercent:percent}}];
+      // A financial adjustment must never invoke date ordering or renumbering.
+      return{ok:true,nextState:JSON.parse(JSON.stringify(nextState)),hasChanges:true,renumbering:{ok:true,changed:[]},chronologyChanges:[]};
+    }
     if(operation.type==="edit"){
       if(!operation.updates||Object.keys(operation.updates).some(key=>!EDIT_FIELDS.has(key)))return fail("Unsupported job edit field.");
+      // Notes use the same guarded edit writer without normalizing dates,
+      // numbering, priorities, categories, or audit history on existing jobs.
+      if(Object.keys(operation.updates).length===1&&Object.hasOwn(operation.updates,"notes")){
+        if(typeof operation.updates.notes!=="string")return fail("Job notes must be text.");
+        const hasChanges=target.notes!==operation.updates.notes;
+        target.notes=operation.updates.notes;
+        return{ok:true,nextState,hasChanges,renumbering:{ok:true,changed:[]},chronologyChanges:[]};
+      }
       Object.assign(target,clone(operation.updates));
       if(Object.hasOwn(operation.updates,"startISO")&&!chronology.validCutDate(target.startISO))return fail("Enter a valid Start Date.");
       if(Object.hasOwn(operation.updates,"completedAtISO")&&(!wasCompleted||!dateKey(target.completedAtISO)))return fail("Enter a valid Completion Date for a completed job.");

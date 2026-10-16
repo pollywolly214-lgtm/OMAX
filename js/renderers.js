@@ -6002,7 +6002,7 @@ function validateExistingJobCategoryEdit(cat, project, original){
 
 function syncManualJobProjectControl(select, input, original = null, categoryChanged = false){
   if (!select || !input) return;
-  input.readOnly = true;
+  if (input.tagName !== "OUTPUT") input.readOnly = true;
   let message;
   if (original && !categoryChanged && String(select.value) === String(original.cat ?? "")
       && (input.value == null || input.value === String(original.projectNumber ?? ""))){
@@ -6027,6 +6027,93 @@ function syncManualJobProjectControls(root, changedSelect = null){
     const job = (history ? window.completedCuttingJobs : window.cuttingJobs)?.find(job=>String(job.id)===id);
     const input = select.closest(".job-edit-card")?.querySelector(history ? "[data-history-field='projectNumber']" : "[data-j='projectNumber']");
     syncManualJobProjectControl(select, input, job, select === changedSelect);
+  });
+}
+
+// Retain the stable job ID and upload outcomes across failed new-job submissions.
+async function persistNewCuttingJobWithAttachments(job){
+  let pending = window.pendingNewJobSave;
+  if (pending?.busy) return { busy:true };
+  if (!pending){
+    pending = { job, verified:false, files:pendingSecureCloudJobFiles.slice(), busy:false };
+    window.pendingNewJobSave = pending;
+  }
+  if (pending.requiresReload) return { requiresReload:true, error:"Job save requires refresh and server verification; do not retry." };
+  pending.busy = true;
+  try {
+    if (!pending.verified){
+      let created;
+      try { created = await createCuttingJob(pending.job); }
+      catch (error){
+        pending.requiresReload = true;
+        return { requiresReload:true, error:`Job save could not be verified: ${error.message || error}. Refresh and verify before retrying.` };
+      }
+      if (!created.saved || !created.verified || created.requiresReload){
+        pending.requiresReload = Boolean(created.requiresReload || created.saved || created.indeterminate);
+        if (!pending.requiresReload) window.pendingNewJobSave = null;
+        return { ...created, complete:false };
+      }
+      pending.verified = true;
+    }
+    for (const entry of pending.files){
+      if (entry.outcome?.stage === "completed" || entry.manualReviewRequired) continue;
+      try {
+        entry.outcome = await window.uploadCfr05CuttingFile(pending.job.id, entry.file,
+          stage=>toast(`${entry.file.name}: ${stage.replaceAll("_", " ")}`));
+      } catch (error){
+        entry.outcome = { stage:"unexpected_failure", indeterminate:true, error:{ message:String(error.message || error) } };
+      }
+      const outcome = entry.outcome;
+      if (outcome.stage !== "completed"){
+        entry.manualReviewRequired = Boolean(outcome.indeterminate || outcome.manualReviewRequired || outcome.possibleOrphanPath
+          || outcome.completed?.firestoreBatchCommit
+          || (outcome.attempted?.storageUpload && !outcome.completed?.cleanupAbsenceVerified));
+      }
+    }
+    const failures = pending.files.filter(entry=>entry.outcome?.stage !== "completed");
+    if (failures.length) return { complete:false, jobId:pending.job.id, failures };
+    let listingFailed = false;
+    if (pending.files.length){
+      try {
+        const listing = await refreshCfr05CloudPresentation(pending.job.id,{force:true});
+        listingFailed = Boolean(listing?.error || listing?.blockers?.length);
+      } catch (_) { listingFailed = true; }
+    }
+    pendingNewJobFiles.length = 0;
+    pendingSecureCloudJobFiles.length = 0;
+    window.jobAddDraft = {};
+    window.pendingNewJobSave = null;
+    return { complete:true, jobId:pending.job.id, fileCount:pending.files.length, listingFailed };
+  } finally {
+    pending.busy = false;
+  }
+}
+
+function newCuttingJobCategoryMessage(categoryId, reason){
+  const rootId = window.JOB_ROOT_FOLDER_ID || "jobs_root";
+  const category = String(categoryId) === rootId ? "All Jobs"
+    : (window.jobFolders || []).find(folder=>String(folder.id) === String(categoryId))?.name || "the selected category";
+  return `Cannot add this job to ${category}. ${String(categoryId) === rootId ? "All Jobs groups jobs; select a project category instead. " : ""}${reason} Choose a category with a verified Project Number, or create a category with its Project Number. Your form and selected files are preserved.`;
+}
+
+function setNewCuttingJobFeedback(message, state = "error"){
+  window.jobAddFeedback = { message, state };
+  const status = document.getElementById("jobAddStatus");
+  if (status){
+    status.textContent = message;
+    status.hidden = !message;
+    status.setAttribute("role", state === "error" || state === "category" ? "alert" : "status");
+  }
+  if (message) toast(message);
+}
+
+function syncNewCuttingJobSaveControls(){
+  const pending = window.pendingNewJobSave;
+  const form = document.getElementById("addJobForm");
+  form?.querySelectorAll("input, select, button").forEach(control=>{
+    control.disabled = Boolean(pending && (control.type !== "submit" || pending.busy || pending.requiresReload
+      || pending.files.every(entry=>entry.outcome?.stage === "completed" || entry.manualReviewRequired)));
+    if (control.type === "submit") control.textContent = pending?.busy ? "Saving…" : pending?.verified ? "Retry pending attachments" : "Add Job";
   });
 }
 
@@ -8030,7 +8117,7 @@ function renderDashboard(){
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
-    if (!Number.isFinite(costRate) || costRate < 0){ toast("Enter a valid cost rate."); return; }
+    if (!Number.isFinite(costRate)){ toast("Enter a valid cost rate."); return; }
     if (!categoryId){ toast("Choose a category."); return; }
     if (categoryId === "__new__"){
       const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
@@ -13338,6 +13425,101 @@ function setupForecastBreakdownModal(){
   });
 }
 
+function getPurchaseOrderApi(){
+  if (window.purchaseOrderApi) return window.purchaseOrderApi;
+  const orders = window.OMAXPurchaseOrders;
+  const localState = ()=>{
+    const source = window.__lastLoadedCloudState || {}, snapshot = compactStateForStorage(snapshotState({skipLocalFileCacheSync:true}));
+    return Object.fromEntries(Object.keys(source).map(name=> [name, ["schema", "syncMeta", "saveMeta", "syncProcessLog"].includes(name) ? source[name] : Object.prototype.hasOwnProperty.call(snapshot, name) ? snapshot[name] : source[name]]));
+  };
+  const targetMatches = token=> FB.ready && FB.db === token.db && FB.docRef === token.docRef && FB.user?.uid === token.actor
+    && String(FB.app?.options?.projectId || "") === token.projectId && FB.docRef?.path === token.path;
+  const matches = (source, token)=> targetMatches(token) && canWriteCloud("purchase order") && !isVercelPreviewRuntime()
+    && !window.__lastIndeterminateSave && !window.__inventoryMaterialMutationPending && !window.__pumpBaselineMutationPending && lastLocalMutationAt === token.version
+    && window.__loadedCloudRevisionForSaveGuard === token.revision && token.revision === source.syncMeta.rev
+    && orders.businessKey(localState()) === orders.businessKey(source);
+  window.purchaseOrderApi = orders.createApi({
+    canWrite:()=> canWriteCloud("purchase order") && FB.ready && Boolean(FB.user) && !isVercelPreviewRuntime()
+      && !window.__lastIndeterminateSave && !window.__inventoryMaterialMutationPending && !window.__pumpBaselineMutationPending,
+    settle:async()=>{
+      await cloudSaveQueue;
+      if (hasPendingLocalChanges) throw Error("Other changes are pending. Wait for their save or reload before saving the order.");
+    },
+    capture:()=> ({db:FB.db, docRef:FB.docRef, path:FB.docRef?.path, actor:FB.user?.uid, projectId:String(FB.app?.options?.projectId || ""), version:lastLocalMutationAt, revision:window.__loadedCloudRevisionForSaveGuard}),
+    matches,
+    read:async token=>{
+      if (!targetMatches(token) || typeof token.db?.runTransaction !== "function") throw Error("The order backend changed or cannot perform an independent server read.");
+      let timer;
+      try {
+        return await Promise.race([
+          token.db.runTransaction(async transaction=>{
+            const snapshot = await transaction.get(token.docRef);
+            if (!targetMatches(token) || !snapshot?.exists || snapshot.metadata?.fromCache || snapshot.metadata?.hasPendingWrites
+              || (snapshot.ref?.path && snapshot.ref.path !== token.path) || (snapshot.ref?.firestore && snapshot.ref.firestore !== token.db)) throw Error("A complete authoritative order snapshot is unavailable.");
+            return snapshot.data();
+          }),
+          new Promise((_, reject)=>{ timer = setTimeout(()=> reject(Error("Order server verification timed out. Review before retrying.")), 15000); })
+        ]);
+      } finally { clearTimeout(timer); }
+    },
+    validate:(source, order)=>{
+      for (const row of order.rows){
+        if (row.inventoryItemId && (source.inventory || []).filter(item=> item.id === row.inventoryItemId).length !== 1) throw Error("An inventory link changed. Review the item before saving.");
+        if (row.taskId && [...(source.tasksInterval || []), ...(source.tasksAsReq || [])].filter(item=> item.id === row.taskId).length !== 1) throw Error("An item task link changed. Review before saving.");
+      }
+      if (scanAuthoritativeCutFileContent(order).contaminated) throw Error("The order contains unsupported file content.");
+    },
+    reserve:token=>{
+      if (hasPendingLocalChanges || lastLocalMutationAt !== token.version) throw Error("Local changes arrived before the order save.");
+      // Existing pending-intent protection prevents realtime adoption before verification.
+      // No order draft is ever appended to live state or available to generic autosaves.
+      hasPendingLocalChanges = true;
+    },
+    backup:(source, edit)=>{
+      persistLocalStateBackup(source);
+      if (edit){
+        // The existing Trash has no purchase-order restore type. Keep one exact
+        // local before-image, independently of the rolling workspace backup.
+        const evidence = {atISO:new Date().toISOString(), path:FB.docRef.path, projectId:String(FB.app?.options?.projectId || ""), expected:edit.expected, confirmedRemovedLineIds:edit.confirmedRemovedLineIds};
+        if (!window.localStorage) throw Error("A local order recovery copy is unavailable. Your edit draft is retained.");
+        window.localStorage.setItem("omax_purchase_order_edit_backup_v1", JSON.stringify(evidence));
+        window.__lastPurchaseOrderEditBackup = evidence;
+      }
+    },
+    write:(pending, source, token)=>{
+      const sourceKey = orders.key(source), preparedKey = orders.key(pending);
+      const queued = cloudSaveQueue.then(()=>{
+        if (!matches(source, token)) return cloudSaveNoWriteFailure("order_source_changed", "Local or backend state changed before the order transaction.");
+        return writeAuthoritativeStateSnapshot(pending, {merge:true}, {expectedRevision:source.syncMeta.rev,
+          validateSourceState:remote=> orders.key(remote) === sourceKey && matches(source, token),
+          validatePreparedState:next=> orders.key(next) === preparedKey && matches(source, token)});
+      });
+      cloudSaveQueue = queued.catch(()=>{});
+      return queued;
+    },
+    adopt:(verified, token)=>{
+      if (!targetMatches(token) || lastLocalMutationAt !== token.version) return false;
+      const result = adoptIdentityCheckedAuthoritativeState(verified);
+      if (result?.recovery !== false || orders.businessKey(localState()) !== orders.businessKey(verified)) return false;
+      persistLocalStateBackup(verified);
+      return true;
+    },
+    release:(token, uncertain)=>{
+      if (!uncertain && lastLocalMutationAt === token.version) hasPendingLocalChanges = false;
+    },
+    suspend:result=>{
+      window.__autosaveDisabled = true; window.__recoveryInspectMode = true;
+      window.__lastIndeterminateSave = {...result};
+      window.__lastPurchaseOrderSaveEvidence = {...result};
+      renderRecoveryDiagnosticsPanel();
+    }
+  });
+  window.addEventListener("beforeunload", event=>{
+    if (window.purchaseOrderApi?.isBusy()){ event.preventDefault(); event.returnValue = ""; }
+  });
+  return window.purchaseOrderApi;
+}
+
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -14387,14 +14569,23 @@ function renderCosts(){
       return monday;
     };
     const weekKey = (year, week)=> `${year}-W${String(week).padStart(2, "0")}`;
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const weekOptions = Array.from({ length: 52 }, (_, i)=>{
+    const currentReceiptWeek = ()=>{
+      const today = new Date();
+      // UTC arithmetic represents local calendar parts, never the current UTC day.
+      const day = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+      day.setUTCDate(day.getUTCDate() + 4 - (day.getUTCDay() || 7));
+      const year = day.getUTCFullYear();
+      const week = Math.floor((day - weekStartFromIndex(year, 1)) / 604800000) + 1;
+      return { year, week, key: weekKey(year, week) };
+    };
+    const buildReceiptWeeks = (year)=> Array.from({ length: Math.round((weekStartFromIndex(year + 1, 1) - weekStartFromIndex(year, 1)) / 604800000) }, (_, i)=>{
       const week = i + 1;
       const start = weekStartFromIndex(year, week);
       const end = new Date(start); end.setUTCDate(start.getUTCDate() + 6);
       return { key: weekKey(year, week), year, week, startISO: start.toISOString().slice(0, 10), endISO: end.toISOString().slice(0, 10) };
     });
+    let selectedReceiptYear = currentReceiptWeek().year;
+    let weekOptions = buildReceiptWeeks(selectedReceiptYear);
     if (!Array.isArray(window.receiptTrackerWeeks)) window.receiptTrackerWeeks = [];
     const persistReceiptState = ()=>{
       if (typeof saveCloudDebounced === "function"){
@@ -14430,6 +14621,7 @@ function renderCosts(){
           flatRows.push({
             dateISO: toIsoDate(row.date) || "",
             purchased: String(row.purchased || ""),
+            poNumber: String(row.poNumber ?? "").trim(),
             partNumber: String(row.partNumber || ""),
             qty: financials.qty,
             cost: financials.unitCost,
@@ -14445,13 +14637,14 @@ function renderCosts(){
       });
       flatRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
       if (!flatRows.length){
-        spendBody.innerHTML = '<tr><td colspan="10" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
+        spendBody.innerHTML = '<tr><td colspan="11" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>';
         return;
       }
       spendBody.innerHTML = flatRows.map(row => `
-        <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${escapeHtml(String(row.dateISO || ""))}" data-spend-week-key="${escapeHtml(String(row.weekKey || ""))}" data-spend-row-index="${escapeHtml(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+        <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${escapeHtml(String(row.dateISO || ""))}" data-spend-week-key="${escapeHtml(String(row.weekKey || ""))}" data-spend-row-index="${escapeHtml(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${escapeHtml(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.poNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
           <td>${escapeHtml(row.dateISO || "—")}</td>
           <td>${escapeHtml(row.purchased || "—")}</td>
+          <td>${escapeHtml(row.poNumber || "N/A")}</td>
           <td>${escapeHtml(row.weekLabel || "—")}</td>
           <td>${escapeHtml(row.partNumber || "—")}</td>
           <td class="purchase-number">${escapeHtml(String(row.qty || 0))}</td>
@@ -14466,10 +14659,9 @@ function renderCosts(){
     const getWeekEntry = (key)=>{
       const existing = window.receiptTrackerWeeks.find(entry => String(entry?.key || "") === key);
       if (existing) return existing;
-      const meta = weekOptions.find(item => item.key === key);
-      const created = { key, year: meta?.year || year, week: meta?.week || 1, startISO: meta?.startISO || "", endISO: meta?.endISO || "", rows: [] };
-      window.receiptTrackerWeeks.push(created);
-      return created;
+      const match = /^(\d{4})-W(\d{2})$/.exec(key);
+      const meta = match && buildReceiptWeeks(Number(match[1])).find(item => item.key === key);
+      return { ...(meta || { key, year:selectedReceiptYear, week:1, startISO:"", endISO:"" }), rows:[] };
     };
     const clampDateToWeek = (dateIso, entry)=>{
       const value = toIsoDate(dateIso);
@@ -14490,6 +14682,7 @@ function renderCosts(){
       body{font-family:Arial,sans-serif;padding:16px;color:#1e2b45;} h2{margin:0 0 6px;} .summary{margin:0 0 14px;}
       table{border-collapse:collapse;width:100%;margin-bottom:12px;} th,td{border:1px solid #cfd7e6;padding:6px 8px;text-align:left;}
       th{background:#eef3fb;font-weight:700;} .right{text-align:right;} .totals td{font-weight:700;background:#f7f9fd;}
+      tbody td:nth-child(3){mso-number-format:"\\@";text-align:left;}
     </style></head><body>
       <h2>${escWorkbookHtml(title || "Export")}</h2>
       <div class="summary">${escWorkbookHtml(subtitle || "")}</div>
@@ -14530,9 +14723,10 @@ function renderCosts(){
       return { start, end: today };
     };
     const formatDateRangeLabel = (start, end)=> {
-      const endIso = end instanceof Date && !Number.isNaN(end.getTime()) ? end.toISOString().slice(0, 10) : "";
+      const localDate = date=> `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const endIso = end instanceof Date && !Number.isNaN(end.getTime()) ? localDate(end) : "";
       if (!start) return endIso ? `Range: All time through ${endIso}` : "Range: All time";
-      const startIso = start instanceof Date && !Number.isNaN(start.getTime()) ? start.toISOString().slice(0, 10) : "";
+      const startIso = start instanceof Date && !Number.isNaN(start.getTime()) ? localDate(start) : "";
       return startIso && endIso ? `Range: ${startIso} to ${endIso}` : "Range: Date window unavailable";
     };
     const buildRangeRows = (months)=>{
@@ -14554,6 +14748,7 @@ function renderCosts(){
     const modal = document.getElementById("costReceiptModal");
     if (receiptOpenBtn instanceof HTMLElement && modal instanceof HTMLElement){
       const weekSelect = modal.querySelector("[data-receipt-week-select]");
+      const yearSelect = modal.querySelector("[data-receipt-year-select]");
       const weekRangeLabel = modal.querySelector("[data-receipt-week-range]");
       const weekAllocationNote = modal.querySelector("[data-receipt-week-allocation-note]");
       const weekRowsBody = modal.querySelector("[data-receipt-week-rows]");
@@ -14576,7 +14771,9 @@ function renderCosts(){
         purchasedDatalist.id = purchasedDatalistId;
         modal.appendChild(purchasedDatalist);
       }
-      let activeWeekKey = String((window.receiptTrackerWeekSelected || weekOptions[0]?.key || ""));
+      let activeWeekKey = window.costPurchaseHistoryModalOpen && /^\d{4}-W\d{2}$/.test(String(window.receiptTrackerWeekSelected || ""))
+        ? window.receiptTrackerWeekSelected : currentReceiptWeek().key;
+      selectedReceiptYear = Number(activeWeekKey.slice(0, 4));
       let activeRange = String(window.receiptTrackerRangeSelected || "1");
       let hasUnsavedReceiptChanges = false;
       let hasExplicitSaveSinceEdit = false;
@@ -14584,6 +14781,13 @@ function renderCosts(){
       window.receiptTrackerWeekSelected = activeWeekKey;
       window.receiptTrackerRangeSelected = activeRange;
       let saveStatusTimer = null;
+      let receiptEditVersion = 0;
+      // Detached DOM rows retain incomplete/invalid edits during view navigation.
+      const receiptDraftRows = new Map();
+      const receiptRowSources = new WeakMap();
+      const receiptColumns = ["date", "purchased", "partNumber", "qty", "cost", "shipping", "tax"];
+      const readReceiptInputs = tr=> Object.fromEntries(receiptColumns.map(col=> [col, tr.querySelector(`[data-col="${col}"]`)?.value || ""]));
+      const rememberReceiptRow = (tr, original)=> receiptRowSources.set(tr, { original, inputs:readReceiptInputs(tr) });
 
       const ensureSaveStatusChip = ()=>{
         if (!(saveWeekBtn instanceof HTMLElement)) return null;
@@ -14612,8 +14816,17 @@ function renderCosts(){
       };
 
       const renderWeekOptions = ()=>{
+        const current = currentReceiptWeek();
+        weekOptions = buildReceiptWeeks(selectedReceiptYear);
+        if (yearSelect instanceof HTMLSelectElement){
+          const storedYears = (window.receiptTrackerWeeks || []).map(entry=> Number(String(entry?.key || "").slice(0, 4))).filter(value=> Number.isInteger(value) && value >= 1 && value <= 9999);
+          const first = Math.min(current.year - 5, selectedReceiptYear, ...storedYears);
+          const last = Math.max(current.year + 1, selectedReceiptYear, ...storedYears);
+          yearSelect.innerHTML = Array.from({length:last - first + 1}, (_, i)=> `<option value="${first + i}">${first + i}</option>`).join("");
+          yearSelect.value = String(selectedReceiptYear);
+        }
         if (!(weekSelect instanceof HTMLSelectElement)) return;
-        weekSelect.innerHTML = weekOptions.map(opt => `<option value="${escapeHtml(opt.key)}">Week ${escapeHtml(String(opt.week))} (${escapeHtml(opt.startISO)} to ${escapeHtml(opt.endISO)})</option>`).join("");
+        weekSelect.innerHTML = weekOptions.map(opt => `<option value="${escapeHtml(opt.key)}"${opt.key === current.key ? ' data-current-week="true" style="font-weight:bold"' : ""}>Week ${escapeHtml(String(opt.week))}${opt.key === current.key ? " — Current week" : ""} (${escapeHtml(opt.startISO)} to ${escapeHtml(opt.endISO)})</option>`).join("");
         if (!weekOptions.some(item => item.key === activeWeekKey)) activeWeekKey = weekOptions[0]?.key || "";
         weekSelect.value = activeWeekKey;
       };
@@ -14623,24 +14836,85 @@ function renderCosts(){
         const tasks = (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).concat(Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []);
         return tasks.find(task => String(task?.name || "").trim().toLowerCase() === key) || null;
       }
-      const saveWeekRowsFromDom = ()=>{
-        const entry = getWeekEntry(activeWeekKey);
-        if (!(weekRowsBody instanceof HTMLElement)) return entry;
-        const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).map(tr => ({
-          ...(entry.rows || [])[Number(tr.dataset.receiptRowIndex)],
-          date: clampDateToWeek(tr.querySelector('[data-col=\"date\"]')?.value || "", entry),
-          purchased: String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim(),
-          cost: Number(tr.querySelector('[data-col=\"cost\"]')?.value) || 0,
-          qty: Number(tr.querySelector('[data-col=\"qty\"]')?.value) || 0,
-          partNumber: String(tr.querySelector('[data-col=\"partNumber\"]')?.value || "").trim(),
-          taskId: String(findTaskByNameExact(String(tr.querySelector('[data-col=\"purchased\"]')?.value || "").trim())?.id || ""),
-          shipping: Number(tr.querySelector('[data-col=\"shipping\"]')?.value) || 0,
-          tax: Number(tr.querySelector('[data-col=\"tax\"]')?.value) || 0
-        }));
-        entry.rows = normalizeRows(rows);
-        persistReceiptState();
-        renderCentralSpendRows();
-        return entry;
+      // Shared with the legacy editor: task PN/price take precedence over inventory.
+      function purchaseSelection(name){
+        const typed = String(name || "").trim().toLowerCase();
+        if (!typed) return {task:null, inv:null, partNumber:"", price:null};
+        const task = findTaskByNameExact(name);
+        const items = Array.isArray(window.inventory) ? window.inventory : [];
+        const inv = (task?.inventoryId != null && items.find(item=> String(item?.id || "") === String(task.inventoryId)))
+          || items.find(item=> String(item?.name || "").trim().toLowerCase() === typed);
+        return {task, inv, partNumber:String(task?.pn || "").trim() || String(inv?.pn || "").trim(),
+          price:Number.isFinite(Number(task?.price)) ? Number(task.price) : Number.isFinite(Number(inv?.price)) ? Number(inv.price) : null};
+      }
+      const openPurchaseInventoryEditor = (purchased, inventoryItemId)=>{
+        const items = Array.isArray(window.inventory) ? window.inventory : [];
+        const inv = items.find(item=> inventoryItemId && String(item.id) === String(inventoryItemId))
+          || items.find(item=> String(item?.name || "").trim().toLowerCase() === String(purchased || "").trim().toLowerCase());
+        const taskId = inv?.linkedTaskId != null ? String(inv.linkedTaskId) : "";
+        if (taskId && typeof openSettingsAndReveal === "function") openSettingsAndReveal(taskId);
+        else if (typeof window.showScreen === "function") window.showScreen("settings");
+      };
+      const saveWeekRowsFromDom = ({ persist = true, includeDrafts = false, showValidation = false } = {})=>{
+        if (!(weekRowsBody instanceof HTMLElement)) return getWeekEntry(activeWeekKey);
+        const groups = includeDrafts ? new Map(receiptDraftRows) : new Map();
+        groups.set(activeWeekKey, Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")));
+        const pending = [];
+        for (const [key, elements] of groups){
+          const entry = getWeekEntry(key), rows = [], sources = [];
+          for (const tr of elements){
+            const source = receiptRowSources.get(tr) || { inputs:{} };
+            const values = readReceiptInputs(tr);
+            if (source.original?.orderId && receiptColumns.some(col=> values[col] !== source.inputs[col])){
+              if (showValidation && typeof toast === "function") toast("Saved orders must be edited as a whole. Whole-order editing is not available yet.");
+              return null;
+            }
+            const meaningful = receiptColumns.some(col=> ["qty", "cost", "shipping", "tax"].includes(col) ? Number(values[col]) !== 0 : values[col].trim());
+            if (!source.original && !meaningful) continue;
+            const qtyInput = tr.querySelector('[data-col="qty"]');
+            const qtyChanged = !source.original || values.qty !== source.inputs.qty;
+            const invalidQty = qtyChanged && (!values.qty.trim() || !Number.isSafeInteger(Number(values.qty)) || Number(values.qty) < 0);
+            qtyInput?.setCustomValidity(invalidQty ? "Quantity must be a whole number of 0 or greater." : "");
+            if (invalidQty){
+              if (showValidation){ navigateReceiptWeek(key); qtyInput?.reportValidity(); }
+              return null;
+            }
+            let row = source.original;
+            for (const col of receiptColumns){
+              if (source.original && values[col] === source.inputs[col]) continue;
+              if (row === source.original) row = { ...source.original };
+              if (["qty", "cost", "shipping", "tax"].includes(col)) row[col] = Number(values[col]) || 0;
+              else row[col] = col === "date" ? clampDateToWeek(values[col], entry) : values[col].trim();
+              if (col === "purchased") row.taskId = String(findTaskByNameExact(row.purchased)?.id || "");
+            }
+            rows.push(row);
+            sources.push([tr, row]);
+          }
+          if (entry.rows.some(row=> row?.orderId && !rows.includes(row))){
+            if (showValidation && typeof toast === "function") toast("Saved order items cannot be removed individually. Whole-order editing is not available yet.");
+            return null;
+          }
+          // Tables group orders visually; retain the authoritative flat source order.
+          const positions = new Map(sources.map(([tr, row])=> [row, entry.rows.indexOf(receiptRowSources.get(tr)?.original)]));
+          rows.sort((a,b)=> (positions.get(a) < 0 ? Number.MAX_SAFE_INTEGER : positions.get(a)) - (positions.get(b) < 0 ? Number.MAX_SAFE_INTEGER : positions.get(b)));
+          pending.push({ entry, rows, sources });
+        }
+        let changed = false;
+        for (const { entry, rows, sources } of pending){
+          if (rows.length !== entry.rows.length || rows.some((row, index)=> row !== entry.rows[index])){
+            entry.rows = rows;
+            if (!window.receiptTrackerWeeks.includes(entry)) window.receiptTrackerWeeks.push(entry);
+            changed = true;
+          }
+          sources.forEach(([tr, row])=> rememberReceiptRow(tr, row));
+        }
+        if (changed){
+          hasUnsavedReceiptChanges = true;
+          hasExplicitSaveSinceEdit = false;
+          if (persist) persistReceiptState();
+          renderCentralSpendRows();
+        }
+        return getWeekEntry(activeWeekKey);
       };
       const refreshCostDashboard = ({ keepReceiptModalOpen = false } = {})=>{
         if (typeof renderCosts !== "function") return;
@@ -14648,46 +14922,36 @@ function renderCosts(){
           window.costPurchaseHistoryModalOpen = !!keepReceiptModalOpen;
         }
         setTimeout(()=>{
+          if (hasUnsavedReceiptChanges) return;
           try { renderCosts(); } catch (err){ console.warn("Failed to refresh cost view after purchase-history save", err); }
         }, 0);
       };
       const savePurchaseHistoryWeek = async ({ showInlineStatus = false, refreshDashboard = true, keepReceiptModalOpen = true } = {})=>{
-        saveWeekRowsFromDom();
+        if (!saveWeekRowsFromDom({ persist:false, includeDrafts:true, showValidation:true })) return false;
         rebuildPurchaseTemplates();
         renderRangeTable();
         renderCentralSpendRows();
+        const version = receiptEditVersion;
         try {
-          if (typeof saveCloudNow === "function"){
-            const maybePromise = saveCloudNow();
-            if (maybePromise && typeof maybePromise.then === "function"){
-              await maybePromise;
-            }
-            if (typeof saveCloudDebounced === "function"){
-              saveCloudDebounced();
-            }
+          const result = typeof saveCloudNow === "function" ? await saveCloudNow() : null;
+          if (result?.saved !== true || result.stateWriteCompleted !== true || result.blocked || result.indeterminate){
+            if (showInlineStatus) showSaveStatusChip("Save not confirmed", true);
+            if (typeof toast === "function") toast(result?.error || "Purchase history save was not confirmed. Your edits remain available.");
+            return false;
+          }
+          if (version === receiptEditVersion){
             hasUnsavedReceiptChanges = false;
             hasExplicitSaveSinceEdit = true;
-            if (showInlineStatus) showSaveStatusChip("Save complete");
             if (refreshDashboard) refreshCostDashboard({ keepReceiptModalOpen });
-            return true;
           }
-          if (typeof saveCloudDebounced === "function"){
-            saveCloudDebounced();
-            hasUnsavedReceiptChanges = false;
-            hasExplicitSaveSinceEdit = true;
-            if (showInlineStatus) showSaveStatusChip("Save complete");
-            if (refreshDashboard) refreshCostDashboard({ keepReceiptModalOpen });
-            return true;
-          }
-          if (typeof toast === "function") toast("Unable to save purchase history right now.");
+          if (showInlineStatus) showSaveStatusChip(version === receiptEditVersion ? "Save complete" : "Earlier edits saved; newer edits pending");
+          return version === receiptEditVersion;
         } catch (err) {
           console.error("Purchase history save failed:", err);
-          if (typeof toast === "function"){
-            toast("Purchase history save failed. Please try again.");
-          }
+          if (typeof toast === "function") toast("Purchase history save failed. Your edits remain available.");
           if (showInlineStatus) showSaveStatusChip("Save failed", true);
+          return false;
         }
-        return false;
       };
       const setUndoClearEnabled = (enabled)=>{
         if (!(undoClearBtn instanceof HTMLButtonElement)) return;
@@ -14697,7 +14961,7 @@ function renderCosts(){
         return Array.isArray(window.receiptTrackerWeeks)
           ? window.receiptTrackerWeeks.map(week => ({
               ...week,
-              rows: normalizeRows(week?.rows).map(row => ({ ...row }))
+              rows: (Array.isArray(week?.rows) ? week.rows : []).map(row => ({ ...row }))
             }))
           : [];
       };
@@ -14735,8 +14999,9 @@ const appendEmptyRow = (focusFirst = false)=>{
         tr.innerHTML = `
           <td><input type="date" data-col="date" min="${escapeHtml(String(getWeekEntry(activeWeekKey)?.startISO || ""))}" max="${escapeHtml(String(getWeekEntry(activeWeekKey)?.endISO || ""))}"></td>
           <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" placeholder="Select existing item"></td>
+          <td>N/A</td>
           <td><input type="text" data-col="partNumber" placeholder="Part #"></td>
-          <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="qty" placeholder="0"></td>
+          <td class="purchase-number"><input type="number" min="0" step="1" data-col="qty" placeholder="0"></td>
           <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" placeholder="0.00"></td>
           <td class="purchase-number" data-col="merchandiseSubtotal">${formatUsd(0)}</td>
           <td><input type="number" min="0" step="0.01" data-col="shipping" placeholder="0.00" style="min-width:86px"></td>
@@ -14744,7 +15009,8 @@ const appendEmptyRow = (focusFirst = false)=>{
           <td class="purchase-number" data-col="total">${formatUsd(0)}</td>
           <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
           <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>`;
-        weekRowsBody.appendChild(tr);
+        (weekRowsBody.querySelector("[data-receipt-legacy-rows]") || weekRowsBody).appendChild(tr);
+        rememberReceiptRow(tr, undefined);
         if (focusFirst){
           const first = tr.querySelector("[data-col='date']");
           if (first instanceof HTMLElement) first.focus();
@@ -14770,20 +15036,63 @@ const appendEmptyRow = (focusFirst = false)=>{
         });
         if (weekSubtotal) weekSubtotal.textContent = formatUsd(subtotal);
       };
+      const layoutWeekOrderTables = ()=>{
+        if (!weekRowsBody.hasAttribute?.("data-receipt-week-groups")) return;
+        const groups = new Map(), legacy = [];
+        Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).forEach(tr=>{
+          const original = receiptRowSources.get(tr)?.original;
+          if (!original?.orderId){ legacy.push(tr); return; }
+          if (!groups.has(original.orderId)) groups.set(original.orderId, []);
+          groups.get(original.orderId).push(tr);
+        });
+        const sections = [];
+        const table = (title, elements, summary, orderId)=>{
+          const section = document.createElement("section");
+          section.className = "purchase-order-group";
+          if (orderId) section.dataset.receiptOrderId = orderId;
+          section.innerHTML = `<h4>${escapeHtml(title)}</h4>${summary ? `<p>${escapeHtml(summary)}</p>` : ""}<div class="cost-weekly-table-wrap"><table class="cost-table cost-receipt-week-table"><thead><tr><th>Date</th><th>Purchased Item</th><th>PO Num.</th><th>Part #</th><th class="purchase-number">Qty</th><th class="purchase-number">Unit Cost</th><th class="purchase-number">Item Subtotal</th><th class="purchase-number">Shipping</th><th class="purchase-number">Tax</th><th class="purchase-number">Total Spend</th><th>Inventory link</th><th>Actions</th></tr></thead><tbody${orderId ? "" : " data-receipt-legacy-rows"}></tbody></table></div>`;
+          if (orderId){
+            const edit = document.createElement("button");
+            edit.type = "button"; edit.className = "btn secondary"; edit.dataset.receiptEditOrder = orderId; edit.textContent = "Edit Order";
+            section.querySelector("h4").appendChild(edit);
+          }
+          section.querySelector("tbody").replaceChildren(...elements);
+          sections.push(section);
+        };
+        groups.forEach((elements, orderId)=>{
+          const originals = elements.map(tr=> receiptRowSources.get(tr).original), first = originals[0];
+          const totals = originals.reduce((sum,row)=>{
+            const values = getPurchaseFinancials(row);
+            sum.shipping += values.shipping; sum.tax += values.tax; sum.total += values.totalSpend; return sum;
+          }, {shipping:0,tax:0,total:0});
+          table(`Order ${sections.length + 1} — ${first.orderDateISO || first.date || "Undated"}`, elements,
+            `PO Num: ${String(first.poNumber ?? "").trim() || "N/A"} · Order Shipping: ${formatUsd(totals.shipping)} · Order Tax: ${formatUsd(totals.tax)} · Order Total: ${formatUsd(totals.total)} · View only`, orderId);
+        });
+        table("Other / Legacy Purchases", legacy);
+        weekRowsBody.replaceChildren(...sections);
+      };
       const renderWeekRows = ()=>{
         const entry = getWeekEntry(activeWeekKey);
-        const rows = normalizeRows(entry.rows);
+        const rows = (Array.isArray(entry.rows) ? entry.rows : []).map(row=> normalizeRows([row])[0] || row);
         if (weekAllocationNote) weekAllocationNote.hidden = !rows.some(isHistoricalPurchase);
         if (weekRangeLabel){
           weekRangeLabel.textContent = entry.startISO && entry.endISO ? `Date range: ${entry.startISO} to ${entry.endISO}` : "Date range unavailable";
         }
         if (!(weekRowsBody instanceof HTMLElement)) return;
-        weekRowsBody.innerHTML = rows.map((row, idx) => `
+        if (receiptDraftRows.has(activeWeekKey)){
+          weekRowsBody.replaceChildren(...receiptDraftRows.get(activeWeekKey));
+          receiptDraftRows.delete(activeWeekKey);
+          layoutWeekOrderTables();
+          recomputeWeekTotals();
+          return;
+        }
+        weekRowsBody.innerHTML = '<table><tbody>' + rows.map((row, idx) => `
           <tr data-receipt-row="1" data-receipt-row-index="${idx}">
             <td><input type="date" data-col="date" value="${escapeHtml(toIsoDate(row.date))}" min="${escapeHtml(String(entry.startISO || ""))}" max="${escapeHtml(String(entry.endISO || ""))}"></td>
-            <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" value="${escapeHtml(row.purchased || "")}"></td>
+            <td><input type="text" data-col="purchased" list="${purchasedDatalistId}" value="${escapeHtml(row.purchased || "")}">${row.orderId ? `<small title="${escapeHtml(row.orderId)}">View only</small>` : ""}</td>
+            <td>${escapeHtml(String(row.poNumber ?? "").trim() || "N/A")}</td>
             <td><input type="text" data-col="partNumber" value="${escapeHtml(row.partNumber || "")}"></td>
-            <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
+            <td class="purchase-number"><input type="number" min="0" step="1" data-col="qty" value="${escapeHtml(String(row.qty || 0))}"></td>
             <td class="purchase-number"><input type="number" min="0" step="0.01" data-col="cost" value="${escapeHtml(String(row.cost || 0))}"></td>
             <td class="purchase-number" data-col="merchandiseSubtotal">${formatUsd(getPurchaseFinancials(row).merchandiseSubtotal)}</td>
             <td><input type="number" min="0" step="0.01" data-col="shipping" value="${escapeHtml(String(row.shipping || 0))}" style="min-width:86px"></td>
@@ -14791,8 +15100,16 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td class="purchase-number" data-col="total">${formatUsd(computeRowTotal(row))}</td>
             <td><button type="button" class="btn secondary" data-col="goTask">Edit</button></td>
             <td><button type="button" class="btn danger" data-col="removeRow" aria-label="Remove row">X</button></td>
-          </tr>`).join("");
+          </tr>`).join("") + '</tbody></table>';
+        Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")).forEach((tr, index)=>{
+          rememberReceiptRow(tr, entry.rows[index]);
+          if (entry.rows[index]?.orderId){
+            tr.querySelectorAll("input").forEach(input=>{ input.readOnly = true; });
+            tr.querySelectorAll("button").forEach(button=>{ button.disabled = true; });
+          }
+        });
         appendEmptyRow();
+        layoutWeekOrderTables();
         recomputeWeekTotals();
       };
       const findInventoryByPartNumber = (partNumber)=>{
@@ -14813,6 +15130,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         (window.receiptTrackerWeeks || []).forEach(week => {
           if (!Array.isArray(week?.rows)) return;
           week.rows = week.rows.map(row => {
+            if (row?.orderId) return row;
             const rowPart = String(row?.partNumber || "").trim().toLowerCase();
             if (!rowPart || rowPart !== partKey) return row;
             updates += 1;
@@ -14893,7 +15211,8 @@ const appendEmptyRow = (focusFirst = false)=>{
           return `
           <tr>
             <td>${escapeHtml(row.date || "—")}</td>
-            <td>${escapeHtml(row.purchased || "—")}</td>
+            <td>${escapeHtml(row.purchased || "—")}${row.orderId ? `<small title="${escapeHtml(row.orderId)}"> · Order ${escapeHtml(String(row.orderId).slice(-8))} (view only)</small>` : ""}</td>
+            <td>${escapeHtml(String(row.poNumber ?? "").trim() || "N/A")}</td>
             <td>${escapeHtml(row.partNumber || "—")}</td>
             <td class="purchase-number">${escapeHtml(String(financials.qty))}</td>
             <td class="purchase-number">${formatUsd(financials.unitCost)}</td>
@@ -14903,7 +15222,7 @@ const appendEmptyRow = (focusFirst = false)=>{
             <td class="purchase-number">${formatUsd(financials.totalSpend)}</td>
             <td><span class="small muted">${stateLabel}</span></td>
           </tr>`;
-        }).join("") : '<tr><td colspan="10" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
+        }).join("") : '<tr><td colspan="11" class="cost-table-placeholder">No receipt rows in this range.</td></tr>';
         if (rangeSubtotal) rangeSubtotal.textContent = formatUsd(subtotal);
         if (rangeLabel) rangeLabel.textContent = formatDateRangeLabel(start, end);
       };
@@ -14931,6 +15250,7 @@ const appendEmptyRow = (focusFirst = false)=>{
             if (next instanceof HTMLElement) next.focus();
           }
           recomputeWeekTotals();
+          receiptEditVersion += 1;
           hasUnsavedReceiptChanges = true;
           hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
@@ -14943,27 +15263,17 @@ const appendEmptyRow = (focusFirst = false)=>{
             const row = inputEl.closest("tr[data-receipt-row]");
             const typed = String(inputEl.value || "").trim();
             if (row && typed){
-              const task = findTaskByNameExact(typed);
-              const invFromTask = task && task.inventoryId != null && Array.isArray(window.inventory)
-                ? window.inventory.find(item => String(item?.id || "") === String(task.inventoryId))
-                : null;
-              const inv = invFromTask || (Array.isArray(window.inventory) ? window.inventory.find(item => String(item?.name || "").trim().toLowerCase() === typed.toLowerCase()) : null);
+              const {task, inv, partNumber, price} = purchaseSelection(typed);
               const partEl = row.querySelector('[data-col="partNumber"]');
               const costEl = row.querySelector('[data-col="cost"]');
               if (task || inv){
-                const taskPn = String(task?.pn || "").trim();
-                const taskPrice = Number(task?.price);
-                const invPn = String(inv?.pn || "").trim();
-                const invPrice = Number(inv?.price);
-                if (partEl instanceof HTMLInputElement) partEl.value = String(taskPn || invPn || partEl.value || "");
-                if (costEl instanceof HTMLInputElement){
-                  if (Number.isFinite(taskPrice)) costEl.value = String(taskPrice);
-                  else if (Number.isFinite(invPrice)) costEl.value = String(invPrice);
-                }
+                if (partEl instanceof HTMLInputElement) partEl.value = partNumber || partEl.value || "";
+                if (costEl instanceof HTMLInputElement && price !== null) costEl.value = String(price);
               }
             }
           }
           recomputeWeekTotals();
+          receiptEditVersion += 1;
           hasUnsavedReceiptChanges = true;
           hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
@@ -14971,6 +15281,7 @@ const appendEmptyRow = (focusFirst = false)=>{
           renderRangeTable();
         });
         weekRowsBody.addEventListener("change", ()=>{
+          receiptEditVersion += 1;
           hasUnsavedReceiptChanges = true;
           hasExplicitSaveSinceEdit = false;
           saveWeekRowsFromDom();
@@ -14980,19 +15291,23 @@ const appendEmptyRow = (focusFirst = false)=>{
           const target = event.target instanceof HTMLElement ? event.target : null;
           if (!target) return;
           if (target.getAttribute("data-col") === "removeRow"){
+            if (receiptRowSources.get(target.closest("tr[data-receipt-row]"))?.original?.orderId){
+              if (typeof toast === "function") toast("Saved order items cannot be removed individually. Whole-order editing is not available yet.");
+              return;
+            }
             const rows = Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"));
             if (rows.length <= 1){ if (typeof toast === "function") toast("At least one row is required."); return; }
             target.closest("tr[data-receipt-row]")?.remove();
+            receiptEditVersion += 1;
+            hasUnsavedReceiptChanges = true;
+            hasExplicitSaveSinceEdit = false;
             recomputeWeekTotals(); saveWeekRowsFromDom(); renderRangeTable(); renderCentralSpendRows();
             return;
           }
           if (target.getAttribute("data-col") === "goTask"){
             const row = target.closest("tr[data-receipt-row]");
             const purchased = String(row?.querySelector('[data-col="purchased"]')?.value || "").trim().toLowerCase();
-            const inv = (Array.isArray(inventory) ? inventory : []).find(item => String(item?.name || "").trim().toLowerCase() === purchased);
-            const taskId = inv && inv.linkedTaskId != null ? String(inv.linkedTaskId) : "";
-            if (taskId && typeof openSettingsAndReveal === "function"){ openSettingsAndReveal(taskId); }
-            else if (typeof window.showScreen === "function"){ window.showScreen("settings"); }
+            openPurchaseInventoryEditor(purchased);
           }
         });
       };
@@ -15008,18 +15323,26 @@ const appendEmptyRow = (focusFirst = false)=>{
           activeRange = rangeSelect.value || "1";
           window.receiptTrackerRangeSelected = activeRange;
           renderRangeTable();
-          persistReceiptState();
         });
       }
+      const navigateReceiptWeek = (key)=>{
+        if (!(weekRowsBody instanceof HTMLElement)) return;
+        receiptDraftRows.set(activeWeekKey, Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]")));
+        activeWeekKey = key;
+        selectedReceiptYear = Number(key.slice(0, 4));
+        window.receiptTrackerWeekSelected = activeWeekKey;
+        renderWeekOptions();
+        renderWeekRows();
+      };
       if (weekSelect instanceof HTMLSelectElement){
-        weekSelect.addEventListener("change", ()=>{
-          saveWeekRowsFromDom();
-          hasUnsavedReceiptChanges = true;
-          hasExplicitSaveSinceEdit = false;
-          activeWeekKey = weekSelect.value;
-          window.receiptTrackerWeekSelected = activeWeekKey;
-          renderWeekRows();
-          renderRangeTable();
+        weekSelect.addEventListener("change", ()=> navigateReceiptWeek(weekSelect.value));
+      }
+      if (yearSelect instanceof HTMLSelectElement){
+        yearSelect.addEventListener("change", ()=>{
+          const year = Number(yearSelect.value), current = currentReceiptWeek();
+          const options = buildReceiptWeeks(year);
+          const week = year === current.year ? current.week : Math.min(Number(activeWeekKey.slice(-2)), options.length);
+          navigateReceiptWeek(weekKey(year, week));
         });
       }
       if (saveWeekBtn instanceof HTMLButtonElement){
@@ -15035,9 +15358,8 @@ const appendEmptyRow = (focusFirst = false)=>{
       const quickAddBtn = modal.querySelector("[data-receipt-quick-add-task]");
       if (quickAddBtn instanceof HTMLButtonElement){
         quickAddBtn.addEventListener("click", ()=>{
+          if (!saveWeekRowsFromDom({ showValidation:true })) return;
           ensureMaintenanceTaskModalAPI();
-          saveWeekRowsFromDom();
-          persistReceiptState();
           const focusRowIndex = Math.max(0, (weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelectorAll("tr[data-receipt-row]").length : 1) - 1);
           const opener = typeof window.__openMaintenanceTaskModal === "function" ? window.__openMaintenanceTaskModal : null;
           if (opener){
@@ -15048,11 +15370,11 @@ const appendEmptyRow = (focusFirst = false)=>{
                 renderWeekRows();
                 renderRangeTable();
                 renderCentralSpendRows();
-                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                const field = weekRowsBody instanceof HTMLElement ? Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"))[focusRowIndex]?.querySelector('[data-col="purchased"]') : null;
                 if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
               },
               onClosed: ()=>{
-                const field = weekRowsBody instanceof HTMLElement ? weekRowsBody.querySelector(`tr[data-receipt-row]:nth-of-type(${focusRowIndex + 1}) [data-col="purchased"]`) : null;
+                const field = weekRowsBody instanceof HTMLElement ? Array.from(weekRowsBody.querySelectorAll("tr[data-receipt-row]"))[focusRowIndex]?.querySelector('[data-col="purchased"]') : null;
                 if (field instanceof HTMLElement) requestAnimationFrame(()=> field.focus());
               }
             });
@@ -15068,7 +15390,13 @@ const appendEmptyRow = (focusFirst = false)=>{
       }
       if (clearAllBtn instanceof HTMLButtonElement){
         clearAllBtn.addEventListener("click", async ()=>{
+          if ((window.receiptTrackerWeeks || []).some(week=> (week.rows || []).some(row=> row?.orderId))){
+            if (typeof toast === "function") toast("Clear all is unavailable when Purchase History contains saved orders. Whole-order deletion is not available yet.");
+            return;
+          }
+          receiptEditVersion += 1;
           purchaseHistoryUndoSnapshot = snapshotPurchaseHistory();
+          receiptDraftRows.clear();
           setUndoClearEnabled(Array.isArray(purchaseHistoryUndoSnapshot) && purchaseHistoryUndoSnapshot.length > 0);
           if (Array.isArray(window.receiptTrackerWeeks)){
             window.receiptTrackerWeeks = window.receiptTrackerWeeks.map(week => ({ ...week, rows: [] }));
@@ -15082,16 +15410,17 @@ const appendEmptyRow = (focusFirst = false)=>{
           renderWeekRows();
           renderRangeTable();
           renderCentralSpendRows();
-          await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true });
-          if (typeof toast === "function") toast("Purchase history cleared. Use Undo clear to restore.");
+          if (await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true }) && typeof toast === "function") toast("Purchase history cleared. Use Undo clear to restore.");
         });
       }
       if (undoClearBtn instanceof HTMLButtonElement){
         undoClearBtn.addEventListener("click", async ()=>{
           if (!Array.isArray(purchaseHistoryUndoSnapshot)) return;
+          receiptEditVersion += 1;
+          receiptDraftRows.clear();
           window.receiptTrackerWeeks = purchaseHistoryUndoSnapshot.map(week => ({
             ...week,
-            rows: normalizeRows(week?.rows).map(row => ({ ...row }))
+            rows: (Array.isArray(week?.rows) ? week.rows : []).map(row => ({ ...row }))
           }));
           purchaseHistoryUndoSnapshot = null;
           setUndoClearEnabled(false);
@@ -15103,14 +15432,14 @@ const appendEmptyRow = (focusFirst = false)=>{
           renderWeekRows();
           renderRangeTable();
           renderCentralSpendRows();
-          await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true });
-          if (typeof toast === "function") toast("Purchase history restore complete.");
+          if (await savePurchaseHistoryWeek({ showInlineStatus: true, refreshDashboard: true, keepReceiptModalOpen: true }) && typeof toast === "function") toast("Purchase history restore complete.");
         });
       }
       setUndoClearEnabled(false);
       if (exportWeekBtn instanceof HTMLElement){
         exportWeekBtn.addEventListener("click", ()=>{
-          const entry = saveWeekRowsFromDom();
+          const entry = saveWeekRowsFromDom({ showValidation:true });
+          if (!entry) return;
           const rows = normalizeRows(entry.rows);
           const subtotal = rows.reduce((sum, row) => sum + computeRowTotal(row), 0);
           const weekRange = entry.startISO && entry.endISO
@@ -15119,10 +15448,11 @@ const appendEmptyRow = (focusFirst = false)=>{
           const workbook = buildWorkbookFromTable({
             title: "Purchase History — Weekly Export",
             subtitle: weekRange,
-            headerRows: [["Date", "Purchased Item", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
+            headerRows: [["Date", "Purchased Item", "PO Num.", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
             bodyRows: rows.map(row => [
               row.date || "—",
               row.purchased || "—",
+              String(row.poNumber ?? "").trim() || "N/A",
               row.partNumber || "—",
               getPurchaseFinancials(row).qty.toFixed(2),
               getPurchaseFinancials(row).unitCost.toFixed(2),
@@ -15131,7 +15461,7 @@ const appendEmptyRow = (focusFirst = false)=>{
               getPurchaseFinancials(row).tax.toFixed(2),
               getPurchaseFinancials(row).totalSpend.toFixed(2)
             ]),
-            footerRows: [["", "", "", "", "", "", "", "Week Total Spend", Number(subtotal || 0).toFixed(2)]]
+            footerRows: [["", "", "", "", "", "", "", "", "Week Total Spend", Number(subtotal || 0).toFixed(2)]]
           });
           downloadWorkbook(`receipt-week-${entry.key || "week"}.xls`, workbook);
         });
@@ -15173,6 +15503,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         (window.receiptTrackerWeeks || []).forEach(week => {
           if (!Array.isArray(week?.rows)) return;
           week.rows = week.rows.map((row, idx) => {
+            if (row?.orderId) return row;
             const samePn = group.partNumber && String(row?.partNumber||"").trim().toLowerCase() === String(group.partNumber).toLowerCase();
             const sameRow = !group.partNumber && group.rows.some(x => x.weekKey===week.key && Number(x.rowIndex)===idx);
             if (!samePn && !sameRow) return row;
@@ -15293,10 +15624,11 @@ const appendEmptyRow = (focusFirst = false)=>{
           const workbook = buildWorkbookFromTable({
             title: "Purchase History — Date Range Export",
             subtitle: formatDateRangeLabel(start, end),
-            headerRows: [["Date", "Purchased Item", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
+            headerRows: [["Date", "Purchased Item", "PO Num.", "Part #", "Qty", "Unit Cost", "Item Subtotal", "Shipping", "Tax", "Total Spend"]],
             bodyRows: rows.map(row => [
               row.date || "—",
               row.purchased || "—",
+              String(row.poNumber ?? "").trim() || "N/A",
               row.partNumber || "—",
               getPurchaseFinancials(row).qty.toFixed(2),
               getPurchaseFinancials(row).unitCost.toFixed(2),
@@ -15305,12 +15637,261 @@ const appendEmptyRow = (focusFirst = false)=>{
               getPurchaseFinancials(row).tax.toFixed(2),
               getPurchaseFinancials(row).totalSpend.toFixed(2)
             ]),
-            footerRows: [["", "", "", "", "", "", "", "Range Total Spend", Number(subtotal || 0).toFixed(2)]]
+            footerRows: [["", "", "", "", "", "", "", "", "Range Total Spend", Number(subtotal || 0).toFixed(2)]]
           });
           downloadWorkbook(`receipt-range-${activeRange}.xls`, workbook);
         });
       }
-      const openModal = ()=>{
+      const newOrderBtn = modal.querySelector("[data-receipt-new-order]");
+      const orderEditor = modal.querySelector("[data-purchase-order-editor]");
+      if (newOrderBtn instanceof HTMLElement && orderEditor instanceof HTMLElement){
+        const orders = window.OMAXPurchaseOrders;
+        const dateInput = orderEditor.querySelector("[data-purchase-order-date]");
+        const shippingInput = orderEditor.querySelector("[data-purchase-order-shipping]");
+        const taxInput = orderEditor.querySelector("[data-purchase-order-tax]");
+        const poInput = orderEditor.querySelector("[data-purchase-order-po]");
+        const itemsBody = orderEditor.querySelector("[data-purchase-order-items]");
+        const previewLabel = orderEditor.querySelector("[data-purchase-order-preview]");
+        const status = orderEditor.querySelector("[data-purchase-order-status]");
+        const addButton = orderEditor.querySelector("[data-purchase-order-add]");
+        const saveButton = orderEditor.querySelector("[data-purchase-order-save]");
+        const cancelButton = orderEditor.querySelector("[data-purchase-order-cancel]");
+        let session = window.__purchaseOrderDraftSession || null, draft = session?.draft || null, saving = false;
+        const disabledBeforeOrder = new Map();
+        const lockHistory = locked=>{
+          if (locked){
+            modal.querySelectorAll("input, select, button").forEach(element=>{
+              if (!orderEditor.contains(element)){ disabledBeforeOrder.set(element, element.disabled); element.disabled = true; }
+            });
+          } else {
+            disabledBeforeOrder.forEach((disabled, element)=>{ element.disabled = disabled; });
+            disabledBeforeOrder.clear();
+          }
+        };
+        const readDraft = ()=>{
+          draft.date = dateInput.value; draft.shipping = shippingInput.value; draft.tax = taxInput.value; draft.poNumber = poInput.value;
+          itemsBody.querySelectorAll("tr[data-order-line]").forEach(tr=>{
+            const item = draft.items.find(item=> item.lineId === tr.dataset.orderLine);
+            for (const field of ["purchased", "partNumber", "qty", "cost", "inventoryItemId"]) item[field] = tr.querySelector(`[data-order-field="${field}"]`).value;
+          });
+        };
+        const updatePreview = ()=>{
+          if (!draft) return;
+          readDraft();
+          try {
+            const planned = orders.plan(draft);
+            previewLabel.textContent = `Merchandise ${formatUsd(orders.dollars(planned.merchandiseCents))} · Shipping ${formatUsd(orders.dollars(planned.shippingCents))} · Tax ${formatUsd(orders.dollars(planned.taxCents))} · Total spend ${formatUsd(orders.dollars(planned.totalCents))}`;
+            planned.rows.forEach(row=>{
+              const tr = itemsBody.querySelector(`[data-order-line="${row.lineId}"]`);
+              tr.querySelector("[data-order-allocation]").textContent = formatUsd(row.shipping);
+              tr.querySelector("[data-order-tax-allocation]").textContent = formatUsd(row.tax);
+              tr.querySelector("[data-order-total]").textContent = formatUsd(getPurchaseFinancials(row).totalSpend);
+            });
+            saveButton.disabled = saving || getPurchaseOrderApi().isUncertain();
+          } catch (error){
+            previewLabel.textContent = error.message;
+            itemsBody.querySelectorAll("[data-order-allocation], [data-order-tax-allocation], [data-order-total]").forEach(cell=>{ cell.textContent = "—"; });
+            saveButton.disabled = true;
+          }
+        };
+        const renderItems = ()=>{
+          itemsBody.innerHTML = draft.items.map(item=> `<tr data-order-line="${escapeHtml(item.lineId)}">
+            <td class="purchase-order-name"><input data-order-field="purchased" value="${escapeHtml(item.purchased)}" aria-label="Item description" role="combobox" aria-autocomplete="list" aria-controls="${escapeHtml(item.lineId)}-suggestions" aria-expanded="false" autocomplete="off" required><div id="${escapeHtml(item.lineId)}-suggestions" data-order-suggestions role="listbox" aria-label="Purchase items" hidden></div></td>
+            <td><input data-order-field="partNumber" value="${escapeHtml(item.partNumber)}" aria-label="Part number"></td>
+            <td><input type="number" min="1" step="1" data-order-field="qty" value="${escapeHtml(item.qty)}" aria-label="Quantity" required></td>
+            <td><input type="number" min="0" step="0.01" data-order-field="cost" value="${escapeHtml(item.cost)}" aria-label="Unit cost" required></td>
+            <td><select data-order-field="inventoryItemId" aria-label="Optional inventory link"><option value="">No link</option>${item.inventoryItemId && !(window.inventory || []).some(inv=> String(inv.id) === item.inventoryItemId) ? `<option value="${escapeHtml(item.inventoryItemId)}" selected>Missing link — review</option>` : ""}${(window.inventory || []).map(inv=> `<option value="${escapeHtml(String(inv.id))}"${item.inventoryItemId === String(inv.id) ? " selected" : ""}>${escapeHtml(inv.name || inv.pn || String(inv.id))}</option>`).join("")}</select><button type="button" class="btn secondary" data-order-edit-inventory="${escapeHtml(item.lineId)}">Edit Inventory</button></td>
+            <td data-order-allocation>—</td><td data-order-tax-allocation>—</td><td data-order-total>—</td>
+            <td><button type="button" class="btn danger" data-order-remove="${escapeHtml(item.lineId)}">Remove Item</button></td>
+          </tr>`).join("");
+          updatePreview();
+        };
+        const showDraft = ()=>{
+          dateInput.value = draft.date; shippingInput.value = draft.shipping; taxInput.value = draft.tax; poInput.value = draft.poNumber || ""; status.textContent = "";
+          orderEditor.querySelector("[data-purchase-order-title]").textContent = session.edit ? "Edit Purchase Order" : "New Purchase Order";
+          orderEditor.setAttribute("aria-label", session.edit ? "Edit purchase order" : "New purchase order");
+          saveButton.textContent = session.edit ? "Save Changes" : "Save Order";
+          orderEditor.hidden = false; lockHistory(true); rebuildPurchaseTemplates(); renderItems(); dateInput.focus();
+          window.costPurchaseHistoryModalOpen = true;
+          if (getPurchaseOrderApi().isUncertain()){
+            orderEditor.querySelectorAll("input, select, button").forEach(element=>{ element.disabled = true; }); cancelButton.disabled = false;
+            status.textContent = "The last save needs server verification. Review Recovery Mode before retrying.";
+          }
+        };
+        const startOrder = async orderId=>{
+          if (saving || getPurchaseOrderApi().isBusy()) return;
+          if (getPurchaseOrderApi().isUncertain()){
+            if (typeof toast === "function") toast("The previous order needs server verification before another order can be entered.");
+            return;
+          }
+          if (hasUnsavedReceiptChanges && !await savePurchaseHistoryWeek({refreshDashboard:false})) return;
+          try {
+            const today = new Date();
+            const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+            const saved = orderId ? orders.openSaved({receiptTrackerWeeks:window.receiptTrackerWeeks}, orderId) : null;
+            draft = saved ? saved.draft : orders.newDraft(date, window.crypto);
+            session = {draft, edit:saved ? {expected:saved.expected, confirmedRemovedLineIds:[]} : null};
+            window.__purchaseOrderDraftSession = session;
+            showDraft();
+          } catch (error){ if (typeof toast === "function") toast(error.message); }
+        };
+        newOrderBtn.addEventListener("click", ()=> startOrder());
+        weekRowsBody.addEventListener("click", event=>{
+          const id = event.target.closest?.("[data-receipt-edit-order]")?.dataset.receiptEditOrder;
+          if (id) void startOrder(id);
+        });
+        const applyOrderSelection = input=>{
+          const tr = input.closest("tr[data-order-line]"), selected = purchaseSelection(input.value), item = draft.items.find(item=> item.lineId === tr.dataset.orderLine);
+          tr.querySelector('[data-order-field="inventoryItemId"]').value = selected.inv ? String(selected.inv.id) : "";
+          if (selected.task) item.taskId = String(selected.task.id); else delete item.taskId;
+          if (selected.task || selected.inv){
+            const part = tr.querySelector('[data-order-field="partNumber"]');
+            part.value = selected.partNumber || part.value;
+            if (selected.price !== null) tr.querySelector('[data-order-field="cost"]').value = String(selected.price);
+          }
+        };
+        const hideSuggestions = tr=>{
+          tr.querySelector("[data-order-suggestions]").hidden = true;
+          const input = tr.querySelector('[data-order-field="purchased"]');
+          input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant");
+        };
+        const suggest = input=>{
+          const tr = input.closest("tr[data-order-line]"), list = tr.querySelector("[data-order-suggestions]"), query = input.value.trim().toLowerCase();
+          itemsBody.querySelectorAll("tr[data-order-line]").forEach(row=>{ if (row !== tr) hideSuggestions(row); });
+          // New Order owns its visible matches; a shared native datalist popup can
+          // retain the previous selection even though this row's text changed.
+          const names = Array.from(purchasedDatalist.options).map(option=> option.value).filter(name=> query && name.toLowerCase().includes(query));
+          list.innerHTML = names.map((name,index)=> `<button type="button" role="option" id="${escapeHtml(tr.dataset.orderLine)}-option-${index}" aria-selected="false" tabindex="-1" data-order-suggestion="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join("");
+          tr.dataset.suggestionIndex = "-1"; list.hidden = !names.length; input.setAttribute("aria-expanded", String(!!names.length)); input.removeAttribute("aria-activedescendant");
+        };
+        const choose = (tr, name)=>{
+          const input = tr.querySelector('[data-order-field="purchased"]');
+          input.value = name; applyOrderSelection(input); updatePreview(); input.focus(); hideSuggestions(tr);
+        };
+        orderEditor.addEventListener("input", event=>{
+          if (saving || !draft) return;
+          const input = event.target;
+          if (input.dataset.orderField === "purchased"){
+            applyOrderSelection(input); suggest(input);
+          }
+          updatePreview();
+        });
+        orderEditor.addEventListener("change", event=>{
+          if (saving || !draft) return;
+          const input = event.target;
+          if (input.dataset.orderField === "inventoryItemId"){
+            const inv = (window.inventory || []).find(item=> String(item.id) === input.value), tr = input.closest("tr[data-order-line]");
+            if (inv){
+              tr.querySelector('[data-order-field="purchased"]').value = String(inv.name || "");
+              tr.querySelector('[data-order-field="partNumber"]').value = String(inv.pn || "");
+              if (Number.isFinite(Number(inv.price))) tr.querySelector('[data-order-field="cost"]').value = String(inv.price);
+            }
+            const item = draft.items.find(item=> item.lineId === tr.dataset.orderLine), task = inv && (findTaskByNameExact(inv.name) || [...(window.tasksInterval || []), ...(window.tasksAsReq || [])].find(task=> String(task.id) === String(inv.linkedTaskId)));
+            if (task) item.taskId = String(task.id); else delete item.taskId;
+          }
+          updatePreview();
+        });
+        addButton.addEventListener("click", ()=>{
+          if (saving || !draft) return;
+          readDraft(); draft.items.push(orders.newItem(window.crypto)); renderItems();
+        });
+        itemsBody.addEventListener("click", event=>{
+          const suggestion = event.target.closest("[data-order-suggestion]");
+          if (suggestion && !saving){ choose(suggestion.closest("tr[data-order-line]"), suggestion.dataset.orderSuggestion); return; }
+          const editInventory = event.target.closest("[data-order-edit-inventory]");
+          if (editInventory && !saving){
+            readDraft();
+            const item = draft.items.find(item=> item.lineId === editInventory.dataset.orderEditInventory);
+            session.inventoryRefresh = {lineId:item.lineId, item:{...item}, selection:purchaseSelection(item.purchased)};
+            session.inventoryRefresh = JSON.parse(JSON.stringify(session.inventoryRefresh));
+            modal.hidden = true; window.costPurchaseHistoryModalOpen = false; document.body.classList.remove("cost-receipt-modal-open");
+            openPurchaseInventoryEditor(item.purchased, item.inventoryItemId); return;
+          }
+          const lineId = event.target.getAttribute("data-order-remove");
+          if (!lineId || saving || !draft) return;
+          if (session.edit?.expected.rows.some(row=> row.lineId === lineId)){
+            if (!confirm("Remove this previously saved item from the order? It will be removed only when you save changes. A local before-image will be retained for recovery.")) return;
+            session.edit.confirmedRemovedLineIds.push(lineId);
+          }
+          readDraft(); draft.items = draft.items.filter(item=> item.lineId !== lineId); renderItems();
+        });
+        itemsBody.addEventListener("pointerdown", event=>{ if (event.target.closest("[data-order-suggestion]")) event.preventDefault(); });
+        itemsBody.addEventListener("focusin", event=>{ if (event.target.dataset.orderField === "purchased" && !saving) suggest(event.target); });
+        itemsBody.addEventListener("focusout", event=>{
+          const tr = event.target.closest("tr[data-order-line]");
+          if (tr) setTimeout(()=>{ if (!tr.contains(document.activeElement)) hideSuggestions(tr); }, 0);
+        });
+        itemsBody.addEventListener("keydown", event=>{
+          const input = event.target;
+          if (saving || input.dataset.orderField !== "purchased") return;
+          const tr = input.closest("tr[data-order-line]"), list = tr.querySelector("[data-order-suggestions]");
+          if (event.key === "Escape"){ event.preventDefault(); event.stopPropagation(); hideSuggestions(tr); return; }
+          if (!["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
+          if (list.hidden && event.key !== "Enter") suggest(input);
+          const options = Array.from(list.querySelectorAll("[data-order-suggestion]"));
+          if (list.hidden || !options.length) return;
+          let index = Number(tr.dataset.suggestionIndex);
+          if (event.key === "Enter"){
+            if (index < 0) return;
+            event.preventDefault(); choose(tr, options[index].dataset.orderSuggestion); return;
+          }
+          event.preventDefault(); event.stopPropagation();
+          index = event.key === "ArrowDown" ? (index + 1) % options.length : (index <= 0 ? options.length - 1 : index - 1);
+          tr.dataset.suggestionIndex = String(index); options.forEach((option,i)=> option.setAttribute("aria-selected", String(i === index)));
+          input.setAttribute("aria-activedescendant", options[index].id); options[index].scrollIntoView({block:"nearest"});
+        });
+        cancelButton.addEventListener("click", ()=>{
+          if (saving) return;
+          draft = null; session = null; delete window.__purchaseOrderDraftSession; orderEditor.hidden = true; lockHistory(false);
+        });
+        saveButton.addEventListener("click", async()=>{
+          if (saving || !draft) return;
+          readDraft();
+          try { orders.plan(draft); } catch (error){ status.textContent = error.message; return; }
+          saving = true;
+          orderEditor.querySelectorAll("input, select, button").forEach(element=>{ element.disabled = true; });
+          status.textContent = "Saving order and verifying the server…";
+          const result = await getPurchaseOrderApi().save(draft, session.edit);
+          saving = false;
+          if (!result.saved || !result.verificationCompleted){
+            const uncertain = result.indeterminate || getPurchaseOrderApi().isUncertain();
+            orderEditor.querySelectorAll("input, select, button").forEach(element=>{ element.disabled = !!uncertain; });
+            cancelButton.disabled = false;
+            status.textContent = result.error || "The order was not confirmed. Your draft remains available.";
+            if (!uncertain) updatePreview();
+            return;
+          }
+          draft = null; session = null; delete window.__purchaseOrderDraftSession; orderEditor.hidden = true; lockHistory(false);
+          orderEditor.querySelectorAll("input, select, button").forEach(element=>{ element.disabled = false; });
+          receiptDraftRows.clear();
+          activeWeekKey = result.weekKey; selectedReceiptYear = Number(activeWeekKey.slice(0, 4));
+          window.receiptTrackerWeekSelected = activeWeekKey;
+          hasUnsavedReceiptChanges = false; hasExplicitSaveSinceEdit = true;
+          renderWeekOptions(); renderWeekRows(); renderRangeTable(); renderCentralSpendRows();
+          refreshCostDashboard({keepReceiptModalOpen:true});
+          if (typeof toast === "function") toast("Order saved and verified.");
+        });
+        if (draft){
+          const refresh = session.inventoryRefresh;
+          if (refresh){
+            const item = draft.items.find(item=> item.lineId === refresh.lineId), prior = refresh.selection;
+            const inv = (window.inventory || []).find(inv=> String(inv.id) === refresh.item.inventoryItemId);
+            const task = [...(window.tasksInterval || []), ...(window.tasksAsReq || [])].find(task=> String(task.id) === refresh.item.taskId);
+            if (item){
+              if (task && item.purchased === prior.task?.name) item.purchased = task.name;
+              else if (inv && item.purchased === prior.inv?.name) item.purchased = inv.name;
+              const selected = purchaseSelection(item.purchased);
+              if (selected.inv && prior.inv && String(item.inventoryItemId) === String(prior.inv.id)) item.inventoryItemId = String(selected.inv.id);
+              if (item.partNumber === prior.partNumber) item.partNumber = selected.partNumber || item.partNumber;
+              if (prior.price !== null && Number(item.cost) === prior.price && selected.price !== null) item.cost = String(selected.price);
+            }
+            delete session.inventoryRefresh;
+          }
+          showDraft();
+        }
+      }
+      const openModal = ({ preserveTarget = false } = {})=>{
+        if (!preserveTarget) navigateReceiptWeek(currentReceiptWeek().key);
         modal.hidden = false;
         modal.setAttribute("aria-hidden", "false");
         document.body.classList.add("cost-receipt-modal-open");
@@ -15335,10 +15916,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         const rowIndex = Number(target.rowIndex);
         if (!weekKey) return false;
         if (weekSelect.value !== weekKey){
-          weekSelect.value = weekKey;
-          activeWeekKey = weekKey;
-          window.receiptTrackerWeekSelected = activeWeekKey;
-          renderWeekRows();
+          navigateReceiptWeek(weekKey);
         }
         if (!Number.isFinite(rowIndex) || rowIndex < 0) return false;
         const row = weekRowsBody.querySelector(`[data-receipt-row-index="${rowIndex}"]`);
@@ -15347,9 +15925,8 @@ const appendEmptyRow = (focusFirst = false)=>{
         return true;
       };
       const closeModal = async ()=>{
-        saveWeekRowsFromDom();
         if (hasUnsavedReceiptChanges && !hasExplicitSaveSinceEdit){
-          await savePurchaseHistoryWeek({ refreshDashboard: false, keepReceiptModalOpen: false });
+          if (!await savePurchaseHistoryWeek({ refreshDashboard: false, keepReceiptModalOpen: false })) return;
           if (typeof toast === "function") toast("Saved");
           refreshCostDashboard({ keepReceiptModalOpen: false });
         }
@@ -15364,15 +15941,17 @@ const appendEmptyRow = (focusFirst = false)=>{
       };
       if (typeof window !== "undefined"){
         window.__openPurchaseHistoryModalAtEntry = (target = {})=>{
-          openModal();
+          openModal({ preserveTarget:true });
           setTimeout(()=>{ focusReceiptWeekRow(target); }, 10);
           return true;
         };
       }
-      receiptOpenBtn.addEventListener("click", openModal);
+      receiptOpenBtn.addEventListener("click", ()=> openModal());
       closeControls.forEach(control => control.addEventListener("click", closeModal));
       if (window.costPurchaseHistoryModalOpen){
-        openModal();
+        const selected = String(window.receiptTrackerWeekSelected || "");
+        if (/^\d{4}-W\d{2}$/.test(selected)) navigateReceiptWeek(selected);
+        openModal({ preserveTarget:true });
       }
     }
 
@@ -15454,7 +16033,7 @@ const appendEmptyRow = (focusFirst = false)=>{
     const normalizeToTwo = (inputEl, fallback)=>{
       if (!(inputEl instanceof HTMLInputElement)) return fallback;
       const raw = asNumber(inputEl.value, fallback);
-      const safe = Math.max(0, raw);
+      const safe = inputEl === costInput ? Math.abs(raw) : Math.max(0, raw);
       const normalized = Math.round(safe * 100) / 100;
       inputEl.value = normalized.toFixed(2);
       return normalized;
@@ -15463,10 +16042,15 @@ const appendEmptyRow = (focusFirst = false)=>{
       ? window.__efficiencyCalculatorDraft
       : null;
     const defaultCharge = Math.max(0, asNumber(draft?.chargeRate, asNumber(defaults.chargeRate, asNumber(chargeInput.value, 0))));
-    const defaultCost = Math.max(0, asNumber(draft?.costRate, asNumber(defaults.costRate, asNumber(costInput.value, 0))));
+    const defaultCost = Math.abs(asNumber(draft?.costRate, asNumber(defaults.costRate, asNumber(costInput.value, 0))));
     chargeInput.value = defaultCharge.toFixed(2);
     costInput.value = defaultCost.toFixed(2);
     let activeRange = "1m";
+    let overrideRates = Boolean(draft);
+    const rowRates = (row, chargeRate, costRate) => ({
+      chargeRate: overrideRates ? chargeRate : asNumber(row?.chargeRateValue, chargeRate),
+      costRate: overrideRates ? costRate : Math.abs(asNumber(row?.costRateValue, costRate))
+    });
 
     const getRangeStart = (rangeKey)=>{
       const now = new Date();
@@ -15514,18 +16098,19 @@ const appendEmptyRow = (focusFirst = false)=>{
 
     const recalc = ()=>{
       const chargeRate = Math.max(0, asNumber(chargeInput.value, defaultCharge));
-      const costRate = Math.max(0, asNumber(costInput.value, defaultCost));
-      if (typeof window !== "undefined"){
+      const costRate = Math.abs(asNumber(costInput.value, defaultCost));
+      if (typeof window !== "undefined" && overrideRates){
         window.__efficiencyCalculatorDraft = { chargeRate, costRate };
       }
       const visibleRows = rows.filter(row => withinRange(row, activeRange));
       const totals = visibleRows.reduce((acc, row)=>{
         const hours = Math.max(0, asNumber(row?.hoursValue, 0));
         const material = Math.max(0, asNumber(row?.materialValue ?? row?.materialCostValue, 0));
-        const labor = hours * costRate;
-        const totalCost = labor + material;
+        const rates = rowRates(row, chargeRate, costRate);
+        const profit = computeCuttingJobProfit({estimateHours:hours, ...rates, materialCost:material, materialQty:1, failurePercent:row.failurePercentValue});
+        const totalCost = profit.cuttingCost + profit.materialExpense;
         acc.rows += 1;
-        acc.net += (hours * (chargeRate - costRate)) - material;
+        acc.net += profit.totalProfit;
         acc.cost += totalCost;
         return acc;
       }, { rows: 0, net: 0, cost: 0 });
@@ -15548,9 +16133,11 @@ const appendEmptyRow = (focusFirst = false)=>{
         if (!show) return;
         const hours = Math.max(0, asNumber(tr.getAttribute("data-efficiency-hours"), asNumber(rowObj?.hoursValue, 0)));
         const material = Math.max(0, asNumber(tr.getAttribute("data-efficiency-material"), asNumber(rowObj?.materialValue ?? rowObj?.materialCostValue, 0)));
-        const labor = hours * costRate;
-        const totalCost = labor + material;
-        const net = (hours * (chargeRate - costRate)) - material;
+        const rates = rowRates(rowObj, chargeRate, costRate);
+        const profit = computeCuttingJobProfit({estimateHours:hours, ...rates, materialCost:material, materialQty:1, failurePercent:rowObj?.failurePercentValue});
+        const labor = profit.cuttingCost;
+        const totalCost = labor + profit.materialExpense;
+        const net = profit.totalProfit;
         const laborCell = tr.querySelector("[data-efficiency-labor-cell]");
         const totalCostCell = tr.querySelector("[data-efficiency-total-cost-cell]");
         const profitCell = tr.querySelector("[data-efficiency-profit-cell]");
@@ -15560,10 +16147,11 @@ const appendEmptyRow = (focusFirst = false)=>{
       });
     };
 
-    chargeInput.addEventListener("input", recalc);
-    costInput.addEventListener("input", recalc);
-    chargeInput.addEventListener("blur", ()=>{ normalizeToTwo(chargeInput, defaultCharge); recalc(); });
-    costInput.addEventListener("blur", ()=>{ normalizeToTwo(costInput, defaultCost); recalc(); });
+    const recalcWithOverride = ()=>{ overrideRates = true; recalc(); };
+    chargeInput.addEventListener("input", recalcWithOverride);
+    costInput.addEventListener("input", recalcWithOverride);
+    chargeInput.addEventListener("blur", ()=>{ normalizeToTwo(chargeInput, defaultCharge); recalcWithOverride(); });
+    costInput.addEventListener("blur", ()=>{ normalizeToTwo(costInput, defaultCost); recalcWithOverride(); });
     if (rangeSelect instanceof HTMLSelectElement){
       rangeSelect.addEventListener("change", ()=>{
         activeRange = String(rangeSelect.value || "1m");
@@ -15575,6 +16163,8 @@ const appendEmptyRow = (focusFirst = false)=>{
       resetBtn.addEventListener("click", ()=>{
         chargeInput.value = defaultCharge.toFixed(2);
         costInput.value = defaultCost.toFixed(2);
+        overrideRates = false;
+        delete window.__efficiencyCalculatorDraft;
         activeRange = "1m";
         recalc();
         updateRangeButtons();
@@ -17664,54 +18254,21 @@ function computeCostModel(){
     });
   };
 
-  const resolveCuttingJobHours = (job, eff = null)=>{
-    const manualLogs = Array.isArray(job?.manualLogs) ? job.manualLogs : [];
-    const latestManualLog = manualLogs
-      .filter(entry => Number.isFinite(Number(entry?.completedHours)) && Number(entry.completedHours) >= 0)
-      .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
-      .pop() || null;
-    const candidates = [
-      Number(job?.actualHours),
-      Number(latestManualLog?.completedHours),
-      Number(job?.durationHours),
-      Number(job?.completedHours),
-      Number(eff?.actualHours),
-      Number(job?.estimateHours)
-    ];
-    const positive = candidates.find(val => Number.isFinite(val) && val > 0);
-    const fallback = candidates.find(val => Number.isFinite(val) && val >= 0);
-    return Number.isFinite(positive) ? positive : (Number.isFinite(fallback) ? fallback : 0);
-  };
+  const resolveCuttingJobHours = job => computeCuttingJobProfit(job).hours;
 
-  const resolveCuttingJobMaterialCost = (job)=>{
-    const overrides = [job?.materialTotal, job?.materialSpend, job?.totalMaterialCost, job?.materialCostTotal];
-    for (const entry of overrides){
-      const num = Number(entry);
-      if (Number.isFinite(num)) return Math.max(0, num);
-    }
-    const unit = Number(job?.materialCost);
-    const qty = Number(job?.materialQty);
-    if (Number.isFinite(unit) && Number.isFinite(qty) && qty > 0){
-      return Math.max(0, unit * qty);
-    }
-    return Number.isFinite(unit) && unit > 0 ? unit : 0;
-  };
+  const resolveCuttingJobMaterialCost = job => computeCuttingJobProfit(job).materialExpense;
 
   const resolveCuttingJobNetTotal = (job, eff = null)=>{
-    const hours = resolveCuttingJobHours(job, eff);
-    const chargeRateRaw = Number(job?.chargeRate ?? eff?.chargeRate);
-    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-    const cutCostRateRaw = Number(job?.costRate ?? eff?.costRate);
-    const cutCostRate = Number.isFinite(cutCostRateRaw) && cutCostRateRaw >= 0 ? cutCostRateRaw : JOB_BASE_COST_PER_HOUR;
-    const materialCost = resolveCuttingJobMaterialCost(job);
-    const billedAmount = chargeRate * Math.max(0, hours);
-    const cutCost = Math.max(0, hours) * cutCostRate;
+    const profit = computeCuttingJobProfit(job);
     return {
-      hours,
-      chargeRate,
-      cutCostRate,
-      materialCost,
-      total: billedAmount - materialCost - cutCost
+      hours: profit.hours,
+      chargeRate: profit.chargeRate,
+      cutCostRate: profit.costRate,
+      materialCost: resolveCuttingJobMaterialCost(job),
+      revenue: profit.revenue,
+      adjustedRevenue: profit.adjustedRevenue,
+      failurePercent: profit.failurePercent,
+      total: profit.totalProfit
     };
   };
 
@@ -18541,26 +19098,7 @@ function computeCostModel(){
 
       const catId = job.cat != null ? String(job.cat) : rootFolderId;
       const categoryName = resolveCategoryName(catId);
-      const actualHoursRaw = Number(job.actualHours);
-      const manualHoursRaw = Number(latestManualLog?.completedHours);
-      const durationHoursRaw = Number(job.durationHours);
-      const completedHoursRaw = Number(job.completedHours);
-      const storedEffHoursRaw = Number(job?.efficiency?.actualHours);
-      const effHoursRaw = Number(eff?.actualHours);
-      const estimateHoursRaw = Number(job.estimateHours);
-      const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw > 0
-        ? actualHoursRaw
-        : (Number.isFinite(manualHoursRaw) && manualHoursRaw > 0
-          ? manualHoursRaw
-          : (Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
-            ? durationHoursRaw
-            : (Number.isFinite(completedHoursRaw) && completedHoursRaw > 0
-              ? completedHoursRaw
-              : (Number.isFinite(storedEffHoursRaw) && storedEffHoursRaw > 0
-                ? storedEffHoursRaw
-                : (Number.isFinite(effHoursRaw) && effHoursRaw > 0
-                  ? effHoursRaw
-                  : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0))))));
+      const cutHours = resolveCuttingJobHours(job);
 
       const projectNumber = window.CuttingJobHistory.normalizeProjectKey(job?.projectNumber);
       const categoryDisplay = projectNumber
@@ -18832,7 +19370,7 @@ function computeCostModel(){
         const estimateSafe = Number.isFinite(estimateHours) && estimateHours > 0 ? estimateHours : 0;
         const durationHours = actualHours > 0 ? actualHours : estimateSafe;
         const materialCost = resolveCuttingJobMaterialCost(job);
-        const laborCost = Math.max(0, durationHours) * (Number.isFinite(Number(job?.costRate)) ? Number(job.costRate) : JOB_BASE_COST_PER_HOUR);
+        const laborCost = durationHours * computeCuttingJobProfit(job).costRate;
         const machineCost = machineFromJob(job);
         const overheadCost = overheadFromJob(job);
         const jobNet = resolveCuttingJobNetTotal(job, eff);
@@ -19094,7 +19632,7 @@ function computeCostModel(){
   const historyEmpty = parsedHistory.length
     ? "Log additional machine hours to expand the maintenance cost timeline."
     : "No usage history yet. Log machine hours to estimate maintenance spend.";
-  const jobEmpty = "Add cutting jobs with estimates to build the efficiency tracker.";
+  const jobEmpty = "Add cutting jobs with Hours Taken to build the efficiency tracker.";
 
   const chartNote = "Maintenance line shows negative loss values (blue), and cutting jobs line shows per-job net gain/loss (green when profitable, negative if jobs become unprofitable). Hover or click any point for details, then click to jump to matching Data Center rows.";
   const chartInfo = "Maintenance trend is plotted as negative cost impact, while cutting jobs are plotted as each completed job’s net result so profitability changes are visible immediately. Point hover/click reveals context and can jump to linked Data Center rows.";
@@ -19158,7 +19696,7 @@ function computeCostModel(){
     const materialCostValue = Number.isFinite(materialCost) && materialCost >= 0 ? materialCost : 0;
     const laborCostValue = Math.max(0, hours) * costRate;
     const totalCostValue = materialCostValue + laborCostValue;
-    const totalProfitValue = (Math.max(0, hours) * chargeRate) - totalCostValue;
+    const totalProfitValue = jobNet.total;
     const completedISO = typeof job?.completedAtISO === "string" && job.completedAtISO ? job.completedAtISO : "";
     return {
       id: job?.id != null ? String(job.id) : `completed_job_${index}`,
@@ -19181,6 +19719,9 @@ function computeCostModel(){
       cumulativeCutNumberLabel: window.CuttingJobChronology?.readCutLabel(job) ?? "—",
       categoryCutNumberLabel: `#${categoryCutCount}`,
       hoursValue: hours,
+      revenueValue: jobNet.adjustedRevenue,
+      originalRevenueValue: jobNet.revenue,
+      failurePercentValue: jobNet.failurePercent,
       chargeRateValue: chargeRate,
       costRateValue: costRate,
       materialCostValue,
@@ -19211,24 +19752,27 @@ function computeCostModel(){
       hoursValue: Number(row?.hoursValue) || 0,
       chargeRateValue: Number(row?.chargeRateValue) || 0,
       costRateValue: Number(row?.costRateValue) || 0,
-      revenueValue: Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)),
+      revenueValue: Number(row?.revenueValue) || 0,
+      originalRevenueValue: Number(row?.originalRevenueValue) || 0,
+      failurePercentValue: Number(row?.failurePercentValue) || 0,
       netGainLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
       materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
       laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
       totalCostValue: Number(row?.totalCostValue) || 0,
       totalProfitValue: Number(row?.totalProfitValue) || 0,
-      formulaTitle: "Source: Central data table completed cutting jobs row. Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost.",
+      formulaTitle: "Source: Central data table completed cutting jobs row. Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense.",
       settingsLink: row?.settingsLink || ""
     }));
   const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
     if (Number.isFinite(row?.hoursValue)) acc.hours += Math.max(0, Number(row.hoursValue));
+    if (Number.isFinite(row?.originalRevenueValue)) acc.originalRevenue += row.originalRevenueValue;
     if (Number.isFinite(row?.revenueValue)) acc.revenue += Math.max(0, Number(row.revenueValue));
     if (Number.isFinite(row?.materialValue)) acc.material += Math.max(0, Number(row.materialValue));
     if (Number.isFinite(row?.laborValue)) acc.labor += Math.max(0, Number(row.laborValue));
     if (Number.isFinite(row?.totalCostValue)) acc.cost += Math.max(0, Number(row.totalCostValue));
     if (Number.isFinite(row?.totalProfitValue)) acc.profit += Number(row.totalProfitValue);
     return acc;
-  }, { hours: 0, revenue: 0, material: 0, labor: 0, cost: 0, profit: 0 });
+  }, { hours: 0, revenue: 0, originalRevenue: 0, material: 0, labor: 0, cost: 0, profit: 0 });
   const efficiencyCount = efficiencyRows.length;
   const efficiencySnapshot = {
     countLabel: String(efficiencyCount),
@@ -19240,15 +19784,15 @@ function computeCostModel(){
     totalNetGainLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
     averageNetGainLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
     sourceLabel: "Source: central data table completed cutting jobs rows.",
-    formulaLabel: "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost",
+    formulaLabel: "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense",
     disclaimerLabel: "Uses central data table values only.",
     rows: efficiencyRows,
     emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
-  const efficiencyMathDetails = `Net gain = (Hours × (Charge Rate - Cost Rate)) - Material. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
+  const efficiencyMathDetails = `Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
   efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
   const totalCalcHours = efficiencyTotals.hours > 0 ? efficiencyTotals.hours : 0;
-  const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.revenue / totalCalcHours) : JOB_RATE_PER_HOUR;
+  const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.originalRevenue / totalCalcHours) : JOB_RATE_PER_HOUR;
   const defaultCostRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.labor / totalCalcHours) : JOB_BASE_COST_PER_HOUR;
   efficiencySnapshot.calculatorDefaults = {
     chargeRate: Number.isFinite(defaultChargeRateForCalc) ? defaultChargeRateForCalc : JOB_RATE_PER_HOUR,
@@ -19848,7 +20392,7 @@ function computeCostModel(){
       const purchased = String(row?.purchased || "").trim();
       const partNumber = String(row?.partNumber || "").trim();
       const financials = getPurchaseFinancials(row);
-      return { dateValue, purchased, partNumber, cost:financials.unitCost, qty:financials.qty, merchandiseSubtotal:financials.merchandiseSubtotal, shipping:financials.shipping, tax:financials.tax, total:financials.totalSpend };
+      return { dateValue, purchased, partNumber, poNumber:String(row?.poNumber ?? "").trim(), cost:financials.unitCost, qty:financials.qty, merchandiseSubtotal:financials.merchandiseSubtotal, shipping:financials.shipping, tax:financials.tax, total:financials.totalSpend };
     });
   };
   (Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks : []).forEach(weekEntry => {
@@ -19879,6 +20423,7 @@ function computeCostModel(){
         tax,
         total,
         merchandiseSubtotal,
+        poNumber:rawRow.poNumber,
         weekLabel,
         weekKey: key,
         rowIndex
@@ -19890,6 +20435,7 @@ function computeCostModel(){
     id: `spend_${idx}_${row.dateISO || "undated"}`,
     dateISO: row.dateISO || "—",
     purchased: row.purchased || "—",
+    poNumber: row.poNumber || "",
     weekLabel: row.weekLabel || "—",
     weekKey: row.weekKey || "",
     rowIndex: Number.isFinite(row.rowIndex) ? row.rowIndex : -1,
@@ -20546,6 +21092,115 @@ function setupCfr05InlinePreviewHydration(content){
   content.querySelectorAll("[data-cfr05-dxf-select]").forEach(select=>select.addEventListener("change",()=>{cfr05CloudPreviewSelection.set(String(select.dataset.cfr05DxfSelect||""),String(select.value||""));renderJobs();}));
 }
 
+function wireCuttingJobNetBreakdowns(content){
+  content.querySelectorAll("[data-job-net-toggle]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      const root = button.closest("[data-job-net-id]");
+      const details = root?.querySelector("[data-job-net-details]");
+      if (!details) return;
+      const expanded = button.getAttribute("aria-expanded") !== "true";
+      details.hidden = !expanded;
+      button.setAttribute("aria-expanded", String(expanded));
+      button.textContent = expanded ? "Collapse" : "Expand";
+      const id = root.getAttribute("data-job-net-id");
+      const ids = expandedCuttingJobNetIds();
+      if (expanded) ids.add(id); else ids.delete(id);
+    });
+  });
+}
+
+function showFailedCutDialog(jobId, trigger){
+  const job = (Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [])
+    .find(entry => String(entry?.id) === String(jobId));
+  if (!job){ toast("This completed cutting job is unavailable. Reload and try again."); return; }
+  const dialog = document.createElement("dialog");
+  dialog.className = "failed-cut-dialog";
+  dialog.setAttribute("data-failed-cut-dialog", "");
+  dialog.setAttribute("aria-labelledby", "failedCutTitle");
+  let selectedPercent = computeCuttingJobProfit(job).failurePercent;
+  dialog.innerHTML = `
+    <form data-failed-cut-form>
+      <h3 id="failedCutTitle">Failed Cut</h3>
+      <p>${escapeHtml(job.name || "Completed cutting job")}</p>
+      <label>Failure percentage (%)
+        <input type="number" min="0" max="100" step="1" required data-failed-cut-percent value="${Math.round(selectedPercent)}">
+      </label>
+      <label class="failed-cut-slider-label"><span class="sr-only">Failure percentage slider</span>
+        <input type="range" min="0" max="100" step="1" aria-label="Failure percentage slider" data-failed-cut-slider value="${Math.round(selectedPercent)}">
+      </label>
+      <div class="failed-cut-slider-scale" aria-hidden="true"><span>0%</span><span>100%</span></div>
+      <dl class="failed-cut-preview" aria-live="polite">
+        <dt>Failure percentage</dt><dd data-failure-preview="failurePercent"></dd>
+        <dt>Original revenue</dt><dd data-failure-preview="revenue"></dd>
+        <dt>Revenue remaining</dt><dd data-failure-preview="adjustedRevenue"></dd>
+        <dt>Full cutting expense</dt><dd data-failure-preview="cuttingCost"></dd>
+        <dt>Full material expense</dt><dd data-failure-preview="materialExpense"></dd>
+        <dt>Original net profit</dt><dd data-failure-preview="originalNetProfit"></dd>
+        <dt>Adjusted net profit</dt><dd data-failure-preview="totalProfit"></dd>
+        <dt>Revenue lost / potential profit reduction</dt><dd data-failure-preview="revenueLost"></dd>
+      </dl>
+      <p class="small muted">Revenue lost is the reduction in revenue. A negative adjusted net profit is an actual loss. Cutting and material expenses stay unchanged.</p>
+      <p data-failed-cut-status role="status"></p>
+      <div class="failed-cut-actions"><button type="button" data-failed-cut-cancel>Cancel</button><button type="submit" data-failed-cut-save>Save</button></div>
+    </form>`;
+  const form = dialog.querySelector("[data-failed-cut-form]");
+  const input = dialog.querySelector("[data-failed-cut-percent]");
+  const slider = dialog.querySelector("[data-failed-cut-slider]");
+  const save = dialog.querySelector("[data-failed-cut-save]");
+  const cancel = dialog.querySelector("[data-failed-cut-cancel]");
+  const status = dialog.querySelector("[data-failed-cut-status]");
+  let saving = false;
+  let saveBlocked = false;
+  // Keep saved precision for calculations until the user edits a control.
+  const percent = () => selectedPercent;
+  const validPercent = () => Number.isFinite(percent()) && percent() >= 0 && percent() <= 100;
+  const preview = () => {
+    const valid = validPercent();
+    save.disabled = saving || saveBlocked || !valid;
+    if (valid){ slider.value = String(Math.round(percent())); slider.setAttribute("aria-valuetext", `${Math.round(percent())}%`); }
+    status.textContent = valid ? "" : "Enter a percentage from 0 to 100.";
+    const profit = valid ? computeCuttingJobProfit(job, {failurePercent:percent()}) : null;
+    dialog.querySelectorAll("[data-failure-preview]").forEach(cell => {
+      const key = cell.getAttribute("data-failure-preview");
+      cell.textContent = profit ? formatCuttingJobFinancialValue(profit, key) : "—";
+      const tone = profit ? cuttingJobFinancialTone(key, profit[key]) : "job-finance-neutral";
+      ["positive", "negative", "neutral", "warning"].forEach(name => cell.classList.toggle(`job-finance-${name}`, tone === `job-finance-${name}`));
+      cell.classList.toggle("is-negative", key === "totalProfit" && profit?.totalProfit < 0);
+    });
+  };
+  const close = () => { if (saving) return; dialog.close(); dialog.remove(); trigger?.focus?.(); };
+  input.addEventListener("input", ()=>{
+    selectedPercent = input.value.trim() === "" ? NaN : Number(input.value);
+    if (validPercent()){ selectedPercent = Math.round(selectedPercent); input.value = String(selectedPercent); }
+    preview();
+  });
+  slider.addEventListener("input", ()=>{ selectedPercent = Number(slider.value); input.value = slider.value; preview(); });
+  cancel.addEventListener("click", close);
+  dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (saving || saveBlocked || !validPercent()) return;
+    saving = true; save.disabled = true; cancel.disabled = true; input.disabled = true; slider.disabled = true;
+    status.textContent = "Saving and verifying…";
+    let result;
+    try { result = await saveCuttingJobFailurePercent(job.id, percent()); }
+    catch (error) { result = {saved:false,requiresReload:true,error:`Save could not be confirmed. Reload before retrying. ${String(error?.message || error)}`}; }
+    saving = false;
+    if (!result?.saved || !result.verified || result.requiresReload){
+      const requiresReload = result?.requiresReload || result?.indeterminate;
+      saveBlocked = Boolean(requiresReload);
+      save.disabled = Boolean(requiresReload); input.disabled = Boolean(requiresReload); slider.disabled = Boolean(requiresReload); cancel.disabled = false;
+      status.textContent = result?.error || "Failure adjustment was not verified. Reload if the save outcome is unknown.";
+      return;
+    }
+    completedCuttingJobs = window.completedCuttingJobs;
+    close(); toast("Failed Cut adjustment saved"); renderJobs();
+  });
+  document.body.appendChild(dialog); preview(); dialog.showModal(); input.focus();
+  return dialog;
+}
+
 function renderJobs(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -20598,6 +21253,7 @@ function renderJobs(){
 
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
+  wireCuttingJobNetBreakdowns(content);
   setupJobLayout();
   hydrateVisibleCfr05CloudFiles(content);
   setupCfr05InlinePreviewHydration(content);
@@ -20630,7 +21286,7 @@ function renderJobs(){
   };
   queueAttachmentPreviewHydration();
 
-  const jobOverlapMessage = "Jobs might be overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
+  const jobOverlapMessage = "Jobs might be overlapping. Review the job dates and Hours Taken to check the cutting schedule.";
   const jobTableEl = content.querySelector(".job-table");
   const currentOverlapSignature = jobTableEl?.getAttribute("data-job-overlap-signature") || "";
   if (typeof window !== "undefined"){
@@ -20788,7 +21444,7 @@ function renderJobs(){
   const previewCardMarkup = (file)=>{ const preview=file?.preview; const fallbackImage = String(file?.previewUrl || file?.dataUrl || file?.url || ""); const canUseFallbackImage = /^data:image\//i.test(fallbackImage) || /^https?:\/\//i.test(fallbackImage); const imgSource = (preview?.mode === "image" && preview.content) ? preview.content : (canUseFallbackImage ? fallbackImage : ""); if (imgSource){ return `<div class="job-flow-preview"><img src="${escapeHtml(imgSource)}" alt="Preview of ${escapeHtml(file?.name || "file")}" loading="lazy"></div>`; } const fallback = preview?.content || "Preview unavailable"; return `<div class="job-flow-preview is-empty small muted">${escapeHtml(fallback)}</div>`; };
   const readFlowCollapsedCategories = ()=>{ const raw = Array.isArray(window.jobFlowCollapsedCategories) ? window.jobFlowCollapsedCategories : []; return new Set(raw.map(id => String(id))); };
   const writeFlowCollapsedCategories = (set)=>{ window.jobFlowCollapsedCategories = Array.from(set).map(id => String(id)); };
-  const renderFlowChart = ()=>{ if (!flowChart) return; const query = String(flowFilterInput?.value || "").trim().toLowerCase(); const grouping = String(flowGroupingSelect?.value || "categoryTree"); const hidePreviews = Boolean(flowHidePreviews?.checked); const jobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : []; const completed = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []; const list = jobs.concat(completed).filter(Boolean); const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"; const folders = Array.isArray(window.jobFolders)&&window.jobFolders.length ? window.jobFolders.slice() : [{ id: rootId, name: "All Jobs", parent: null, order: 1 }]; if (!folders.some(folder => String(folder?.id) === String(rootId))) folders.push({ id: rootId, name: "All Jobs", parent: null, order: 1 }); const folderMap = new Map(folders.map(folder => [String(folder.id), folder])); const normalizeCategory=(cat)=>{ const key = cat != null ? String(cat) : rootId; return folderMap.has(key)?key:rootId; }; const projectNumberForJob=(job)=>{ const direct = normalizeProjectNumber(job?.projectNumber); if (direct) return direct; const folderName = folderMap.get(normalizeCategory(job?.cat))?.name || ""; return categoryProjectNumber(folderName) || "0000"; }; const childrenOf=(parentId)=>{ const key=parentId==null?null:String(parentId); return folders.filter(folder => (folder.parent==null?null:String(folder.parent))===key).sort((a,b)=>String(a?.name||"").localeCompare(String(b?.name||""))); }; const categoryOrder=[]; const walkCategory=(id)=>{ const key=String(id); categoryOrder.push(key); childrenOf(key).forEach(child=>walkCategory(child.id)); }; walkCategory(rootId); const categoryCutMap=new Map(categoryOrder.map((id,idx)=>[id,`CAT-${String(idx+1).padStart(3,"0")}`])); const categoryCutLabel=(catId)=>categoryCutMap.get(String(catId||rootId))||"CAT-000"; const filtered=list.filter(job=>{ const project=projectNumberForJob(job); const material=String(job?.material||""); const est=Number(job?.estimateHours); const dateTokens=[job?.startISO,job?.dueISO,job?.completedAtISO].filter(Boolean).join(" "); const fileNames=(Array.isArray(job?.files)?job.files:[]).map(file=>file?.name||"").join(" "); const token=`${project} ${job?.name||""} ${material} ${Number.isFinite(est)?est:""} ${dateTokens} ${fileNames}`.toLowerCase(); return !query || token.includes(query); }); const jobCategoryCutMap=window.CuttingJobDateEditing?.categoryNumbers(jobs,completed)||new Map(); const jobCutLabel=(job)=>window.CuttingJobChronology?.readCutLabel(job)??"—"; const jobCategoryCutLabel=(job)=>jobCategoryCutMap.get(String(job?.id||""))||"0"; const renderJobCard=(job)=>{ const files=Array.isArray(job?.files)?job.files:[]; const fileList=files.length?files.map(file=>`<li><span class="job-flow-file-name">${escapeHtml(file?.name || "Attachment")}</span>${hidePreviews?"":previewCardMarkup(file)}</li>`).join(""):'<li class="small job-flow-empty">No attached files</li>'; const style=categoryStyleAttr(normalizeCategory(job?.cat), folderMap, rootId); return `<article class="job-flow-job-card"${style}><header><div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")} · ${escapeHtml(jobCutLabel(job))} · ${escapeHtml(jobCategoryCutLabel(job))}</div><div class="small job-flow-meta">Project #${escapeHtml(projectNumberForJob(job))}</div><div class="small job-flow-meta">Material: ${escapeHtml(job?.material || "—")}</div><div class="small job-flow-meta">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div><div class="small job-flow-meta">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div></header><ul class="job-flow-file-list">${fileList}</ul></article>`; }; let html=""; if (grouping==="categoryTree"){ const byCategory=new Map(); filtered.forEach(job=>{ const cat=normalizeCategory(job?.cat); if (!byCategory.has(cat)) byCategory.set(cat,[]); byCategory.get(cat).push(job); }); const hasDescendantJobs=(categoryId)=>{ const key=String(categoryId); if ((byCategory.get(key)||[]).length>0) return true; return childrenOf(key).some(child=>hasDescendantJobs(String(child.id))); }; const collapsedSet=readFlowCollapsedCategories(); const renderCategoryNode=(categoryId, depth=0)=>{ const key=String(categoryId); if (!hasDescendantJobs(key)) return ""; const folder=folderMap.get(key)||{id:key,name:"Category"}; const projects=new Map(); (byCategory.get(key)||[]).forEach(job=>{ const project=projectNumberForJob(job); if (!projects.has(project)) projects.set(project,[]); projects.get(project).push(job); }); const projectMarkup=Array.from(projects.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([project, projectJobs])=>`<section class="job-flow-project-group"><h6>Project ${escapeHtml(project)}</h6><div class="job-flow-group-grid">${projectJobs.map(renderJobCard).join("")}</div></section>`).join(""); const childMarkup=childrenOf(key).map(child=>renderCategoryNode(String(child.id), depth+1)).join(""); const style=categoryStyleAttr(key, folderMap, rootId); const collapsed=collapsedSet.has(key); return `<div class="job-flow-tree-node" data-depth="${depth}"><div class="job-flow-tree-title-row"><button type="button" class="job-flow-tree-title job-flow-tree-title-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed?"false":"true"}"${style}>${escapeHtml(folder?.name || "Category")} · ${escapeHtml(categoryProjectNumber(folder?.name) || "----")} · ${escapeHtml(categoryCutLabel(key))}</button></div><div class="job-flow-tree-body${collapsed ? " is-collapsed" : ""}">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div></div>`; }; html=`<section class="job-flow-group"><h5>Category tree</h5>${renderCategoryNode(rootId)}</section>`; } else { const groups=new Map(); filtered.forEach(job=>{ const key=grouping==="job"?String(job?.name||"Untitled job"):projectNumberForJob(job); if (!groups.has(key)) groups.set(key,[]); groups.get(key).push(job); }); html=Array.from(groups.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([key,groupJobs])=>`<section class="job-flow-group"><h5>${escapeHtml(grouping==="job"?"Job":"Project")} ${escapeHtml(key)}</h5><div class="job-flow-group-grid">${groupJobs.map(renderJobCard).join("")}</div></section>`).join(""); } flowChart.innerHTML = html || '<p class="small job-flow-empty">No projects match this filter.</p>'; if (flowChart) flowChart.classList.toggle("hide-previews", hidePreviews); };
+  const renderFlowChart = ()=>{ if (!flowChart) return; const query = String(flowFilterInput?.value || "").trim().toLowerCase(); const grouping = String(flowGroupingSelect?.value || "categoryTree"); const hidePreviews = Boolean(flowHidePreviews?.checked); const jobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : []; const completed = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []; const list = jobs.concat(completed).filter(Boolean); const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"; const folders = Array.isArray(window.jobFolders)&&window.jobFolders.length ? window.jobFolders.slice() : [{ id: rootId, name: "All Jobs", parent: null, order: 1 }]; if (!folders.some(folder => String(folder?.id) === String(rootId))) folders.push({ id: rootId, name: "All Jobs", parent: null, order: 1 }); const folderMap = new Map(folders.map(folder => [String(folder.id), folder])); const normalizeCategory=(cat)=>{ const key = cat != null ? String(cat) : rootId; return folderMap.has(key)?key:rootId; }; const projectNumberForJob=(job)=>{ const direct = normalizeProjectNumber(job?.projectNumber); if (direct) return direct; const folderName = folderMap.get(normalizeCategory(job?.cat))?.name || ""; return categoryProjectNumber(folderName) || "0000"; }; const childrenOf=(parentId)=>{ const key=parentId==null?null:String(parentId); return folders.filter(folder => (folder.parent==null?null:String(folder.parent))===key).sort((a,b)=>String(a?.name||"").localeCompare(String(b?.name||""))); }; const categoryOrder=[]; const walkCategory=(id)=>{ const key=String(id); categoryOrder.push(key); childrenOf(key).forEach(child=>walkCategory(child.id)); }; walkCategory(rootId); const categoryCutMap=new Map(categoryOrder.map((id,idx)=>[id,`CAT-${String(idx+1).padStart(3,"0")}`])); const categoryCutLabel=(catId)=>categoryCutMap.get(String(catId||rootId))||"CAT-000"; const filtered=list.filter(job=>{ const project=projectNumberForJob(job); const material=String(job?.material||""); const est=Number(job?.estimateHours); const dateTokens=[job?.startISO,job?.dueISO,job?.completedAtISO].filter(Boolean).join(" "); const fileNames=(Array.isArray(job?.files)?job.files:[]).map(file=>file?.name||"").join(" "); const token=`${project} ${job?.name||""} ${material} ${Number.isFinite(est)?est:""} ${dateTokens} ${fileNames}`.toLowerCase(); return !query || token.includes(query); }); const jobCategoryCutMap=window.CuttingJobDateEditing?.categoryNumbers(jobs,completed)||new Map(); const jobCutLabel=(job)=>window.CuttingJobChronology?.readCutLabel(job)??"—"; const jobCategoryCutLabel=(job)=>jobCategoryCutMap.get(String(job?.id||""))||"0"; const renderJobCard=(job)=>{ const files=Array.isArray(job?.files)?job.files:[]; const fileList=files.length?files.map(file=>`<li><span class="job-flow-file-name">${escapeHtml(file?.name || "Attachment")}</span>${hidePreviews?"":previewCardMarkup(file)}</li>`).join(""):'<li class="small job-flow-empty">No attached files</li>'; const style=categoryStyleAttr(normalizeCategory(job?.cat), folderMap, rootId); return `<article class="job-flow-job-card"${style}><header><div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")} · ${escapeHtml(jobCutLabel(job))} · ${escapeHtml(jobCategoryCutLabel(job))}</div><div class="small job-flow-meta">Project #${escapeHtml(projectNumberForJob(job))}</div><div class="small job-flow-meta">Material: ${escapeHtml(job?.material || "—")}</div><div class="small job-flow-meta">Hours Taken: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div><div class="small job-flow-meta">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div></header><ul class="job-flow-file-list">${fileList}</ul></article>`; }; let html=""; if (grouping==="categoryTree"){ const byCategory=new Map(); filtered.forEach(job=>{ const cat=normalizeCategory(job?.cat); if (!byCategory.has(cat)) byCategory.set(cat,[]); byCategory.get(cat).push(job); }); const hasDescendantJobs=(categoryId)=>{ const key=String(categoryId); if ((byCategory.get(key)||[]).length>0) return true; return childrenOf(key).some(child=>hasDescendantJobs(String(child.id))); }; const collapsedSet=readFlowCollapsedCategories(); const renderCategoryNode=(categoryId, depth=0)=>{ const key=String(categoryId); if (!hasDescendantJobs(key)) return ""; const folder=folderMap.get(key)||{id:key,name:"Category"}; const projects=new Map(); (byCategory.get(key)||[]).forEach(job=>{ const project=projectNumberForJob(job); if (!projects.has(project)) projects.set(project,[]); projects.get(project).push(job); }); const projectMarkup=Array.from(projects.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([project, projectJobs])=>`<section class="job-flow-project-group"><h6>Project ${escapeHtml(project)}</h6><div class="job-flow-group-grid">${projectJobs.map(renderJobCard).join("")}</div></section>`).join(""); const childMarkup=childrenOf(key).map(child=>renderCategoryNode(String(child.id), depth+1)).join(""); const style=categoryStyleAttr(key, folderMap, rootId); const collapsed=collapsedSet.has(key); return `<div class="job-flow-tree-node" data-depth="${depth}"><div class="job-flow-tree-title-row"><button type="button" class="job-flow-tree-title job-flow-tree-title-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed?"false":"true"}"${style}>${escapeHtml(folder?.name || "Category")} · ${escapeHtml(categoryProjectNumber(folder?.name) || "----")} · ${escapeHtml(categoryCutLabel(key))}</button></div><div class="job-flow-tree-body${collapsed ? " is-collapsed" : ""}">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div></div>`; }; html=`<section class="job-flow-group"><h5>Category tree</h5>${renderCategoryNode(rootId)}</section>`; } else { const groups=new Map(); filtered.forEach(job=>{ const key=grouping==="job"?String(job?.name||"Untitled job"):projectNumberForJob(job); if (!groups.has(key)) groups.set(key,[]); groups.get(key).push(job); }); html=Array.from(groups.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([key,groupJobs])=>`<section class="job-flow-group"><h5>${escapeHtml(grouping==="job"?"Job":"Project")} ${escapeHtml(key)}</h5><div class="job-flow-group-grid">${groupJobs.map(renderJobCard).join("")}</div></section>`).join(""); } flowChart.innerHTML = html || '<p class="small job-flow-empty">No projects match this filter.</p>'; if (flowChart) flowChart.classList.toggle("hide-previews", hidePreviews); };
   const noteTextarea = content.querySelector("#jobNoteModalInput");
   const noteJobLabel = content.querySelector("#jobNoteModalJob");
   const noteHistory = content.querySelector("#jobNoteModalHistory");
@@ -20797,6 +21453,8 @@ function renderJobs(){
   const noteCancelBtns = content.querySelectorAll("[data-note-cancel]");
   const escapeHtml = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   let activeNoteJobId = null;
+  let noteSaveInFlight = false;
+  let noteSaveRequiresReload = false;
   let lastNoteTrigger = null;
   let lastNoteTriggerSelector = "";
   let openFileMenuId = null;
@@ -21132,6 +21790,7 @@ function renderJobs(){
   };
 
   const openJobNoteModal = (jobId, { appendBlank = false, trigger = null } = {})=>{
+    if (noteSaveInFlight) return;
     if (!noteBackdrop || !noteTextarea) return;
     const id = jobId != null ? String(jobId) : "";
     if (!id) return;
@@ -21147,12 +21806,13 @@ function renderJobs(){
     renderNoteHistory(normalized);
     noteBackdrop.hidden = false;
     noteBackdrop.classList.add("open");
+    noteBackdrop.querySelector(".job-note-modal")?.scrollTo(0, 0);
     const resolvedTrigger = trigger || content.querySelector(`[data-job-note="${id}"]`);
     lastNoteTrigger = resolvedTrigger || null;
     lastNoteTriggerSelector = `[data-job-note="${id}"]`;
     requestAnimationFrame(()=>{
       try {
-        noteTextarea.focus();
+        noteTextarea.focus({ preventScroll: true });
         const len = noteTextarea.value.length;
         noteTextarea.setSelectionRange(len, len);
       } catch (_err) { }
@@ -21287,6 +21947,7 @@ function renderJobs(){
   }
 
   const closeJobNoteModal = ()=>{
+    if (noteSaveInFlight) return;
     if (!noteBackdrop) return;
     noteBackdrop.classList.remove("open");
     noteBackdrop.hidden = true;
@@ -21302,26 +21963,44 @@ function renderJobs(){
     lastNoteTriggerSelector = "";
   };
 
-  const handleJobNoteSave = ({ keepOpen = false, prepareNew = false } = {})=>{
-    if (!activeNoteJobId || !noteTextarea) return;
-    const { job, source } = findJobRecord(activeNoteJobId);
+  const handleJobNoteSave = async ({ keepOpen = false, prepareNew = false } = {})=>{
+    if (!activeNoteJobId || !noteTextarea || noteSaveInFlight || noteSaveRequiresReload) return;
+    const id = activeNoteJobId;
+    const { job } = findJobRecord(id);
     if (!job) return;
     const raw = typeof noteTextarea.value === "string" ? noteTextarea.value : "";
     const normalized = raw.replace(/\s+$/, "");
-    job.notes = normalized;
-    if (source === "history"){
-      window.completedCuttingJobs = completedCuttingJobs;
-    } else {
-      window.cuttingJobs = cuttingJobs;
+    noteSaveInFlight = true;
+    const controls = [noteSaveBtn, noteSaveNewBtn, ...noteCancelBtns].filter(Boolean);
+    controls.forEach(control=>{ control.disabled = true; });
+    noteTextarea.readOnly = true;
+    noteBackdrop.setAttribute("aria-busy", "true");
+    try {
+      const result = await saveCuttingJobEdit(id, { notes: normalized });
+      noteSaveRequiresReload = result?.requiresReload === true || result?.indeterminate === true;
+      if (!result?.saved || !result?.verified || noteSaveRequiresReload){
+        toast(result?.error || "Note save was not confirmed. Keep this draft and reload if verification is required.");
+        return result;
+      }
+      cuttingJobs = window.cuttingJobs;
+      completedCuttingJobs = window.completedCuttingJobs;
+    } catch (error){
+      noteSaveRequiresReload = true;
+      toast(`Note save could not be confirmed. Keep this draft and reload before retrying. ${error?.message || error}`);
+      return;
+    } finally {
+      noteSaveInFlight = false;
+      controls.forEach(control=>{ control.disabled = noteSaveRequiresReload && (control === noteSaveBtn || control === noteSaveNewBtn); });
+      noteTextarea.readOnly = false;
+      noteBackdrop.removeAttribute("aria-busy");
     }
-    saveCloudDebounced();
     toast("Notes updated");
     if (keepOpen){
-      window.__pendingJobNoteModal = { jobId: String(job.id), appendBlank: !!prepareNew };
+      window.__pendingJobNoteModal = { jobId: id, appendBlank: !!prepareNew };
       window.__pendingJobNoteReturn = "";
     } else {
       window.__pendingJobNoteModal = null;
-      window.__pendingJobNoteReturn = String(job.id);
+      window.__pendingJobNoteReturn = id;
     }
     renderJobs();
   };
@@ -21804,12 +22483,19 @@ function renderJobs(){
   const secureCloudFilesBtn = document.getElementById("jobSecureCloudFilesBtn");
   secureCloudFilesBtn?.addEventListener("click", ()=>secureCloudFilesInput?.click());
   secureCloudFilesInput?.addEventListener("change", ()=>{
-    const accepted = [];
+    if (window.pendingNewJobSave || !secureCloudFilesInput.files?.length) return;
+    syncAddJobDraftFromForm();
+    const accepted = pendingSecureCloudJobFiles.slice();
     for (const file of Array.from(secureCloudFilesInput.files || [])){
       const validation = window.cfr05CloudCuttingFiles?.validateLocalFile(file);
-      if (validation?.valid) accepted.push({ file, name:file.name, size:file.size, pending:true });
+      if (validation?.valid){
+        if (!accepted.some(entry=>entry.file.name === file.name && entry.file.size === file.size && entry.file.lastModified === file.lastModified)){
+          accepted.push({ file, name:file.name, size:file.size, pending:true });
+        }
+      }
       else toast(`${file.name}: not accepted (${(validation?.reasons || ["invalid file"]).join(", ")}).`);
     }
+    if (accepted.length > 10) toast("Select at most 10 files per new job.");
     pendingSecureCloudJobFiles.splice(0, pendingSecureCloudJobFiles.length, ...accepted.slice(0, 10));
     secureCloudFilesInput.value = "";
     toast(accepted.length
@@ -22644,7 +23330,11 @@ function renderJobs(){
   const updateJobCategoryHint = ()=>{
     if (!jobCategoryHint) return;
     const current = jobCategorySelect ? String(jobCategorySelect.value || "") : "";
-    jobCategoryHint.hidden = !!current && current !== jobRootCategoryId;
+    const pair = window.CuttingJobHistory.resolveCategoryProject(current, window.jobFolders || [],
+      [...(window.cuttingJobs || []), ...(window.completedCuttingJobs || [])]);
+    jobCategoryHint.hidden = pair.ok;
+    jobCategoryHint.textContent = pair.ok ? "" : newCuttingJobCategoryMessage(current, pair.reason);
+    jobCategorySelect?.setAttribute("aria-invalid", pair.ok ? "false" : "true");
   };
   if (jobCategorySelect){
     jobCategorySelect.dataset.prevValue = jobCategorySelect.value;
@@ -22673,6 +23363,7 @@ function renderJobs(){
       updateJobCategoryHint();
       syncManualJobProjectControl(select, document.getElementById("jobProjectNumber"));
       syncAddJobDraftFromForm();
+      if (window.jobAddFeedback?.state === "category") setNewCuttingJobFeedback("", "status");
     });
   }
 
@@ -22979,6 +23670,7 @@ function renderJobs(){
     window.jobAddDraft = {
       name: getVal("jobName"),
       estimate: getVal("jobEst"),
+      estimateMinutes: getVal("jobEstMinutes"),
       priority: getVal("jobPriority"),
       charge: getVal("jobCharge"),
       costRate: getVal("jobCostRate"),
@@ -23095,6 +23787,12 @@ function renderJobs(){
   }
   addJobForm?.addEventListener("input", syncAddJobDraftFromForm);
   addJobForm?.addEventListener("change", syncAddJobDraftFromForm);
+  // Native constraint validation runs before submit; make those rejections visible too.
+  addJobForm?.addEventListener("invalid", (event)=>{
+    const field = event.target;
+    const label = field.labels?.[0]?.textContent?.trim() || field.id || "a required field";
+    setNewCuttingJobFeedback(`Cannot add job: correct ${label}. ${field.validationMessage || "Enter a valid value."}`);
+  }, true);
   addJobForm?.addEventListener("input", (e)=>{
     if (["jobMaterial", "jobMaterialThickness", "jobMaterialLengthFt", "jobMaterialWidthFt"].includes(e.target?.id)) recalcMaterialTotals();
   });
@@ -23172,108 +23870,120 @@ function renderJobs(){
   });
   refreshEstimateBreakdown(addJobEstHoursInput, addJobEstBreakdown);
 
+  syncNewCuttingJobSaveControls();
   document.getElementById("addJobForm")?.addEventListener("submit",async (e)=>{
     e.preventDefault();
-    if(typeof createCuttingJob!=="function"){toast("Cutting-job saving is unavailable.");return {blocked:true};}
+    try {
+      if(typeof createCuttingJob!=="function"){setNewCuttingJobFeedback("Cutting-job saving is unavailable.");return {blocked:true};}
 
-    recalcMaterialTotals();
-    if (typeof e.currentTarget?.reportValidity === "function" && !e.currentTarget.reportValidity()) return;
-    const name  = document.getElementById("jobName").value.trim();
-    const estMinutesInput = document.getElementById("jobEstMinutes");
-    applyMinutesToHours(addJobEstHoursInput, estMinutesInput, addJobEstBreakdown);
-    const est = Number(addJobEstHoursInput?.value);
-    const material = document.getElementById("jobMaterial")?.value.trim() || "";
-    const chargeRaw = document.getElementById("jobCharge")?.value ?? "";
-    const costRateRaw = document.getElementById("jobCostRate")?.value ?? "";
-    const materialCostRaw = document.getElementById("jobMaterialCost")?.value ?? "";
-    const materialQtyRaw = document.getElementById("jobMaterialQty")?.textContent ?? "";
-    const start = document.getElementById("jobStart").value;
-    const due   = document.getElementById("jobDue").value;
-    const projectNumberRaw = document.getElementById("jobProjectNumber")?.value ?? "";
-    const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
-    const priorityNum = Number(priorityRaw);
-    const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
-    const categorySelect = document.getElementById("jobCategory");
-    let categoryId = categorySelect?.value || "";
-    const previousCategoryFilter = typeof window.jobCategoryFilter === "string" && window.jobCategoryFilter
-      ? window.jobCategoryFilter
-      : jobRootCategoryId;
-    let materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
-    const materialWeight = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
-    const materialQty = 1;
-    const chargeRate = chargeRaw === "" ? 200 : Number(chargeRaw);
-    const costRate = costRateRaw === "" ? 45 : Number(costRateRaw);
-    if (!name || !isFinite(est) || est<=0 || !start || !due){ toast("Fill job fields."); return; }
-    if (!Number.isFinite(materialCost) || materialCost < 0){
-      materialCost = 0;
-    }
-    if (!Number.isFinite(materialWeight) || materialWeight < 0){ toast("Enter a valid material quantity."); return; }
-    if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
-    if (!Number.isFinite(costRate) || costRate < 0){ toast("Enter a valid cost rate."); return; }
-    if (materialCost <= 0 && materialWeight > 0){
-      const selectedMaterial = materialSettings.materials.find(m => m.name === material);
-      const pricePerLb = Number(selectedMaterial?.pricePerLb || 0);
-      if (Number.isFinite(pricePerLb) && pricePerLb > 0){
-        materialCost = Number((materialWeight * pricePerLb).toFixed(2));
+      if (window.pendingNewJobSave?.busy){ setNewCuttingJobFeedback("Saving this cutting job. Please wait.", "saving"); return; }
+      let newJob = window.pendingNewJobSave?.job;
+      if (!newJob){
+        recalcMaterialTotals();
+        if (typeof e.currentTarget?.reportValidity === "function" && !e.currentTarget.reportValidity()){
+          setNewCuttingJobFeedback("Cannot add job: correct the highlighted required or invalid fields, then try again."); return;
+        }
+        const name  = document.getElementById("jobName").value.trim();
+        const estMinutesInput = document.getElementById("jobEstMinutes");
+        applyMinutesToHours(addJobEstHoursInput, estMinutesInput, addJobEstBreakdown);
+        const est = Number(addJobEstHoursInput?.value);
+        const material = document.getElementById("jobMaterial")?.value.trim() || "";
+        const chargeRaw = document.getElementById("jobCharge")?.value ?? "";
+        const costRateRaw = document.getElementById("jobCostRate")?.value ?? "";
+        const materialCostRaw = document.getElementById("jobMaterialCost")?.value ?? "";
+        const materialQtyRaw = document.getElementById("jobMaterialQty")?.textContent ?? "";
+        const start = document.getElementById("jobStart").value;
+        const due   = document.getElementById("jobDue").value;
+        const projectNumberRaw = document.getElementById("jobProjectNumber")?.value ?? "";
+        const priorityRaw = document.getElementById("jobPriority")?.value ?? "1";
+        const priorityNum = Number(priorityRaw);
+        const priority = Number.isFinite(priorityNum) && priorityNum > 0 ? Math.max(1, Math.floor(priorityNum)) : 1;
+        const categorySelect = document.getElementById("jobCategory");
+        let categoryId = categorySelect?.value || "";
+        let materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
+        const materialWeight = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
+        const materialQty = 1;
+        const chargeRate = chargeRaw === "" ? 200 : Number(chargeRaw);
+        const costRate = costRateRaw === "" ? 45 : Number(costRateRaw);
+        if (!name || !isFinite(est) || est<=0 || !start || !due){ setNewCuttingJobFeedback("Fill job fields."); return; }
+        if (!Number.isFinite(materialCost) || materialCost < 0){
+          materialCost = 0;
+        }
+        if (!Number.isFinite(materialWeight) || materialWeight < 0){ setNewCuttingJobFeedback("Enter a valid material quantity."); return; }
+        if (!Number.isFinite(chargeRate) || chargeRate < 0){ setNewCuttingJobFeedback("Enter a valid charge rate."); return; }
+        if (!Number.isFinite(costRate)){ setNewCuttingJobFeedback("Enter a valid cost rate."); return; }
+        if (materialCost <= 0 && materialWeight > 0){
+          const selectedMaterial = materialSettings.materials.find(m => m.name === material);
+          const pricePerLb = Number(selectedMaterial?.pricePerLb || 0);
+          if (Number.isFinite(pricePerLb) && pricePerLb > 0){
+            materialCost = Number((materialWeight * pricePerLb).toFixed(2));
+          }
+        }
+        if (!categoryId){ setNewCuttingJobFeedback("Choose a category."); return; }
+        if (categoryId === "__new__"){
+          const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
+          const folder = await promptCreateCategory(parent);
+          if (!folder){ setNewCuttingJobFeedback("Category not created."); return; }
+          categoryId = String(folder.id);
+          selectManualJobCategory(categorySelect, folder);
+          syncManualJobProjectControl(categorySelect, document.getElementById("jobProjectNumber"));
+          ensureJobCategoryFolderOpen(categoryId);
+        }
+        const pair = validateManualJobProjectCategory(categoryId, document.getElementById("jobProjectNumber")?.value ?? projectNumberRaw);
+        if (!pair.ok){
+          setNewCuttingJobFeedback(newCuttingJobCategoryMessage(categoryId, pair.reason), "category");
+          categorySelect?.focus?.();
+          return pair;
+        }
+        const projectNumber = pair.projectNumber;
+        const attachments = pendingNewJobFiles.map(f=>({ ...f }));
+        const thickness = fractionToNumber(document.getElementById("jobMaterialThickness")?.value);
+        const lengthText = document.getElementById("jobMaterialLengthFt")?.value || "";
+        const widthText = document.getElementById("jobMaterialWidthFt")?.value || "";
+        const pathLength = lengthText.trim() ? window.CuttingJobDimensions.readInput(document.getElementById("jobMaterialLengthFt")) : 0;
+        const pathWidth = widthText.trim() ? window.CuttingJobDimensions.readInput(document.getElementById("jobMaterialWidthFt")) : 0;
+        if (![pathLength, pathWidth].every(value => Number.isFinite(value) && value >= 0)){
+          setNewCuttingJobFeedback("Enter valid dimensions in feet, using decimals or fractions."); return;
+        }
+        newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material,
+          thickness, pathLength, pathWidth, materialCost, materialQty, materialWeight, materialCostComplete:materialCostRaw !== "",
+          chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: pair.cat };
       }
-    }
-    if (!categoryId){ toast("Choose a category."); return; }
-    if (categoryId === "__new__"){
-      const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
-      const folder = await promptCreateCategory(parent);
-      if (!folder){ toast("Category not created."); return; }
-      categoryId = String(folder.id);
-      selectManualJobCategory(categorySelect, folder);
-      syncManualJobProjectControl(categorySelect, document.getElementById("jobProjectNumber"));
-      ensureJobCategoryFolderOpen(categoryId);
-    }
-    const pair = validateManualJobProjectCategory(categoryId, document.getElementById("jobProjectNumber")?.value ?? projectNumberRaw);
-    if (!pair.ok) return;
-    const projectNumber = pair.projectNumber;
-    const attachments = pendingNewJobFiles.map(f=>({ ...f }));
-    const pendingCloudFiles = pendingSecureCloudJobFiles.map(entry=>entry?.file).filter(file=>file && typeof file.arrayBuffer === "function");
-    const thickness = fractionToNumber(document.getElementById("jobMaterialThickness")?.value);
-    const lengthText = document.getElementById("jobMaterialLengthFt")?.value || "";
-    const widthText = document.getElementById("jobMaterialWidthFt")?.value || "";
-    const pathLength = lengthText.trim() ? window.CuttingJobDimensions.readInput(document.getElementById("jobMaterialLengthFt")) : 0;
-    const pathWidth = widthText.trim() ? window.CuttingJobDimensions.readInput(document.getElementById("jobMaterialWidthFt")) : 0;
-    if (![pathLength, pathWidth].every(value => Number.isFinite(value) && value >= 0)){
-      toast("Enter valid dimensions in feet, using decimals or fractions."); return;
-    }
-    const newJob = { id: genId(name), name, estimateHours:est, startISO:start, dueISO:due, projectNumber, material,
-      thickness, pathLength, pathWidth, materialCost, materialQty, materialWeight, materialCostComplete:materialCostRaw !== "",
-      chargeRate, costRate, priority, notes:"", manualLogs:[], files:attachments, cat: pair.cat };
-    const created=await createCuttingJob(newJob);
-    if(!created.saved||!created.verified||created.requiresReload){toast(created.error||"Job was not saved.");return created;}
-    cuttingJobs=window.cuttingJobs;completedCuttingJobs=window.completedCuttingJobs;
-    window.jobCategoryFilter = previousCategoryFilter;
-    if (!pendingCloudFiles.length){
-      pendingNewJobFiles.length = 0;
-      window.jobAddDraft = {};
-      toast("Cutting job added");
+      syncAddJobDraftFromForm();
+      setNewCuttingJobFeedback(window.pendingNewJobSave?.verified ? "Saving pending attachments for this job…" : "Saving cutting job and verifying Firebase…", "saving");
+      const saving = persistNewCuttingJobWithAttachments(newJob);
+      syncNewCuttingJobSaveControls();
+      const result = await saving;
+      syncNewCuttingJobSaveControls();
+      if (result.busy){ setNewCuttingJobFeedback("Saving this cutting job. Please wait.", "saving"); return; }
+      if (result.complete || window.pendingNewJobSave?.verified){
+        window.jobCategoryFilter = newJob.cat;
+        ensureJobCategoryFolderOpen(newJob.cat);
+      }
+      if (!result.complete){
+        if (result.failures?.length){
+          const first = result.failures[0];
+          const review = result.failures.some(entry=>entry.manualReviewRequired);
+          setNewCuttingJobFeedback(`Job created, but attachment failed at ${first.outcome.stage}: ${first.outcome.error?.message || "Unknown error"}. ${review ? "Manual inspection required; do not re-upload uncertain files." : "Retry pending attachments to continue with this saved job."}`);
+          content.dataset.cfr05LastResult = JSON.stringify({ jobId:result.jobId, created:true,
+            attachmentFailures:result.failures.map(entry=>({ name:entry.name, ...entry.outcome })) });
+          renderCalendarPreservingScroll();
+          renderJobs();
+        } else setNewCuttingJobFeedback(result.requiresReload
+          ? `${result.error || "Job save could not be verified."} Refresh and verify the server save before retrying. Your form and selected files are preserved.`
+          : result.error || "Job was not saved. Your form and selected files are preserved.");
+        return result;
+      }
+      cuttingJobs=window.cuttingJobs;completedCuttingJobs=window.completedCuttingJobs;
+      setNewCuttingJobFeedback(result.listingFailed ? "Upload succeeded; Cloud Files refresh failed. Do not upload the file again."
+        : result.fileCount ? `Job created and ${result.fileCount} cloud file${result.fileCount === 1 ? "" : "s"} verified.` : "Cutting job added", "success");
       renderCalendarPreservingScroll();
       renderJobs();
-      return;
+    } catch (error){
+      setNewCuttingJobFeedback(`Add Job could not finish: ${error.message || error}. Check the save status before retrying.`);
+    } finally {
+      syncNewCuttingJobSaveControls();
     }
-    pendingNewJobFiles.length = 0;
-    window.jobAddDraft = {};
-    const attachmentFailures = [];
-    for (const file of pendingCloudFiles){
-      const outcome = await window.uploadCfr05CuttingFile(newJob.id, file, stage=>toast(`${file.name}: ${stage.replaceAll("_", " ")}`));
-      if (outcome.stage !== "completed") attachmentFailures.push({ name:file.name, stage:outcome.stage, error:outcome.error, indeterminate:outcome.indeterminate, possibleOrphanPath:outcome.possibleOrphanPath });
-    }
-    pendingSecureCloudJobFiles.length = 0;
-    try { await refreshCfr05CloudPresentation(newJob.id,{force:true}); }
-    catch (_) { /* the job remains saved; presentation hydration can retry on the next page load */ }
-    if (attachmentFailures.length){
-      const first = attachmentFailures[0];
-      toast(`Job created, but ${attachmentFailures.length} cloud file upload${attachmentFailures.length === 1 ? "" : "s"} failed at ${first.stage}${first.indeterminate ? " (indeterminate; do not retry automatically)" : ""}.`);
-      content.dataset.cfr05LastResult = JSON.stringify({ jobId:newJob.id, created:true, attachmentFailures:attachmentFailures.slice(0, 10) });
-    } else {
-      toast(`Job created and ${pendingCloudFiles.length} cloud file${pendingCloudFiles.length === 1 ? "" : "s"} verified.`);
-    }
-    renderCalendarPreservingScroll();
-    renderJobs();
   });
 
   // 5) Inline material $/qty (kept)
@@ -23365,7 +24075,7 @@ function renderJobs(){
   });
 
   const historyBody = content.querySelector(".past-jobs-table tbody");
-  
+
   historyBody?.addEventListener("change", (e)=>{
     const previewSelect = e.target instanceof Element
       ? e.target.closest("select[data-file-preview-select]")
@@ -23760,6 +24470,8 @@ function renderJobs(){
   }
 
   historyBody?.addEventListener("click", async (e)=>{
+    const failedCut = e.target.closest("[data-history-failed-cut]");
+    if (failedCut){ e.preventDefault(); const trigger = failedCut.closest(".job-actions")?.querySelector("[data-history-actions-toggle]") || failedCut; closeHistoryActionMenu(); showFailedCutDialog(failedCut.getAttribute("data-history-failed-cut"), trigger); return; }
     if (await handleCuttingJobFileActionClick(e)) return;
     const historyActionTrigger = e.target.closest("[data-history-actions-toggle]");
     if (historyActionTrigger){
@@ -23933,7 +24645,7 @@ function renderJobs(){
             chargeRate: Number.isFinite(Number(entry.chargeRate)) && Number(entry.chargeRate) >= 0
               ? Number(entry.chargeRate)
               : JOB_RATE_PER_HOUR,
-            costRate: Number.isFinite(Number(entry.costRate)) && Number(entry.costRate) >= 0
+            costRate: Number.isFinite(Number(entry.costRate))
               ? Number(entry.costRate) : JOB_BASE_COST_PER_HOUR,
             priority: typeof getJobPriority === "function"
               ? getJobPriority(entry)
@@ -24009,7 +24721,6 @@ function renderJobs(){
       if (!pair.ok) return;
       const nameInput = field("name");
       const estimateInput = field("estimateHours");
-      const actualInput = field("actualHours");
       const materialInput = field("material");
       const materialCostInput = field("materialCost");
       const materialQtyInput = field("materialQty");
@@ -24026,10 +24737,6 @@ function renderJobs(){
       const estNum = estVal === "" || estVal == null ? null : Number(estVal);
       const estimateHours = Number.isFinite(estNum) && estNum >= 0 ? estNum : Number(entry.estimateHours) || 0;
 
-      const actVal = actualInput?.value;
-      const actualNum = actVal === "" || actVal == null ? null : Number(actVal);
-      const actualHours = Number.isFinite(actualNum) && actualNum >= 0 ? actualNum : null;
-
       const material = materialInput?.value ?? entry.material ?? "";
       const materialCostVal = materialCostInput?.value;
       const materialCostNum = materialCostVal === "" || materialCostVal == null ? null : Number(materialCostVal);
@@ -24045,7 +24752,7 @@ function renderJobs(){
 
       const costRateVal = costRateInput?.value;
       const costRateNum = costRateVal === "" || costRateVal == null ? null : Number(costRateVal);
-      if (costRateNum != null && (!Number.isFinite(costRateNum) || costRateNum < 0)){ toast("Enter a valid cost rate."); return; }
+      if (costRateNum != null && !Number.isFinite(costRateNum)){ toast("Enter a valid cost rate."); return; }
 
       const notes = notesInput?.value ?? entry.notes ?? "";
 
@@ -24082,13 +24789,12 @@ function renderJobs(){
 
       const fallbackCost = (() => {
         const existingCost = Number(entry.costRate);
-        if (Number.isFinite(existingCost) && existingCost >= 0) return existingCost;
+        if (Number.isFinite(existingCost)) return existingCost;
         const effCost = Number(entry.efficiency?.costRate);
-        if (Number.isFinite(effCost) && effCost >= 0) return effCost;
-        return estimateHours > 0 ? JOB_BASE_COST_PER_HOUR + ((materialCost * materialQty) / estimateHours) : JOB_BASE_COST_PER_HOUR;
+        if (Number.isFinite(effCost)) return effCost;
+        return JOB_BASE_COST_PER_HOUR;
       })();
-      const costRate = Number.isFinite(costRateNum) && costRateNum >= 0 ? costRateNum : fallbackCost;
-      const netRate = chargeRate - costRate;
+      const costRate = Number.isFinite(costRateNum) ? costRateNum : fallbackCost;
 
       entry.name = name;
       entry.estimateHours = estimateHours;
@@ -24098,7 +24804,6 @@ function renderJobs(){
       entry.chargeRate = chargeRate;
       entry.costRate = costRate;
       entry.notes = notes;
-      entry.actualHours = actualHours != null ? actualHours : null;
       entry.files = mergeJobFileReferences(filesBeforeSave, entry.files);
       if (window.DEBUG_MODE) console.info("[cutting-job-files] history save files", {
         jobId: String(id),
@@ -24107,25 +24812,19 @@ function renderJobs(){
       });
       applyManualJobProjectCategory(entry, pair);
 
-      const rate = Number.isFinite(netRate) ? netRate : (Number(entry.efficiency?.rate) || JOB_RATE_PER_HOUR);
-      const deltaHours = actualHours != null ? (estimateHours - actualHours) : (entry.efficiency?.deltaHours ?? null);
-      const gainLoss = deltaHours != null ? deltaHours * rate : (entry.efficiency?.gainLoss ?? null);
-
+      const profit = computeCuttingJobProfit(entry);
       entry.efficiency = {
         ...entry.efficiency,
-        rate,
-        chargeRate,
-        costRate,
-        netRate,
-        expectedHours: estimateHours,
-        actualHours: entry.actualHours,
-        expectedRemaining: 0,
-        actualRemaining: 0,
-        deltaHours,
-        gainLoss
+        rate: profit.netRate,
+        chargeRate: profit.chargeRate,
+        costRate: profit.costRate,
+        netRate: profit.netRate,
+        hoursTaken: profit.hours,
+        totalProfit: profit.totalProfit,
+        gainLoss: profit.totalProfit
       };
 
-      const updates=Object.fromEntries(["name","startISO","completedAtISO","estimateHours","material","materialCost","materialQty","chargeRate","costRate","notes","actualHours","cat","projectNumber","priority","efficiency"].filter(key=>!["startISO","completedAtISO"].includes(key)||entry[key]).map(key=>[key,entry[key]]));
+      const updates=Object.fromEntries(["name","startISO","completedAtISO","estimateHours","material","materialCost","materialQty","chargeRate","costRate","notes","cat","projectNumber","priority","efficiency"].filter(key=>!["startISO","completedAtISO"].includes(key)||entry[key]).map(key=>[key,entry[key]]));
       histSave.disabled=true;
       const result=await saveCuttingJobEdit(id,updates);
       histSave.disabled=false;
@@ -24284,17 +24983,17 @@ function renderJobs(){
       if (chargeVal != null && (!Number.isFinite(chargeVal) || chargeVal < 0)){ toast("Enter a valid charge rate."); return; }
       const costRaw = qs("costRate");
       const costVal = costRaw === "" || costRaw == null ? null : Number(costRaw);
-      if (costVal != null && (!Number.isFinite(costVal) || costVal < 0)){ toast("Enter a valid cost rate."); return; }
+      if (costVal != null && !Number.isFinite(costVal)){ toast("Enter a valid cost rate."); return; }
       const existingCharge = Number.isFinite(Number(j.chargeRate)) && Number(j.chargeRate) >= 0
         ? Number(j.chargeRate)
         : JOB_RATE_PER_HOUR;
       const chargeToSet = chargeVal == null ? existingCharge : chargeVal;
-      const existingCost = Number.isFinite(Number(j.costRate)) && Number(j.costRate) >= 0
+      const existingCost = Number.isFinite(Number(j.costRate))
         ? Number(j.costRate)
         : 45;
       const costToSet = costVal == null ? existingCost : costVal;
       j.name = qs("name") || j.name;
-      j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
+      j.estimateHours = Math.max(0.01, Number(qs("estimateHours"))||j.estimateHours||1);
       j.material = qs("material") || j.material || "";
       j.materialCost = Math.max(0, Number(qs("materialCost")) || 0);
       j.materialQty = Math.max(0, Number(qs("materialQty")) || 0);

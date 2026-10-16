@@ -3696,6 +3696,8 @@ function buildCompletedJob(job, completionISO){
     chargeRate: eff.chargeRate ?? existingChargeRate,
     costRate: eff.costRate ?? null,
     netRate: eff.netRate ?? null,
+    hoursTaken: eff.hoursTaken ?? null,
+    totalProfit: eff.totalProfit ?? null,
     expectedHours: eff.expectedHours ?? null,
     actualHours: eff.actualHours ?? null,
     expectedRemaining: eff.expectedRemaining ?? null,
@@ -3747,6 +3749,10 @@ function completeCuttingJob(jobId, { completedAtISO = null } = {}){
 
 function saveCuttingJobEdit(jobId, updates){
   return saveCuttingJobBusinessOperation({type:"edit",id:String(jobId || ""),updates});
+}
+
+function saveCuttingJobFailurePercent(jobId, failurePercent){
+  return saveCuttingJobBusinessOperation({type:"failure",id:String(jobId || ""),failurePercent});
 }
 
 function createCuttingJob(job){
