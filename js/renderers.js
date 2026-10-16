@@ -21222,12 +21222,13 @@ function renderJobs(){
     renderNoteHistory(normalized);
     noteBackdrop.hidden = false;
     noteBackdrop.classList.add("open");
+    noteBackdrop.querySelector(".job-note-modal")?.scrollTo(0, 0);
     const resolvedTrigger = trigger || content.querySelector(`[data-job-note="${id}"]`);
     lastNoteTrigger = resolvedTrigger || null;
     lastNoteTriggerSelector = `[data-job-note="${id}"]`;
     requestAnimationFrame(()=>{
       try {
-        noteTextarea.focus();
+        noteTextarea.focus({ preventScroll: true });
         const len = noteTextarea.value.length;
         noteTextarea.setSelectionRange(len, len);
       } catch (_err) { }

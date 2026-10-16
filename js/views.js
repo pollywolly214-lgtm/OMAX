@@ -4729,6 +4729,7 @@ function viewJobs(){
           </div>
         </div>
       </div>
+    </div>
       <div class="job-note-modal-backdrop" id="jobNoteModal" hidden>
         <div class="job-note-modal" role="dialog" aria-modal="true" aria-labelledby="jobNoteModalTitle" aria-describedby="jobNoteModalDescription">
           <div class="job-note-modal-header">
@@ -4751,8 +4752,6 @@ function viewJobs(){
           <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
         </div>
       </div>
-    </div>
-
     <div class="block past-jobs-block job-main-block" id="pastJobs">
       <p data-cutting-job-verification-notice role="alert" class="small" style="padding:10px;border:1px solid #b45309;background:#fff7ed;color:#7c2d12" ${window.__cuttingJobDisplayUnconfirmed ? "" : "hidden"}>Unverified cutting-job display: values below may be previously loaded data or unsaved edits. The latest save has not been verified; do not treat the information below as confirmed.</p>
       <h3>Past Cutting Jobs</h3>
