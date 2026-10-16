@@ -299,7 +299,7 @@ function inclusiveDayCount(startDate, endDate){
 }
 
 // Cutting-job duration keeps its legacy storage key. Historical progress is not duration.
-function computeCuttingJobProfit(job){
+function computeCuttingJobProfit(job, options = {}){
   const finiteValue = (values, fallback, nonnegative = false) => {
     for (const raw of values){
       if (raw == null || raw === "") continue;
@@ -313,7 +313,18 @@ function computeCuttingJobProfit(job){
   // efficiency.costRate remains a positive expense magnitude for subtracting consumers.
   const costRate = Math.abs(finiteValue([job?.costRate, job?.efficiency?.costRate], JOB_BASE_COST_PER_HOUR));
   const netRate = chargeRate - costRate;
-  return { hours, chargeRate, costRate, netRate, totalProfit: netRate * hours };
+  const materialCost = finiteValue([job?.materialCost], 0, true);
+  const materialQty = finiteValue([job?.materialQty], 0, true);
+  const materialExpense = materialCost * materialQty;
+  const failurePercent = Math.min(100, Math.max(0, finiteValue([options.failurePercent ?? job?.failurePercent], 0)));
+  const revenue = chargeRate * hours;
+  const cuttingCost = costRate * hours;
+  const revenueLost = revenue * failurePercent / 100;
+  const adjustedRevenue = revenue * (1 - failurePercent / 100);
+  const originalNetProfit = revenue - cuttingCost - materialExpense;
+  const totalProfit = adjustedRevenue - cuttingCost - materialExpense;
+  return { hours, chargeRate, costRate, netRate, materialCost, materialQty, materialExpense,
+    failurePercent, revenue, adjustedRevenue, revenueLost, cuttingCost, originalNetProfit, totalProfit };
 }
 
 function computeJobEfficiency(job){

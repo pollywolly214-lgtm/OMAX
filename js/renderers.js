@@ -15452,10 +15452,10 @@ const appendEmptyRow = (focusFirst = false)=>{
         const hours = Math.max(0, asNumber(row?.hoursValue, 0));
         const material = Math.max(0, asNumber(row?.materialValue ?? row?.materialCostValue, 0));
         const rates = rowRates(row, chargeRate, costRate);
-        const labor = hours * rates.costRate;
-        const totalCost = labor + material;
+        const profit = computeCuttingJobProfit({estimateHours:hours, ...rates, materialCost:material, materialQty:1, failurePercent:row.failurePercentValue});
+        const totalCost = profit.cuttingCost + profit.materialExpense;
         acc.rows += 1;
-        acc.net += hours * (rates.chargeRate - rates.costRate);
+        acc.net += profit.totalProfit;
         acc.cost += totalCost;
         return acc;
       }, { rows: 0, net: 0, cost: 0 });
@@ -15479,9 +15479,10 @@ const appendEmptyRow = (focusFirst = false)=>{
         const hours = Math.max(0, asNumber(tr.getAttribute("data-efficiency-hours"), asNumber(rowObj?.hoursValue, 0)));
         const material = Math.max(0, asNumber(tr.getAttribute("data-efficiency-material"), asNumber(rowObj?.materialValue ?? rowObj?.materialCostValue, 0)));
         const rates = rowRates(rowObj, chargeRate, costRate);
-        const labor = hours * rates.costRate;
-        const totalCost = labor + material;
-        const net = hours * (rates.chargeRate - rates.costRate);
+        const profit = computeCuttingJobProfit({estimateHours:hours, ...rates, materialCost:material, materialQty:1, failurePercent:rowObj?.failurePercentValue});
+        const labor = profit.cuttingCost;
+        const totalCost = labor + profit.materialExpense;
+        const net = profit.totalProfit;
         const laborCell = tr.querySelector("[data-efficiency-labor-cell]");
         const totalCostCell = tr.querySelector("[data-efficiency-total-cost-cell]");
         const profitCell = tr.querySelector("[data-efficiency-profit-cell]");
@@ -17600,19 +17601,7 @@ function computeCostModel(){
 
   const resolveCuttingJobHours = job => computeCuttingJobProfit(job).hours;
 
-  const resolveCuttingJobMaterialCost = (job)=>{
-    const overrides = [job?.materialTotal, job?.materialSpend, job?.totalMaterialCost, job?.materialCostTotal];
-    for (const entry of overrides){
-      const num = Number(entry);
-      if (Number.isFinite(num)) return Math.max(0, num);
-    }
-    const unit = Number(job?.materialCost);
-    const qty = Number(job?.materialQty);
-    if (Number.isFinite(unit) && Number.isFinite(qty) && qty > 0){
-      return Math.max(0, unit * qty);
-    }
-    return Number.isFinite(unit) && unit > 0 ? unit : 0;
-  };
+  const resolveCuttingJobMaterialCost = job => computeCuttingJobProfit(job).materialExpense;
 
   const resolveCuttingJobNetTotal = (job, eff = null)=>{
     const profit = computeCuttingJobProfit(job);
@@ -17621,6 +17610,9 @@ function computeCostModel(){
       chargeRate: profit.chargeRate,
       cutCostRate: profit.costRate,
       materialCost: resolveCuttingJobMaterialCost(job),
+      revenue: profit.revenue,
+      adjustedRevenue: profit.adjustedRevenue,
+      failurePercent: profit.failurePercent,
       total: profit.totalProfit
     };
   };
@@ -19072,6 +19064,9 @@ function computeCostModel(){
       cumulativeCutNumberLabel: window.CuttingJobChronology?.readCutLabel(job) ?? "—",
       categoryCutNumberLabel: `#${categoryCutCount}`,
       hoursValue: hours,
+      revenueValue: jobNet.adjustedRevenue,
+      originalRevenueValue: jobNet.revenue,
+      failurePercentValue: jobNet.failurePercent,
       chargeRateValue: chargeRate,
       costRateValue: costRate,
       materialCostValue,
@@ -19102,24 +19097,27 @@ function computeCostModel(){
       hoursValue: Number(row?.hoursValue) || 0,
       chargeRateValue: Number(row?.chargeRateValue) || 0,
       costRateValue: Number(row?.costRateValue) || 0,
-      revenueValue: Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)),
+      revenueValue: Number(row?.revenueValue) || 0,
+      originalRevenueValue: Number(row?.originalRevenueValue) || 0,
+      failurePercentValue: Number(row?.failurePercentValue) || 0,
       netGainLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
       materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
       laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
       totalCostValue: Number(row?.totalCostValue) || 0,
       totalProfitValue: Number(row?.totalProfitValue) || 0,
-      formulaTitle: "Source: Central data table completed cutting jobs row. Net gain = Hours Taken × (Charge Rate - abs(Cost Rate)).",
+      formulaTitle: "Source: Central data table completed cutting jobs row. Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense.",
       settingsLink: row?.settingsLink || ""
     }));
   const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
     if (Number.isFinite(row?.hoursValue)) acc.hours += Math.max(0, Number(row.hoursValue));
+    if (Number.isFinite(row?.originalRevenueValue)) acc.originalRevenue += row.originalRevenueValue;
     if (Number.isFinite(row?.revenueValue)) acc.revenue += Math.max(0, Number(row.revenueValue));
     if (Number.isFinite(row?.materialValue)) acc.material += Math.max(0, Number(row.materialValue));
     if (Number.isFinite(row?.laborValue)) acc.labor += Math.max(0, Number(row.laborValue));
     if (Number.isFinite(row?.totalCostValue)) acc.cost += Math.max(0, Number(row.totalCostValue));
     if (Number.isFinite(row?.totalProfitValue)) acc.profit += Number(row.totalProfitValue);
     return acc;
-  }, { hours: 0, revenue: 0, material: 0, labor: 0, cost: 0, profit: 0 });
+  }, { hours: 0, revenue: 0, originalRevenue: 0, material: 0, labor: 0, cost: 0, profit: 0 });
   const efficiencyCount = efficiencyRows.length;
   const efficiencySnapshot = {
     countLabel: String(efficiencyCount),
@@ -19131,15 +19129,15 @@ function computeCostModel(){
     totalNetGainLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
     averageNetGainLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
     sourceLabel: "Source: central data table completed cutting jobs rows.",
-    formulaLabel: "Net gain = Hours Taken × (Charge Rate - abs(Cost Rate))",
+    formulaLabel: "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense",
     disclaimerLabel: "Uses central data table values only.",
     rows: efficiencyRows,
     emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
-  const efficiencyMathDetails = `Net gain = Hours Taken × (Charge Rate - abs(Cost Rate)). Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
+  const efficiencyMathDetails = `Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
   efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
   const totalCalcHours = efficiencyTotals.hours > 0 ? efficiencyTotals.hours : 0;
-  const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.revenue / totalCalcHours) : JOB_RATE_PER_HOUR;
+  const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.originalRevenue / totalCalcHours) : JOB_RATE_PER_HOUR;
   const defaultCostRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.labor / totalCalcHours) : JOB_BASE_COST_PER_HOUR;
   efficiencySnapshot.calculatorDefaults = {
     chargeRate: Number.isFinite(defaultChargeRateForCalc) ? defaultChargeRateForCalc : JOB_RATE_PER_HOUR,
@@ -20437,6 +20435,115 @@ function setupCfr05InlinePreviewHydration(content){
   content.querySelectorAll("[data-cfr05-dxf-select]").forEach(select=>select.addEventListener("change",()=>{cfr05CloudPreviewSelection.set(String(select.dataset.cfr05DxfSelect||""),String(select.value||""));renderJobs();}));
 }
 
+function wireCuttingJobNetBreakdowns(content){
+  content.querySelectorAll("[data-job-net-toggle]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      const root = button.closest("[data-job-net-id]");
+      const details = root?.querySelector("[data-job-net-details]");
+      if (!details) return;
+      const expanded = button.getAttribute("aria-expanded") !== "true";
+      details.hidden = !expanded;
+      button.setAttribute("aria-expanded", String(expanded));
+      button.textContent = expanded ? "Collapse" : "Expand";
+      const id = root.getAttribute("data-job-net-id");
+      const ids = expandedCuttingJobNetIds();
+      if (expanded) ids.add(id); else ids.delete(id);
+    });
+  });
+}
+
+function showFailedCutDialog(jobId, trigger){
+  const job = (Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [])
+    .find(entry => String(entry?.id) === String(jobId));
+  if (!job){ toast("This completed cutting job is unavailable. Reload and try again."); return; }
+  const dialog = document.createElement("dialog");
+  dialog.className = "failed-cut-dialog";
+  dialog.setAttribute("data-failed-cut-dialog", "");
+  dialog.setAttribute("aria-labelledby", "failedCutTitle");
+  let selectedPercent = computeCuttingJobProfit(job).failurePercent;
+  dialog.innerHTML = `
+    <form data-failed-cut-form>
+      <h3 id="failedCutTitle">Failed Cut</h3>
+      <p>${escapeHtml(job.name || "Completed cutting job")}</p>
+      <label>Failure percentage (%)
+        <input type="number" min="0" max="100" step="1" required data-failed-cut-percent value="${Math.round(selectedPercent)}">
+      </label>
+      <label class="failed-cut-slider-label"><span class="sr-only">Failure percentage slider</span>
+        <input type="range" min="0" max="100" step="1" aria-label="Failure percentage slider" data-failed-cut-slider value="${Math.round(selectedPercent)}">
+      </label>
+      <div class="failed-cut-slider-scale" aria-hidden="true"><span>0%</span><span>100%</span></div>
+      <dl class="failed-cut-preview" aria-live="polite">
+        <dt>Failure percentage</dt><dd data-failure-preview="failurePercent"></dd>
+        <dt>Original revenue</dt><dd data-failure-preview="revenue"></dd>
+        <dt>Revenue remaining</dt><dd data-failure-preview="adjustedRevenue"></dd>
+        <dt>Full cutting expense</dt><dd data-failure-preview="cuttingCost"></dd>
+        <dt>Full material expense</dt><dd data-failure-preview="materialExpense"></dd>
+        <dt>Original net profit</dt><dd data-failure-preview="originalNetProfit"></dd>
+        <dt>Adjusted net profit</dt><dd data-failure-preview="totalProfit"></dd>
+        <dt>Revenue lost / potential profit reduction</dt><dd data-failure-preview="revenueLost"></dd>
+      </dl>
+      <p class="small muted">Revenue lost is the reduction in revenue. A negative adjusted net profit is an actual loss. Cutting and material expenses stay unchanged.</p>
+      <p data-failed-cut-status role="status"></p>
+      <div class="failed-cut-actions"><button type="button" data-failed-cut-cancel>Cancel</button><button type="submit" data-failed-cut-save>Save</button></div>
+    </form>`;
+  const form = dialog.querySelector("[data-failed-cut-form]");
+  const input = dialog.querySelector("[data-failed-cut-percent]");
+  const slider = dialog.querySelector("[data-failed-cut-slider]");
+  const save = dialog.querySelector("[data-failed-cut-save]");
+  const cancel = dialog.querySelector("[data-failed-cut-cancel]");
+  const status = dialog.querySelector("[data-failed-cut-status]");
+  let saving = false;
+  let saveBlocked = false;
+  // Keep saved precision for calculations until the user edits a control.
+  const percent = () => selectedPercent;
+  const validPercent = () => Number.isFinite(percent()) && percent() >= 0 && percent() <= 100;
+  const preview = () => {
+    const valid = validPercent();
+    save.disabled = saving || saveBlocked || !valid;
+    if (valid){ slider.value = String(Math.round(percent())); slider.setAttribute("aria-valuetext", `${Math.round(percent())}%`); }
+    status.textContent = valid ? "" : "Enter a percentage from 0 to 100.";
+    const profit = valid ? computeCuttingJobProfit(job, {failurePercent:percent()}) : null;
+    dialog.querySelectorAll("[data-failure-preview]").forEach(cell => {
+      const key = cell.getAttribute("data-failure-preview");
+      cell.textContent = profit ? formatCuttingJobFinancialValue(profit, key) : "—";
+      const tone = profit ? cuttingJobFinancialTone(key, profit[key]) : "job-finance-neutral";
+      ["positive", "negative", "neutral", "warning"].forEach(name => cell.classList.toggle(`job-finance-${name}`, tone === `job-finance-${name}`));
+      cell.classList.toggle("is-negative", key === "totalProfit" && profit?.totalProfit < 0);
+    });
+  };
+  const close = () => { if (saving) return; dialog.close(); dialog.remove(); trigger?.focus?.(); };
+  input.addEventListener("input", ()=>{
+    selectedPercent = input.value.trim() === "" ? NaN : Number(input.value);
+    if (validPercent()){ selectedPercent = Math.round(selectedPercent); input.value = String(selectedPercent); }
+    preview();
+  });
+  slider.addEventListener("input", ()=>{ selectedPercent = Number(slider.value); input.value = slider.value; preview(); });
+  cancel.addEventListener("click", close);
+  dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (saving || saveBlocked || !validPercent()) return;
+    saving = true; save.disabled = true; cancel.disabled = true; input.disabled = true; slider.disabled = true;
+    status.textContent = "Saving and verifying…";
+    let result;
+    try { result = await saveCuttingJobFailurePercent(job.id, percent()); }
+    catch (error) { result = {saved:false,requiresReload:true,error:`Save could not be confirmed. Reload before retrying. ${String(error?.message || error)}`}; }
+    saving = false;
+    if (!result?.saved || !result.verified || result.requiresReload){
+      const requiresReload = result?.requiresReload || result?.indeterminate;
+      saveBlocked = Boolean(requiresReload);
+      save.disabled = Boolean(requiresReload); input.disabled = Boolean(requiresReload); slider.disabled = Boolean(requiresReload); cancel.disabled = false;
+      status.textContent = result?.error || "Failure adjustment was not verified. Reload if the save outcome is unknown.";
+      return;
+    }
+    completedCuttingJobs = window.completedCuttingJobs;
+    close(); toast("Failed Cut adjustment saved"); renderJobs();
+  });
+  document.body.appendChild(dialog); preview(); dialog.showModal(); input.focus();
+  return dialog;
+}
+
 function renderJobs(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -20489,6 +20596,7 @@ function renderJobs(){
 
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
+  wireCuttingJobNetBreakdowns(content);
   setupJobLayout();
   hydrateVisibleCfr05CloudFiles(content);
   setupCfr05InlinePreviewHydration(content);
@@ -23524,6 +23632,8 @@ function renderJobs(){
   }
 
   historyBody?.addEventListener("click", async (e)=>{
+    const failedCut = e.target.closest("[data-history-failed-cut]");
+    if (failedCut){ e.preventDefault(); const trigger = failedCut.closest(".job-actions")?.querySelector("[data-history-actions-toggle]") || failedCut; closeHistoryActionMenu(); showFailedCutDialog(failedCut.getAttribute("data-history-failed-cut"), trigger); return; }
     if (await handleCuttingJobFileActionClick(e)) return;
     const historyActionTrigger = e.target.closest("[data-history-actions-toggle]");
     if (historyActionTrigger){

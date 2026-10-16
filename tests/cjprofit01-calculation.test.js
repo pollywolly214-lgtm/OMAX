@@ -15,11 +15,11 @@ function harness() {
   return c;
 }
 const fixture = (extra = {}) => ({ id:"same-job", chargeRate:150, costRate:-60, estimateHours:2, actualHours:0,
-  materialCost:500, materialQty:3, cat:"project", projectNumber:"0000", cutNumber:"C041",
+  materialCost:5, materialQty:3, cat:"project", projectNumber:"0000", cutNumber:"C041",
   cutDateISO:"2026-10-05", cutOrderWithinDay:2, files:[{fileId:"retained"}],
   importProvenance:{sourceRowNumber:7}, efficiency:{chargeRate:999, costRate:999, actualHours:99, netRate:999}, ...extra });
 for (const [chargeRate, costRate, estimateHours, rate, total] of [
-  [150,-60,2,90,180], [200,-80,0.5,120,60], [100,-25,1.5,75,112.5], [150,-60,2.8,90,252], [200,-45,2.8,155,434]
+  [150,-60,2,90,165], [200,-80,0.5,120,45], [100,-25,1.5,75,97.5], [150,-60,2.8,90,237], [200,-45,2.8,155,419]
 ]) test(`charge ${chargeRate}, expense ${costRate}, ${estimateHours} hr yields ${total}`, () => {
   const c = harness();
   for (const historical of [false,true]) for (const sign of [-1,1]) {
@@ -32,12 +32,12 @@ for (const [chargeRate, costRate, estimateHours, rate, total] of [
 });
 test("edits recalculate from authoritative inputs; refresh retains result and unrelated fields", () => {
   const job = fixture(), c = harness(), before = structuredClone(job);
-  assert.equal(c.total(job, job.efficiency), 180);
-  job.chargeRate = 200; assert.equal(c.total(job, job.efficiency), 280);
-  job.costRate = -80; assert.equal(c.total(job, job.efficiency), 240);
-  job.estimateHours = .5; assert.equal(c.total(job, job.efficiency), 60);
+  assert.equal(c.total(job, job.efficiency), 165);
+  job.chargeRate = 200; assert.equal(c.total(job, job.efficiency), 265);
+  job.costRate = -80; assert.equal(c.total(job, job.efficiency), 225);
+  job.estimateHours = .5; assert.equal(c.total(job, job.efficiency), 45);
   const edited = structuredClone(job);
-  assert.equal(harness().total(JSON.parse(JSON.stringify(job)), job.efficiency), 60);
+  assert.equal(harness().total(JSON.parse(JSON.stringify(job)), job.efficiency), 45);
   assert.deepEqual(job, edited, "rendering must not mutate or persist the job");
   for (const key of Object.keys(before).filter(key => !["chargeRate","costRate","estimateHours"].includes(key)))
     assert.deepEqual(job[key], before[key], key);
@@ -47,16 +47,16 @@ test("Hours Taken alone determines duration, regardless of legacy progress", () 
   for (const actualHours of [0,1.5,99,null,undefined]) {
     const job = fixture({estimateHours:2.8,chargeRate:200,costRate:-45,actualHours,
       manualLogs:[{dateISO:"2026-10-01",completedHours:99}]});
-    assert.ok(Math.abs(c.total(job, {actualHours:99}) - 434) < 1e-9);
+    assert.ok(Math.abs(c.total(job, {actualHours:99}) - 419) < 1e-9);
   }
-  assert.equal(c.total(fixture({estimateHours:0}), {actualHours:99}), 0);
-  assert.equal(c.total(fixture({estimateHours:undefined}), {actualHours:99}), 0);
+  assert.equal(c.total(fixture({estimateHours:0}), {actualHours:99}), -15);
+  assert.equal(c.total(fixture({estimateHours:undefined}), {actualHours:99}), -15);
 });
 test("missing rates use stored efficiency values, but blank/null rates do not become zero", () => {
   const c = harness();
   for (const value of [undefined,null,""]) {
     const job = fixture({chargeRate:value, costRate:value, efficiency:{chargeRate:150, costRate:-60}});
-    assert.equal(c.total(job, job.efficiency), 180);
+    assert.equal(c.total(job, job.efficiency), 165);
   }
 });
 test("active/history labels and history totals use the same formula", () => {
@@ -70,11 +70,11 @@ test("active/history labels and history totals use the same formula", () => {
     const result = vm.runInContext("(()=>{" + body + ";return {costDisplay,netDisplay,netTotalDisplay};})()", c);
     assert.equal(result.costDisplay, "-$60.00/hr");
     assert.equal(result.netDisplay, "+$90.00/hr");
-    assert.equal(result.netTotalDisplay, "+$180.00");
+    assert.equal(result.netTotalDisplay, "+$165.00");
   }
   c.completedFiltered = [job, {...job,id:"second"}];
   c.computeJobEfficiency = job => job.efficiency;
   vm.runInContext(section(views, "  const completedStats =", "  const prioritySchedule =") +
     ";this.average = completedAverageMetrics;", c);
-  assert.equal(c.average.netRate,90); assert.equal(c.average.costRate,-60); assert.equal(c.average.netTotal,180);
+  assert.equal(c.average.netRate,90); assert.equal(c.average.costRate,-60); assert.equal(c.average.netTotal,165);
 });
