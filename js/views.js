@@ -3533,7 +3533,7 @@ function viewJobs(){
     const colorStyleAttr = colorData.style;
     const actions = [
       `<button type="button" class="link" data-job-folder-add="${esc(id)}">+ Sub-category</button>`,
-      !isRoot ? `<button type="button" class="link" data-job-folder-rename="${esc(id)}">Rename</button>` : "",
+      !isRoot ? `<button type="button" class="link" data-job-folder-rename="${esc(id)}">Edit</button>` : "",
       !isRoot ? `<button type="button" class="link danger" data-job-folder-remove="${esc(id)}">Remove</button>` : ""
     ].filter(Boolean).join("<span class=\"job-folder-action-sep\" aria-hidden=\"true\">·</span>");
     const childrenMarkup = childrenOf(folder.id).map(child => renderFolderTree(child)).join("");
@@ -4525,7 +4525,7 @@ function viewJobs(){
   return `
   <div class="container job-page-container">
     <div class="dashboard-toolbar">
-      <span class="dashboard-edit-hint" id="jobEditHint" hidden>Drag the job categories window to reposition or resize it.</span>
+      <span class="dashboard-edit-hint" id="jobEditHint" hidden>Use Edit Categories to manage job categories.</span>
     </div>
 
     ${avgBanner}
@@ -4535,8 +4535,10 @@ function viewJobs(){
       <button type="button" data-wjcuts-open-setup>Open WJ Cuts setup</button>
     </div>
 
-    <div class="dashboard-layout job-layout" id="jobLayout">
-      <div class="dashboard-window" data-job-window="categories">
+    <div class="job-category-modal" id="jobCategoryManager" role="dialog" aria-modal="true" aria-labelledby="jobCategoryManagerTitle" hidden>
+      <div class="job-category-backdrop" data-job-category-close></div>
+      <div class="job-category-modal-card">
+        <div class="job-category-modal-heading"><h3 id="jobCategoryManagerTitle">Edit Categories</h3><button type="button" data-job-category-close aria-label="Close categories">×</button></div>
         <div class="block job-category-panel" data-job-category-panel>
           <div class="job-category-header">
             <h3>Job Categories</h3>
@@ -4556,6 +4558,7 @@ function viewJobs(){
         <div class="job-page-toolbar">
           <h3>Cutting Jobs</h3>
           <div class="job-toolbar-actions">
+             <button type="button" class="job-history-button" data-job-category-open>Edit Categories</button>
             <button type="button" class="job-show-all-button" data-job-show-all>Show all jobs</button>
             <button
               type="button"
