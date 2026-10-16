@@ -58,7 +58,7 @@ class Element{
 }
 function popup(saveResult={saved:true,verified:true},failurePercent=0){
   const source=job({failurePercent}),calls=[],elements=Object.fromEntries(["form","percent","slider","save","cancel","status"].map(key=>[key,new Element()]));
-  elements.percent.value=String(failurePercent);const cells=["failurePercent","revenue","adjustedRevenue","cuttingCost","materialExpense","originalNetProfit","totalProfit","revenueLost"].map(key=>Object.assign(new Element(),{getAttribute:()=>key,key}));
+  elements.percent.value=String(Math.round(failurePercent));const cells=["failurePercent","revenue","adjustedRevenue","cuttingCost","materialExpense","originalNetProfit","totalProfit","revenueLost"].map(key=>Object.assign(new Element(),{getAttribute:()=>key,key}));
   const dialog=new Element();dialog.querySelector=selector=>elements[/data-failed-cut-([a-z]+)/.exec(selector)?.[1]];dialog.querySelectorAll=()=>cells;
   const c=vm.createContext({JOB_RATE_PER_HOUR:200,JOB_BASE_COST_PER_HOUR:45,window:{completedCuttingJobs:[source]},completedCuttingJobs:[source],document:{createElement:()=>dialog,body:{appendChild(){}}},escapeHtml:String,toast(){},renderJobs(){calls.push("render");},saveCuttingJobFailurePercent:async(id,percent)=>{calls.push({id,percent});return saveResult;}});
   vm.runInContext(computations,c);const views=fs.readFileSync("js/views.js","utf8");vm.runInContext(views.slice(views.indexOf("function cuttingJobFinancialTone("),views.indexOf("function viewJobs(){")),c);const start=renderers.indexOf("function showFailedCutDialog("),end=renderers.indexOf("\nfunction renderJobs(){",start);vm.runInContext(renderers.slice(start,end),c);c.showFailedCutDialog("j",new Element());
@@ -82,17 +82,26 @@ test("saved failure percentage can be reopened, edited, reset, and unknown saves
   const blocked=popup({saved:false,requiresReload:true});blocked.change(50);await blocked.submit();await blocked.submit();assert.equal(blocked.calls.length,1);
 });
 
-test("CJPROFIT-03: slider and typed percentages stay synchronized without rounding or saving",()=>{
-  const p=popup({saved:true,verified:true},10.123456),before=structuredClone(p.source);
-  assert.equal(p.elements.slider.value,"10.123456");
-  p.change(12.3456789);assert.equal(p.elements.slider.value,"12.3456789");
-  p.elements.slider.value="75.125";p.elements.slider.listeners.input();assert.equal(p.elements.percent.value,"75.125");assert.equal(p.value("failurePercent").textContent,"75.125%");
-  assert.equal(p.value("totalProfit").textContent,"-$12.69");assert.equal(p.value("totalProfit").classes.has("job-finance-negative"),true);
-  assert.deepEqual(p.calls,[]);p.elements.cancel.listeners.click();assert.deepEqual(p.source,before);
+test("CJPROFIT-03A: whole percentage display preserves saved precision until edited",async()=>{
+  for(const [saved,display] of [[21.3768115942029,"21"],[50.75,"51"]]){
+    const p=popup({saved:true,verified:true},saved),before=structuredClone(p.source);
+    assert.equal(p.elements.percent.value,display);assert.equal(p.elements.slider.value,display);
+    assert.equal(p.value("failurePercent").textContent,`${display}%`);
+    assert.equal(p.value("totalProfit").textContent,new Intl.NumberFormat(undefined,{style:"currency",currency:"USD"}).format(profit(p.source).totalProfit));
+    assert.deepEqual(p.calls,[]);p.elements.cancel.listeners.click();assert.deepEqual(p.source,before);
+    const unchanged=popup({saved:true,verified:true},saved);await unchanged.submit();assert.deepEqual(unchanged.calls[0],{id:"j",percent:saved});
+  }
+  const p=popup({saved:true,verified:true},21.3768115942029);
+  p.change(50.75);assert.equal(p.elements.percent.value,"51");assert.equal(p.elements.slider.value,"51");
+  assert.equal(p.value("failurePercent").textContent,"51%");assert.equal(p.value("totalProfit").textContent,"$23.50");
+  p.elements.slider.value="75";p.elements.slider.listeners.input();assert.equal(p.elements.percent.value,"75");
+  assert.equal(p.value("failurePercent").textContent,"75%");assert.equal(p.value("totalProfit").textContent,"-$12.50");
+  assert.match(p.dialog.innerHTML,/step="1" required data-failed-cut-percent/);
+  assert.match(p.dialog.innerHTML,/step="1" aria-label="Failure percentage slider"/);
 });
 test("CJPROFIT-03: slider saves through the unchanged submit flow and locks during verification",async()=>{
-  let resolve;const p=popup(new Promise(done=>resolve=done));p.elements.slider.value="50.25";p.elements.slider.listeners.input();
-  const pending=p.submit();assert.equal(p.elements.slider.disabled,true);assert.equal(p.elements.percent.disabled,true);assert.deepEqual(p.calls,[{id:"j",percent:50.25}]);
+  let resolve;const p=popup(new Promise(done=>resolve=done));p.elements.slider.value="51";p.elements.slider.listeners.input();
+  const pending=p.submit();assert.equal(p.elements.slider.disabled,true);assert.equal(p.elements.percent.disabled,true);assert.deepEqual(p.calls,[{id:"j",percent:51}]);
   resolve({saved:true,verified:true});await pending;assert.equal(p.dialog.removed,true);
   const blocked=popup({saved:false,verified:false,requiresReload:true});blocked.change(50);await blocked.submit();assert.equal(blocked.elements.slider.disabled,true);
 });

@@ -2699,7 +2699,7 @@ function cuttingJobFinancialTone(key, value){
 }
 
 function formatCuttingJobFinancialValue(profit, key){
-  if (key === "failurePercent") return `${profit[key]}%`;
+  if (key === "failurePercent") return `${Math.round(profit[key])}%`;
   const value = ["cuttingCost", "materialExpense"].includes(key) ? (-profit[key] || 0) : profit[key];
   return new Intl.NumberFormat(undefined, {style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(value);
 }
@@ -3920,7 +3920,7 @@ function viewJobs(){
                 <span class="job-actions-trigger-caret" aria-hidden="true">▾</span>
               </button>
               <div class="job-actions-menu" id="${esc(actionMenuId)}" data-history-actions-menu="${job.id}" hidden>
-                <button type="button" data-history-failed-cut="${esc(String(job.id))}">Failed Cut — ${computeCuttingJobProfit(job).failurePercent}%</button>
+                <button type="button" data-history-failed-cut="${esc(String(job.id))}">Failed Cut — ${Math.round(computeCuttingJobProfit(job).failurePercent)}%</button>
                 <button type="button" data-history-activate="${job.id}">Make active copy</button>
                 <button type="button" data-history-edit="${job.id}">Edit</button>
                 <button type="button" class="danger" data-history-delete="${job.id}">Delete</button>

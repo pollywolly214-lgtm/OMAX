@@ -20461,15 +20461,16 @@ function showFailedCutDialog(jobId, trigger){
   dialog.className = "failed-cut-dialog";
   dialog.setAttribute("data-failed-cut-dialog", "");
   dialog.setAttribute("aria-labelledby", "failedCutTitle");
+  let selectedPercent = computeCuttingJobProfit(job).failurePercent;
   dialog.innerHTML = `
     <form data-failed-cut-form>
       <h3 id="failedCutTitle">Failed Cut</h3>
       <p>${escapeHtml(job.name || "Completed cutting job")}</p>
       <label>Failure percentage (%)
-        <input type="number" min="0" max="100" step="any" required data-failed-cut-percent value="${computeCuttingJobProfit(job).failurePercent}">
+        <input type="number" min="0" max="100" step="1" required data-failed-cut-percent value="${Math.round(selectedPercent)}">
       </label>
       <label class="failed-cut-slider-label"><span class="sr-only">Failure percentage slider</span>
-        <input type="range" min="0" max="100" step="any" aria-label="Failure percentage slider" data-failed-cut-slider value="${computeCuttingJobProfit(job).failurePercent}">
+        <input type="range" min="0" max="100" step="1" aria-label="Failure percentage slider" data-failed-cut-slider value="${Math.round(selectedPercent)}">
       </label>
       <div class="failed-cut-slider-scale" aria-hidden="true"><span>0%</span><span>100%</span></div>
       <dl class="failed-cut-preview" aria-live="polite">
@@ -20494,12 +20495,13 @@ function showFailedCutDialog(jobId, trigger){
   const status = dialog.querySelector("[data-failed-cut-status]");
   let saving = false;
   let saveBlocked = false;
-  const percent = () => input.value.trim() === "" ? NaN : Number(input.value);
+  // Keep saved precision for calculations until the user edits a control.
+  const percent = () => selectedPercent;
   const validPercent = () => Number.isFinite(percent()) && percent() >= 0 && percent() <= 100;
   const preview = () => {
     const valid = validPercent();
     save.disabled = saving || saveBlocked || !valid;
-    if (valid){ slider.value = input.value; slider.setAttribute("aria-valuetext", `${percent()}%`); }
+    if (valid){ slider.value = String(Math.round(percent())); slider.setAttribute("aria-valuetext", `${Math.round(percent())}%`); }
     status.textContent = valid ? "" : "Enter a percentage from 0 to 100.";
     const profit = valid ? computeCuttingJobProfit(job, {failurePercent:percent()}) : null;
     dialog.querySelectorAll("[data-failure-preview]").forEach(cell => {
@@ -20511,8 +20513,12 @@ function showFailedCutDialog(jobId, trigger){
     });
   };
   const close = () => { if (saving) return; dialog.close(); dialog.remove(); trigger?.focus?.(); };
-  input.addEventListener("input", preview);
-  slider.addEventListener("input", ()=>{ input.value = slider.value; preview(); });
+  input.addEventListener("input", ()=>{
+    selectedPercent = input.value.trim() === "" ? NaN : Number(input.value);
+    if (validPercent()){ selectedPercent = Math.round(selectedPercent); input.value = String(selectedPercent); }
+    preview();
+  });
+  slider.addEventListener("input", ()=>{ selectedPercent = Number(slider.value); input.value = slider.value; preview(); });
   cancel.addEventListener("click", close);
   dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
   form.addEventListener("submit", async event => {
