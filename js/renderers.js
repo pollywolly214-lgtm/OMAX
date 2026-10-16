@@ -21560,24 +21560,93 @@ function renderJobs(){
     }
   };
 
-  const promptRenameCategory = (categoryId)=>{
-    if (!categoryId) return null;
-    const folder = ensureCategoryState().find(f => String(f.id) === String(categoryId));
-    if (!folder){ toast("Category not found"); return null; }
-    const next = window.prompt("Rename category", folder.name || "");
-    if (!next) return null;
-    try {
-      const result = typeof renameJobFolder === "function" ? renameJobFolder(categoryId, next) : null;
-      if (result){
-        saveCloudDebounced();
-      }
-      return result;
-    } catch (err){
-      console.warn("Failed to rename job category", err);
-      toast("Unable to rename category.");
-      return null;
+  const categoryManager=content.querySelector("#jobCategoryManager");
+  const categoryEditForm=content.querySelector("#jobCategoryEditForm");
+  const closeCategoryEditor=()=>{
+    if(categoryEditForm){categoryEditForm.hidden=true;categoryEditForm.reset();}
+  };
+  const closeCategoryManager=()=>{
+    closeCategoryEditor();
+    window.jobCategoryManagerOpen=false;
+    if(categoryManager)categoryManager.hidden=true;
+    document.body.classList.remove("job-category-modal-open");
+  };
+  const openCategoryManager=()=>{
+    window.jobCategoryManagerOpen=true;
+    if(categoryManager)categoryManager.hidden=false;
+    document.body.classList.add("job-category-modal-open");
+    categoryManager?.querySelector("[data-job-category-close]")?.focus();
+  };
+  if(window.jobCategoryManagerOpen)document.body.classList.add("job-category-modal-open");
+  else document.body.classList.remove("job-category-modal-open");
+  content.querySelector("[data-job-category-open]")?.addEventListener("click",openCategoryManager);
+  categoryManager?.querySelectorAll("[data-job-category-close]").forEach(button=>button.addEventListener("click",closeCategoryManager));
+  const categoryEscapeHandler=event=>{
+    if(event.key==="Escape"&&window.jobCategoryManagerOpen&&!window.__categoryMutationPending){
+      closeCategoryManager();
     }
   };
+  // The document listener is replaced when renderJobs recreates the page.
+  if(window.__jobCategoryEscapeHandler)document.removeEventListener("keydown",window.__jobCategoryEscapeHandler);
+  window.__jobCategoryEscapeHandler=categoryEscapeHandler;
+  document.addEventListener("keydown",categoryEscapeHandler);
+  categoryEditForm?.querySelector("[data-job-category-edit-cancel]")?.addEventListener("click",closeCategoryEditor);
+  const startCategoryEdit=categoryId=>{
+    if(window.__categoryMutationPending)return;
+    const folder=ensureCategoryState().find(row=>String(row?.id)===String(categoryId));
+    if(!folder||!categoryEditForm){toast("Category was not found.");return;}
+    const projectNumber=window.CuttingJobCategoryEdit?.folderKey?.(folder)||"";
+    const name=window.CuttingJobCategoryEdit?.categoryName?.(folder,projectNumber)||"";
+    categoryEditForm.elements.categoryId.value=String(categoryId);
+    categoryEditForm.elements.projectNumber.value=projectNumber;
+    categoryEditForm.elements.categoryName.value=name;
+    categoryEditForm.dataset.originalName=String(folder.name||"");
+    categoryEditForm.dataset.originalProject=String(folder.projectNumber??window.CuttingJobHistory?.leadingProject?.(folder.name)??"");
+    categoryEditForm.querySelector(".job-category-edit-status").textContent="";
+    categoryEditForm.hidden=false;
+    categoryEditForm.elements.categoryName.focus();
+    categoryEditForm.scrollIntoView({block:"nearest"});
+  };
+  categoryEditForm?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    if(window.__categoryMutationPending)return;
+    const status=categoryEditForm.querySelector(".job-category-edit-status");
+    const submit=categoryEditForm.querySelector("[data-job-category-edit-save]");
+    const request={
+      categoryId:categoryEditForm.elements.categoryId.value,
+      projectNumber:categoryEditForm.elements.projectNumber.value,
+      name:categoryEditForm.elements.categoryName.value,
+      expectedOldName:categoryEditForm.dataset.originalName,
+      expectedOldProjectNumber:categoryEditForm.dataset.originalProject
+    };
+    const preview=window.CuttingJobCategoryEdit?.plan?.({
+      jobFolders:window.jobFolders,cuttingJobs:window.cuttingJobs,
+      completedCuttingJobs:window.completedCuttingJobs
+    },request);
+    if(!preview?.ok){status.textContent=preview?.reason||"Category update cannot be prepared.";return;}
+    const p=preview.summary;
+    if(!p.changed){status.textContent="No changes to save.";return;}
+    const message=`Change category from "${p.oldFullName}" (Project ${p.oldProjectNumber}) to "${p.newFullName}" (Project ${p.newProjectNumber})?\n\nThis updates ${p.totalCount} cutting jobs: ${p.activeCount} active and ${p.completedCount} historical. Existing job IDs, cut numbers, dates, files, costs and history will be retained.\n\nContinue?`;
+    if(!window.confirm(message))return;
+    request.expectedActiveCount=p.activeCount;
+    request.expectedCompletedCount=p.completedCount;
+    submit.disabled=true;
+    status.textContent="Saving and verifying category and linked cutting jobs…";
+    try{
+      const result=await window.saveCuttingJobCategoryChange(request);
+      if(!result?.saved||!result?.verified){
+        status.textContent=result?.error||"Category was not saved.";
+        if(result?.indeterminate)status.textContent+=" Outcome uncertain: review Recovery Mode before retrying.";
+        return;
+      }
+      toast("Category and linked cutting jobs saved and verified.");
+      closeCategoryEditor();
+      rerenderPreservingState(currentCategoryFilter());
+      if(typeof refreshDashboardWidgets==="function")refreshDashboardWidgets();
+      else if(typeof renderCalendar==="function")renderCalendar();
+    }catch(error){status.textContent=String(error?.message||error);}
+    finally{submit.disabled=false;}
+  });
 
   const attemptRemoveCategory = (categoryId)=>{
     if (!categoryId) return false;
@@ -22393,10 +22462,7 @@ function renderJobs(){
       if (renameBtn){
         event.preventDefault();
         const catId = renameBtn.getAttribute("data-job-folder-rename");
-        const result = promptRenameCategory(catId);
-        if (result){
-          rerenderPreservingState(String(catId));
-        }
+        startCategoryEdit(catId);
         return;
       }
       const removeBtn = event.target.closest("[data-job-folder-remove]");
