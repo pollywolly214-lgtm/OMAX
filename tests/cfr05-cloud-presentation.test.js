@@ -61,7 +61,7 @@ const {createCache,createPreviewCache}=require("../js/cloudFilePresentation.js")
   assert.match(styles,/cfr05-preview-dialog-image[^}]*max-width: 88vw[^}]*max-height: 80vh[^}]*object-fit: contain/);
   assert.match(renderers,/!cfr05CloudPresentation\.has\(id\) && !cfr05CloudPresentation\.isLoading\(id\)/);
   assert.match(renderers,/refreshCfr05CloudPresentation\(jobId,\{force:true\}\)/,"successful existing-job upload refreshes only its exact job");
-  assert.match(renderers,/refreshCfr05CloudPresentation\(newJob\.id,\{force:true\}\)/,"successful new-job uploads refresh only the new job");
+  assert.match(renderers,/refreshCfr05CloudPresentation\(pending\.job\.id,\{force:true\}\)/,"successful new-job uploads refresh only the new job");
   assert.doesNotMatch(core,/cloudFilesByJobId|cfr05CloudPresentation|cfr05CloudPreviewCache/,"transient presentation cache is absent from core persistence");
   for(const source of [views,renderers,core]) assert.doesNotMatch(source,/localStorage[^\n]*cfr05Cloud|snapshotState\([^\n]*cfr05Cloud|saveCloudNow\([^\n]*cfr05Cloud/);
   assert.doesNotMatch(renderers,/job\.files\s*=\s*.*cloud|cuttingJobs.*cloudFile|completedCuttingJobs.*cloudFile/i);

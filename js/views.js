@@ -3139,14 +3139,16 @@ function viewJobs(){
   const computeJobNetTotal = job => computeCuttingJobProfit(job).totalProfit;
 
   const pendingFiles = Array.isArray(window.pendingNewJobFiles) ? window.pendingNewJobFiles : [];
-  const pendingSummary = pendingFiles.length
-    ? `${pendingFiles.length} file${pendingFiles.length===1?"":"s"} ready to attach`
+  const pendingCloudFiles = Array.isArray(window.pendingSecureCloudJobFiles) ? window.pendingSecureCloudJobFiles : [];
+  const pendingFileCount = pendingFiles.length + pendingCloudFiles.filter(entry=>entry.outcome?.stage !== "completed").length;
+  const pendingSummary = pendingFileCount
+    ? `${pendingFileCount} file${pendingFileCount===1?"":"s"} ready to attach`
     : "No files selected";
   let addFormOpenState = typeof window.jobAddFormOpen === "boolean"
     ? window.jobAddFormOpen
     : null;
   if (addFormOpenState == null){
-    addFormOpenState = pendingFiles.length > 0;
+    addFormOpenState = pendingFileCount > 0;
     window.jobAddFormOpen = addFormOpenState;
   }
   const addFormOpen = addFormOpenState;
@@ -3270,7 +3272,7 @@ function viewJobs(){
     ? String(historyCategoryFolder.name)
     : (historyCategory === rootCategoryId ? "All Jobs" : "Category");
   window.jobHistoryCategoryFilter = historyCategory;
-  const addJobDefaultCategory = rootCategoryId;
+  const addJobDefaultCategory = selectedCategory;
   const addJobDraft = window.jobAddDraft && typeof window.jobAddDraft === "object"
     ? window.jobAddDraft
     : {};
@@ -4524,7 +4526,7 @@ function viewJobs(){
           </div>
         </div>
         <div class="job-onedrive-status small muted">${esc(oneDriveStatusLabel)}</div>
-        ${!addFormOpen && pendingFiles.length
+        ${!addFormOpen && pendingFileCount
           ? `<div class="job-add-indicator" role="status" aria-live="polite">${pendingSummary}</div>`
           : ""}
       </div>
@@ -4547,7 +4549,7 @@ function viewJobs(){
             <input type="number" id="jobEst" required min="0.01" step="0.01" value="${esc(addJobDraftField("estimate"))}">
           </label>
           <label>Add minutes
-            <input type="number" id="jobEstMinutes" min="0" step="1" placeholder="e.g. 45">
+            <input type="number" id="jobEstMinutes" min="0" step="1" placeholder="e.g. 45" value="${esc(addJobDraftField("estimateMinutes"))}">
           </label>
           <label>Priority
             <select id="jobPriority" aria-label="Priority">
@@ -4569,14 +4571,14 @@ function viewJobs(){
             <input type="date" id="jobDue" required value="${esc(addJobDraftField("due", defaultJobDateISO))}">
           </label>
           <label>Project #
-            <input type="text" id="jobProjectNumber" placeholder="Select a project category" readonly value="${esc(addJobDraftField("projectNumber"))}"><span class="small muted" data-project-category-status aria-live="polite"></span>
+            <output id="jobProjectNumber" class="small" for="jobCategory" aria-live="polite">${esc(addJobDraftField("projectNumber"))}</output><span class="small muted" data-project-category-status aria-live="polite"></span>
           </label>
           <div class="job-category-field">
             <label for="jobCategory">Category</label>
-            <select id="jobCategory" aria-label="Category" required>
+            <select id="jobCategory" aria-label="Category" aria-describedby="jobCategoryHint" required>
               ${categoryOptionsMarkup(addJobCategoryDefault, { includeCreateOption: true })}
             </select>
-            <p class="small muted job-category-hint" id="jobCategoryHint" aria-live="polite">
+            <p class="small job-category-hint" id="jobCategoryHint" aria-live="polite">
               Choose a category with verified project ownership.
             </p>
           </div>
@@ -4611,13 +4613,14 @@ function viewJobs(){
           <button type="button" id="jobMaterialSettingsBtn">Material settings</button>
           </div>
           <div class="job-add-actions">
-            <button type="button" id="jobSecureCloudFilesBtn">Upload file</button>
+            <button type="button" id="jobSecureCloudFilesBtn">Attach File</button>
             <button type="submit">Add Job</button>
           </div>
           <input type="file" id="jobFiles" multiple style="display:none">
           <input type="file" id="jobSecureCloudFiles" accept=".dxf,.ord,.omx" multiple style="display:none">
           <datalist id="jobMaterialOptions">${materialInventoryOptionsMarkup}</datalist>
         </form>
+        <p id="jobAddStatus" role="${["error", "category"].includes(window.jobAddFeedback?.state) ? "alert" : "status"}"${window.jobAddFeedback?.message ? "" : " hidden"}>${esc(window.jobAddFeedback?.message || "")}</p>
         <div class="small muted job-files-summary" id="jobFilesSummary">${pendingSummary}</div>
         <div class="job-material-settings-modal" id="jobMaterialSettingsPanel" hidden aria-hidden="true">
           <div class="job-material-settings">
