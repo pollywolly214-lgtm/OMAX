@@ -20435,6 +20435,24 @@ function setupCfr05InlinePreviewHydration(content){
   content.querySelectorAll("[data-cfr05-dxf-select]").forEach(select=>select.addEventListener("change",()=>{cfr05CloudPreviewSelection.set(String(select.dataset.cfr05DxfSelect||""),String(select.value||""));renderJobs();}));
 }
 
+function wireCuttingJobNetBreakdowns(content){
+  content.querySelectorAll("[data-job-net-toggle]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      const root = button.closest("[data-job-net-id]");
+      const details = root?.querySelector("[data-job-net-details]");
+      if (!details) return;
+      const expanded = button.getAttribute("aria-expanded") !== "true";
+      details.hidden = !expanded;
+      button.setAttribute("aria-expanded", String(expanded));
+      button.textContent = expanded ? "Collapse" : "Expand";
+      const id = root.getAttribute("data-job-net-id");
+      const ids = expandedCuttingJobNetIds();
+      if (expanded) ids.add(id); else ids.delete(id);
+    });
+  });
+}
+
 function showFailedCutDialog(jobId, trigger){
   const job = (Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [])
     .find(entry => String(entry?.id) === String(jobId));
@@ -20443,18 +20461,23 @@ function showFailedCutDialog(jobId, trigger){
   dialog.className = "failed-cut-dialog";
   dialog.setAttribute("data-failed-cut-dialog", "");
   dialog.setAttribute("aria-labelledby", "failedCutTitle");
+  let selectedPercent = computeCuttingJobProfit(job).failurePercent;
   dialog.innerHTML = `
     <form data-failed-cut-form>
       <h3 id="failedCutTitle">Failed Cut</h3>
       <p>${escapeHtml(job.name || "Completed cutting job")}</p>
       <label>Failure percentage (%)
-        <input type="number" min="0" max="100" step="any" required data-failed-cut-percent value="${computeCuttingJobProfit(job).failurePercent}">
+        <input type="number" min="0" max="100" step="1" required data-failed-cut-percent value="${Math.round(selectedPercent)}">
       </label>
+      <label class="failed-cut-slider-label"><span class="sr-only">Failure percentage slider</span>
+        <input type="range" min="0" max="100" step="1" aria-label="Failure percentage slider" data-failed-cut-slider value="${Math.round(selectedPercent)}">
+      </label>
+      <div class="failed-cut-slider-scale" aria-hidden="true"><span>0%</span><span>100%</span></div>
       <dl class="failed-cut-preview" aria-live="polite">
         <dt>Failure percentage</dt><dd data-failure-preview="failurePercent"></dd>
         <dt>Original revenue</dt><dd data-failure-preview="revenue"></dd>
         <dt>Revenue remaining</dt><dd data-failure-preview="adjustedRevenue"></dd>
-        <dt>Full cutting cost</dt><dd data-failure-preview="cuttingCost"></dd>
+        <dt>Full cutting expense</dt><dd data-failure-preview="cuttingCost"></dd>
         <dt>Full material expense</dt><dd data-failure-preview="materialExpense"></dd>
         <dt>Original net profit</dt><dd data-failure-preview="originalNetProfit"></dd>
         <dt>Adjusted net profit</dt><dd data-failure-preview="totalProfit"></dd>
@@ -20466,33 +20489,42 @@ function showFailedCutDialog(jobId, trigger){
     </form>`;
   const form = dialog.querySelector("[data-failed-cut-form]");
   const input = dialog.querySelector("[data-failed-cut-percent]");
+  const slider = dialog.querySelector("[data-failed-cut-slider]");
   const save = dialog.querySelector("[data-failed-cut-save]");
   const cancel = dialog.querySelector("[data-failed-cut-cancel]");
   const status = dialog.querySelector("[data-failed-cut-status]");
   let saving = false;
   let saveBlocked = false;
-  const money = value => new Intl.NumberFormat(undefined, {style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(value);
-  const percent = () => input.value.trim() === "" ? NaN : Number(input.value);
+  // Keep saved precision for calculations until the user edits a control.
+  const percent = () => selectedPercent;
   const validPercent = () => Number.isFinite(percent()) && percent() >= 0 && percent() <= 100;
   const preview = () => {
     const valid = validPercent();
-    save.disabled = saving || !valid;
+    save.disabled = saving || saveBlocked || !valid;
+    if (valid){ slider.value = String(Math.round(percent())); slider.setAttribute("aria-valuetext", `${Math.round(percent())}%`); }
     status.textContent = valid ? "" : "Enter a percentage from 0 to 100.";
     const profit = valid ? computeCuttingJobProfit(job, {failurePercent:percent()}) : null;
     dialog.querySelectorAll("[data-failure-preview]").forEach(cell => {
       const key = cell.getAttribute("data-failure-preview");
-      cell.textContent = profit ? (key === "failurePercent" ? `${profit[key]}%` : money(profit[key])) : "—";
+      cell.textContent = profit ? formatCuttingJobFinancialValue(profit, key) : "—";
+      const tone = profit ? cuttingJobFinancialTone(key, profit[key]) : "job-finance-neutral";
+      ["positive", "negative", "neutral", "warning"].forEach(name => cell.classList.toggle(`job-finance-${name}`, tone === `job-finance-${name}`));
       cell.classList.toggle("is-negative", key === "totalProfit" && profit?.totalProfit < 0);
     });
   };
   const close = () => { if (saving) return; dialog.close(); dialog.remove(); trigger?.focus?.(); };
-  input.addEventListener("input", preview);
+  input.addEventListener("input", ()=>{
+    selectedPercent = input.value.trim() === "" ? NaN : Number(input.value);
+    if (validPercent()){ selectedPercent = Math.round(selectedPercent); input.value = String(selectedPercent); }
+    preview();
+  });
+  slider.addEventListener("input", ()=>{ selectedPercent = Number(slider.value); input.value = slider.value; preview(); });
   cancel.addEventListener("click", close);
   dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
   form.addEventListener("submit", async event => {
     event.preventDefault();
     if (saving || saveBlocked || !validPercent()) return;
-    saving = true; save.disabled = true; cancel.disabled = true; input.disabled = true;
+    saving = true; save.disabled = true; cancel.disabled = true; input.disabled = true; slider.disabled = true;
     status.textContent = "Saving and verifying…";
     let result;
     try { result = await saveCuttingJobFailurePercent(job.id, percent()); }
@@ -20501,7 +20533,7 @@ function showFailedCutDialog(jobId, trigger){
     if (!result?.saved || !result.verified || result.requiresReload){
       const requiresReload = result?.requiresReload || result?.indeterminate;
       saveBlocked = Boolean(requiresReload);
-      save.disabled = Boolean(requiresReload); input.disabled = Boolean(requiresReload); cancel.disabled = false;
+      save.disabled = Boolean(requiresReload); input.disabled = Boolean(requiresReload); slider.disabled = Boolean(requiresReload); cancel.disabled = false;
       status.textContent = result?.error || "Failure adjustment was not verified. Reload if the save outcome is unknown.";
       return;
     }
@@ -20564,6 +20596,7 @@ function renderJobs(){
 
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
+  wireCuttingJobNetBreakdowns(content);
   setupJobLayout();
   hydrateVisibleCfr05CloudFiles(content);
   setupCfr05InlinePreviewHydration(content);
@@ -23600,7 +23633,7 @@ function renderJobs(){
 
   historyBody?.addEventListener("click", async (e)=>{
     const failedCut = e.target.closest("[data-history-failed-cut]");
-    if (failedCut){ e.preventDefault(); closeHistoryActionMenu(); showFailedCutDialog(failedCut.getAttribute("data-history-failed-cut"), failedCut); return; }
+    if (failedCut){ e.preventDefault(); const trigger = failedCut.closest(".job-actions")?.querySelector("[data-history-actions-toggle]") || failedCut; closeHistoryActionMenu(); showFailedCutDialog(failedCut.getAttribute("data-history-failed-cut"), trigger); return; }
     if (await handleCuttingJobFileActionClick(e)) return;
     const historyActionTrigger = e.target.closest("[data-history-actions-toggle]");
     if (historyActionTrigger){
