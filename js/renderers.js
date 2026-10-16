@@ -8030,7 +8030,7 @@ function renderDashboard(){
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
-    if (!Number.isFinite(costRate) || costRate < 0){ toast("Enter a valid cost rate."); return; }
+    if (!Number.isFinite(costRate)){ toast("Enter a valid cost rate."); return; }
     if (!categoryId){ toast("Choose a category."); return; }
     if (categoryId === "__new__"){
       const parent = window.jobCategoryFilter || (typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root");
@@ -15454,7 +15454,7 @@ const appendEmptyRow = (focusFirst = false)=>{
     const normalizeToTwo = (inputEl, fallback)=>{
       if (!(inputEl instanceof HTMLInputElement)) return fallback;
       const raw = asNumber(inputEl.value, fallback);
-      const safe = Math.max(0, raw);
+      const safe = inputEl === costInput ? Math.abs(raw) : Math.max(0, raw);
       const normalized = Math.round(safe * 100) / 100;
       inputEl.value = normalized.toFixed(2);
       return normalized;
@@ -15463,10 +15463,15 @@ const appendEmptyRow = (focusFirst = false)=>{
       ? window.__efficiencyCalculatorDraft
       : null;
     const defaultCharge = Math.max(0, asNumber(draft?.chargeRate, asNumber(defaults.chargeRate, asNumber(chargeInput.value, 0))));
-    const defaultCost = Math.max(0, asNumber(draft?.costRate, asNumber(defaults.costRate, asNumber(costInput.value, 0))));
+    const defaultCost = Math.abs(asNumber(draft?.costRate, asNumber(defaults.costRate, asNumber(costInput.value, 0))));
     chargeInput.value = defaultCharge.toFixed(2);
     costInput.value = defaultCost.toFixed(2);
     let activeRange = "1m";
+    let overrideRates = Boolean(draft);
+    const rowRates = (row, chargeRate, costRate) => ({
+      chargeRate: overrideRates ? chargeRate : asNumber(row?.chargeRateValue, chargeRate),
+      costRate: overrideRates ? costRate : Math.abs(asNumber(row?.costRateValue, costRate))
+    });
 
     const getRangeStart = (rangeKey)=>{
       const now = new Date();
@@ -15514,18 +15519,19 @@ const appendEmptyRow = (focusFirst = false)=>{
 
     const recalc = ()=>{
       const chargeRate = Math.max(0, asNumber(chargeInput.value, defaultCharge));
-      const costRate = Math.max(0, asNumber(costInput.value, defaultCost));
-      if (typeof window !== "undefined"){
+      const costRate = Math.abs(asNumber(costInput.value, defaultCost));
+      if (typeof window !== "undefined" && overrideRates){
         window.__efficiencyCalculatorDraft = { chargeRate, costRate };
       }
       const visibleRows = rows.filter(row => withinRange(row, activeRange));
       const totals = visibleRows.reduce((acc, row)=>{
         const hours = Math.max(0, asNumber(row?.hoursValue, 0));
         const material = Math.max(0, asNumber(row?.materialValue ?? row?.materialCostValue, 0));
-        const labor = hours * costRate;
-        const totalCost = labor + material;
+        const rates = rowRates(row, chargeRate, costRate);
+        const profit = computeCuttingJobProfit({estimateHours:hours, ...rates, materialCost:material, materialQty:1, failurePercent:row.failurePercentValue});
+        const totalCost = profit.cuttingCost + profit.materialExpense;
         acc.rows += 1;
-        acc.net += (hours * (chargeRate - costRate)) - material;
+        acc.net += profit.totalProfit;
         acc.cost += totalCost;
         return acc;
       }, { rows: 0, net: 0, cost: 0 });
@@ -15548,9 +15554,11 @@ const appendEmptyRow = (focusFirst = false)=>{
         if (!show) return;
         const hours = Math.max(0, asNumber(tr.getAttribute("data-efficiency-hours"), asNumber(rowObj?.hoursValue, 0)));
         const material = Math.max(0, asNumber(tr.getAttribute("data-efficiency-material"), asNumber(rowObj?.materialValue ?? rowObj?.materialCostValue, 0)));
-        const labor = hours * costRate;
-        const totalCost = labor + material;
-        const net = (hours * (chargeRate - costRate)) - material;
+        const rates = rowRates(rowObj, chargeRate, costRate);
+        const profit = computeCuttingJobProfit({estimateHours:hours, ...rates, materialCost:material, materialQty:1, failurePercent:rowObj?.failurePercentValue});
+        const labor = profit.cuttingCost;
+        const totalCost = labor + profit.materialExpense;
+        const net = profit.totalProfit;
         const laborCell = tr.querySelector("[data-efficiency-labor-cell]");
         const totalCostCell = tr.querySelector("[data-efficiency-total-cost-cell]");
         const profitCell = tr.querySelector("[data-efficiency-profit-cell]");
@@ -15560,10 +15568,11 @@ const appendEmptyRow = (focusFirst = false)=>{
       });
     };
 
-    chargeInput.addEventListener("input", recalc);
-    costInput.addEventListener("input", recalc);
-    chargeInput.addEventListener("blur", ()=>{ normalizeToTwo(chargeInput, defaultCharge); recalc(); });
-    costInput.addEventListener("blur", ()=>{ normalizeToTwo(costInput, defaultCost); recalc(); });
+    const recalcWithOverride = ()=>{ overrideRates = true; recalc(); };
+    chargeInput.addEventListener("input", recalcWithOverride);
+    costInput.addEventListener("input", recalcWithOverride);
+    chargeInput.addEventListener("blur", ()=>{ normalizeToTwo(chargeInput, defaultCharge); recalcWithOverride(); });
+    costInput.addEventListener("blur", ()=>{ normalizeToTwo(costInput, defaultCost); recalcWithOverride(); });
     if (rangeSelect instanceof HTMLSelectElement){
       rangeSelect.addEventListener("change", ()=>{
         activeRange = String(rangeSelect.value || "1m");
@@ -15575,6 +15584,8 @@ const appendEmptyRow = (focusFirst = false)=>{
       resetBtn.addEventListener("click", ()=>{
         chargeInput.value = defaultCharge.toFixed(2);
         costInput.value = defaultCost.toFixed(2);
+        overrideRates = false;
+        delete window.__efficiencyCalculatorDraft;
         activeRange = "1m";
         recalc();
         updateRangeButtons();
@@ -17664,54 +17675,21 @@ function computeCostModel(){
     });
   };
 
-  const resolveCuttingJobHours = (job, eff = null)=>{
-    const manualLogs = Array.isArray(job?.manualLogs) ? job.manualLogs : [];
-    const latestManualLog = manualLogs
-      .filter(entry => Number.isFinite(Number(entry?.completedHours)) && Number(entry.completedHours) >= 0)
-      .sort((a, b) => String(a?.dateISO || "").localeCompare(String(b?.dateISO || "")))
-      .pop() || null;
-    const candidates = [
-      Number(job?.actualHours),
-      Number(latestManualLog?.completedHours),
-      Number(job?.durationHours),
-      Number(job?.completedHours),
-      Number(eff?.actualHours),
-      Number(job?.estimateHours)
-    ];
-    const positive = candidates.find(val => Number.isFinite(val) && val > 0);
-    const fallback = candidates.find(val => Number.isFinite(val) && val >= 0);
-    return Number.isFinite(positive) ? positive : (Number.isFinite(fallback) ? fallback : 0);
-  };
+  const resolveCuttingJobHours = job => computeCuttingJobProfit(job).hours;
 
-  const resolveCuttingJobMaterialCost = (job)=>{
-    const overrides = [job?.materialTotal, job?.materialSpend, job?.totalMaterialCost, job?.materialCostTotal];
-    for (const entry of overrides){
-      const num = Number(entry);
-      if (Number.isFinite(num)) return Math.max(0, num);
-    }
-    const unit = Number(job?.materialCost);
-    const qty = Number(job?.materialQty);
-    if (Number.isFinite(unit) && Number.isFinite(qty) && qty > 0){
-      return Math.max(0, unit * qty);
-    }
-    return Number.isFinite(unit) && unit > 0 ? unit : 0;
-  };
+  const resolveCuttingJobMaterialCost = job => computeCuttingJobProfit(job).materialExpense;
 
   const resolveCuttingJobNetTotal = (job, eff = null)=>{
-    const hours = resolveCuttingJobHours(job, eff);
-    const chargeRateRaw = Number(job?.chargeRate ?? eff?.chargeRate);
-    const chargeRate = Number.isFinite(chargeRateRaw) && chargeRateRaw >= 0 ? chargeRateRaw : JOB_RATE_PER_HOUR;
-    const cutCostRateRaw = Number(job?.costRate ?? eff?.costRate);
-    const cutCostRate = Number.isFinite(cutCostRateRaw) && cutCostRateRaw >= 0 ? cutCostRateRaw : JOB_BASE_COST_PER_HOUR;
-    const materialCost = resolveCuttingJobMaterialCost(job);
-    const billedAmount = chargeRate * Math.max(0, hours);
-    const cutCost = Math.max(0, hours) * cutCostRate;
+    const profit = computeCuttingJobProfit(job);
     return {
-      hours,
-      chargeRate,
-      cutCostRate,
-      materialCost,
-      total: billedAmount - materialCost - cutCost
+      hours: profit.hours,
+      chargeRate: profit.chargeRate,
+      cutCostRate: profit.costRate,
+      materialCost: resolveCuttingJobMaterialCost(job),
+      revenue: profit.revenue,
+      adjustedRevenue: profit.adjustedRevenue,
+      failurePercent: profit.failurePercent,
+      total: profit.totalProfit
     };
   };
 
@@ -18541,26 +18519,7 @@ function computeCostModel(){
 
       const catId = job.cat != null ? String(job.cat) : rootFolderId;
       const categoryName = resolveCategoryName(catId);
-      const actualHoursRaw = Number(job.actualHours);
-      const manualHoursRaw = Number(latestManualLog?.completedHours);
-      const durationHoursRaw = Number(job.durationHours);
-      const completedHoursRaw = Number(job.completedHours);
-      const storedEffHoursRaw = Number(job?.efficiency?.actualHours);
-      const effHoursRaw = Number(eff?.actualHours);
-      const estimateHoursRaw = Number(job.estimateHours);
-      const cutHours = Number.isFinite(actualHoursRaw) && actualHoursRaw > 0
-        ? actualHoursRaw
-        : (Number.isFinite(manualHoursRaw) && manualHoursRaw > 0
-          ? manualHoursRaw
-          : (Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
-            ? durationHoursRaw
-            : (Number.isFinite(completedHoursRaw) && completedHoursRaw > 0
-              ? completedHoursRaw
-              : (Number.isFinite(storedEffHoursRaw) && storedEffHoursRaw > 0
-                ? storedEffHoursRaw
-                : (Number.isFinite(effHoursRaw) && effHoursRaw > 0
-                  ? effHoursRaw
-                  : (Number.isFinite(estimateHoursRaw) && estimateHoursRaw > 0 ? estimateHoursRaw : 0))))));
+      const cutHours = resolveCuttingJobHours(job);
 
       const projectNumber = window.CuttingJobHistory.normalizeProjectKey(job?.projectNumber);
       const categoryDisplay = projectNumber
@@ -18832,7 +18791,7 @@ function computeCostModel(){
         const estimateSafe = Number.isFinite(estimateHours) && estimateHours > 0 ? estimateHours : 0;
         const durationHours = actualHours > 0 ? actualHours : estimateSafe;
         const materialCost = resolveCuttingJobMaterialCost(job);
-        const laborCost = Math.max(0, durationHours) * (Number.isFinite(Number(job?.costRate)) ? Number(job.costRate) : JOB_BASE_COST_PER_HOUR);
+        const laborCost = durationHours * computeCuttingJobProfit(job).costRate;
         const machineCost = machineFromJob(job);
         const overheadCost = overheadFromJob(job);
         const jobNet = resolveCuttingJobNetTotal(job, eff);
@@ -19094,7 +19053,7 @@ function computeCostModel(){
   const historyEmpty = parsedHistory.length
     ? "Log additional machine hours to expand the maintenance cost timeline."
     : "No usage history yet. Log machine hours to estimate maintenance spend.";
-  const jobEmpty = "Add cutting jobs with estimates to build the efficiency tracker.";
+  const jobEmpty = "Add cutting jobs with Hours Taken to build the efficiency tracker.";
 
   const chartNote = "Maintenance line shows negative loss values (blue), and cutting jobs line shows per-job net gain/loss (green when profitable, negative if jobs become unprofitable). Hover or click any point for details, then click to jump to matching Data Center rows.";
   const chartInfo = "Maintenance trend is plotted as negative cost impact, while cutting jobs are plotted as each completed job’s net result so profitability changes are visible immediately. Point hover/click reveals context and can jump to linked Data Center rows.";
@@ -19158,7 +19117,7 @@ function computeCostModel(){
     const materialCostValue = Number.isFinite(materialCost) && materialCost >= 0 ? materialCost : 0;
     const laborCostValue = Math.max(0, hours) * costRate;
     const totalCostValue = materialCostValue + laborCostValue;
-    const totalProfitValue = (Math.max(0, hours) * chargeRate) - totalCostValue;
+    const totalProfitValue = jobNet.total;
     const completedISO = typeof job?.completedAtISO === "string" && job.completedAtISO ? job.completedAtISO : "";
     return {
       id: job?.id != null ? String(job.id) : `completed_job_${index}`,
@@ -19181,6 +19140,9 @@ function computeCostModel(){
       cumulativeCutNumberLabel: window.CuttingJobChronology?.readCutLabel(job) ?? "—",
       categoryCutNumberLabel: `#${categoryCutCount}`,
       hoursValue: hours,
+      revenueValue: jobNet.adjustedRevenue,
+      originalRevenueValue: jobNet.revenue,
+      failurePercentValue: jobNet.failurePercent,
       chargeRateValue: chargeRate,
       costRateValue: costRate,
       materialCostValue,
@@ -19211,24 +19173,27 @@ function computeCostModel(){
       hoursValue: Number(row?.hoursValue) || 0,
       chargeRateValue: Number(row?.chargeRateValue) || 0,
       costRateValue: Number(row?.costRateValue) || 0,
-      revenueValue: Math.max(0, (Number(row?.hoursValue) || 0) * (Number(row?.chargeRateValue) || 0)),
+      revenueValue: Number(row?.revenueValue) || 0,
+      originalRevenueValue: Number(row?.originalRevenueValue) || 0,
+      failurePercentValue: Number(row?.failurePercentValue) || 0,
       netGainLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
       materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
       laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
       totalCostValue: Number(row?.totalCostValue) || 0,
       totalProfitValue: Number(row?.totalProfitValue) || 0,
-      formulaTitle: "Source: Central data table completed cutting jobs row. Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost.",
+      formulaTitle: "Source: Central data table completed cutting jobs row. Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense.",
       settingsLink: row?.settingsLink || ""
     }));
   const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
     if (Number.isFinite(row?.hoursValue)) acc.hours += Math.max(0, Number(row.hoursValue));
+    if (Number.isFinite(row?.originalRevenueValue)) acc.originalRevenue += row.originalRevenueValue;
     if (Number.isFinite(row?.revenueValue)) acc.revenue += Math.max(0, Number(row.revenueValue));
     if (Number.isFinite(row?.materialValue)) acc.material += Math.max(0, Number(row.materialValue));
     if (Number.isFinite(row?.laborValue)) acc.labor += Math.max(0, Number(row.laborValue));
     if (Number.isFinite(row?.totalCostValue)) acc.cost += Math.max(0, Number(row.totalCostValue));
     if (Number.isFinite(row?.totalProfitValue)) acc.profit += Number(row.totalProfitValue);
     return acc;
-  }, { hours: 0, revenue: 0, material: 0, labor: 0, cost: 0, profit: 0 });
+  }, { hours: 0, revenue: 0, originalRevenue: 0, material: 0, labor: 0, cost: 0, profit: 0 });
   const efficiencyCount = efficiencyRows.length;
   const efficiencySnapshot = {
     countLabel: String(efficiencyCount),
@@ -19240,15 +19205,15 @@ function computeCostModel(){
     totalNetGainLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
     averageNetGainLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
     sourceLabel: "Source: central data table completed cutting jobs rows.",
-    formulaLabel: "Net gain = (Hours × (Charge Rate - Cost Rate)) - Material Cost",
+    formulaLabel: "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense",
     disclaimerLabel: "Uses central data table values only.",
     rows: efficiencyRows,
     emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
-  const efficiencyMathDetails = `Net gain = (Hours × (Charge Rate - Cost Rate)) - Material. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
+  const efficiencyMathDetails = `Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
   efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
   const totalCalcHours = efficiencyTotals.hours > 0 ? efficiencyTotals.hours : 0;
-  const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.revenue / totalCalcHours) : JOB_RATE_PER_HOUR;
+  const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.originalRevenue / totalCalcHours) : JOB_RATE_PER_HOUR;
   const defaultCostRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.labor / totalCalcHours) : JOB_BASE_COST_PER_HOUR;
   efficiencySnapshot.calculatorDefaults = {
     chargeRate: Number.isFinite(defaultChargeRateForCalc) ? defaultChargeRateForCalc : JOB_RATE_PER_HOUR,
@@ -20546,6 +20511,115 @@ function setupCfr05InlinePreviewHydration(content){
   content.querySelectorAll("[data-cfr05-dxf-select]").forEach(select=>select.addEventListener("change",()=>{cfr05CloudPreviewSelection.set(String(select.dataset.cfr05DxfSelect||""),String(select.value||""));renderJobs();}));
 }
 
+function wireCuttingJobNetBreakdowns(content){
+  content.querySelectorAll("[data-job-net-toggle]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      const root = button.closest("[data-job-net-id]");
+      const details = root?.querySelector("[data-job-net-details]");
+      if (!details) return;
+      const expanded = button.getAttribute("aria-expanded") !== "true";
+      details.hidden = !expanded;
+      button.setAttribute("aria-expanded", String(expanded));
+      button.textContent = expanded ? "Collapse" : "Expand";
+      const id = root.getAttribute("data-job-net-id");
+      const ids = expandedCuttingJobNetIds();
+      if (expanded) ids.add(id); else ids.delete(id);
+    });
+  });
+}
+
+function showFailedCutDialog(jobId, trigger){
+  const job = (Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : [])
+    .find(entry => String(entry?.id) === String(jobId));
+  if (!job){ toast("This completed cutting job is unavailable. Reload and try again."); return; }
+  const dialog = document.createElement("dialog");
+  dialog.className = "failed-cut-dialog";
+  dialog.setAttribute("data-failed-cut-dialog", "");
+  dialog.setAttribute("aria-labelledby", "failedCutTitle");
+  let selectedPercent = computeCuttingJobProfit(job).failurePercent;
+  dialog.innerHTML = `
+    <form data-failed-cut-form>
+      <h3 id="failedCutTitle">Failed Cut</h3>
+      <p>${escapeHtml(job.name || "Completed cutting job")}</p>
+      <label>Failure percentage (%)
+        <input type="number" min="0" max="100" step="1" required data-failed-cut-percent value="${Math.round(selectedPercent)}">
+      </label>
+      <label class="failed-cut-slider-label"><span class="sr-only">Failure percentage slider</span>
+        <input type="range" min="0" max="100" step="1" aria-label="Failure percentage slider" data-failed-cut-slider value="${Math.round(selectedPercent)}">
+      </label>
+      <div class="failed-cut-slider-scale" aria-hidden="true"><span>0%</span><span>100%</span></div>
+      <dl class="failed-cut-preview" aria-live="polite">
+        <dt>Failure percentage</dt><dd data-failure-preview="failurePercent"></dd>
+        <dt>Original revenue</dt><dd data-failure-preview="revenue"></dd>
+        <dt>Revenue remaining</dt><dd data-failure-preview="adjustedRevenue"></dd>
+        <dt>Full cutting expense</dt><dd data-failure-preview="cuttingCost"></dd>
+        <dt>Full material expense</dt><dd data-failure-preview="materialExpense"></dd>
+        <dt>Original net profit</dt><dd data-failure-preview="originalNetProfit"></dd>
+        <dt>Adjusted net profit</dt><dd data-failure-preview="totalProfit"></dd>
+        <dt>Revenue lost / potential profit reduction</dt><dd data-failure-preview="revenueLost"></dd>
+      </dl>
+      <p class="small muted">Revenue lost is the reduction in revenue. A negative adjusted net profit is an actual loss. Cutting and material expenses stay unchanged.</p>
+      <p data-failed-cut-status role="status"></p>
+      <div class="failed-cut-actions"><button type="button" data-failed-cut-cancel>Cancel</button><button type="submit" data-failed-cut-save>Save</button></div>
+    </form>`;
+  const form = dialog.querySelector("[data-failed-cut-form]");
+  const input = dialog.querySelector("[data-failed-cut-percent]");
+  const slider = dialog.querySelector("[data-failed-cut-slider]");
+  const save = dialog.querySelector("[data-failed-cut-save]");
+  const cancel = dialog.querySelector("[data-failed-cut-cancel]");
+  const status = dialog.querySelector("[data-failed-cut-status]");
+  let saving = false;
+  let saveBlocked = false;
+  // Keep saved precision for calculations until the user edits a control.
+  const percent = () => selectedPercent;
+  const validPercent = () => Number.isFinite(percent()) && percent() >= 0 && percent() <= 100;
+  const preview = () => {
+    const valid = validPercent();
+    save.disabled = saving || saveBlocked || !valid;
+    if (valid){ slider.value = String(Math.round(percent())); slider.setAttribute("aria-valuetext", `${Math.round(percent())}%`); }
+    status.textContent = valid ? "" : "Enter a percentage from 0 to 100.";
+    const profit = valid ? computeCuttingJobProfit(job, {failurePercent:percent()}) : null;
+    dialog.querySelectorAll("[data-failure-preview]").forEach(cell => {
+      const key = cell.getAttribute("data-failure-preview");
+      cell.textContent = profit ? formatCuttingJobFinancialValue(profit, key) : "—";
+      const tone = profit ? cuttingJobFinancialTone(key, profit[key]) : "job-finance-neutral";
+      ["positive", "negative", "neutral", "warning"].forEach(name => cell.classList.toggle(`job-finance-${name}`, tone === `job-finance-${name}`));
+      cell.classList.toggle("is-negative", key === "totalProfit" && profit?.totalProfit < 0);
+    });
+  };
+  const close = () => { if (saving) return; dialog.close(); dialog.remove(); trigger?.focus?.(); };
+  input.addEventListener("input", ()=>{
+    selectedPercent = input.value.trim() === "" ? NaN : Number(input.value);
+    if (validPercent()){ selectedPercent = Math.round(selectedPercent); input.value = String(selectedPercent); }
+    preview();
+  });
+  slider.addEventListener("input", ()=>{ selectedPercent = Number(slider.value); input.value = slider.value; preview(); });
+  cancel.addEventListener("click", close);
+  dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (saving || saveBlocked || !validPercent()) return;
+    saving = true; save.disabled = true; cancel.disabled = true; input.disabled = true; slider.disabled = true;
+    status.textContent = "Saving and verifying…";
+    let result;
+    try { result = await saveCuttingJobFailurePercent(job.id, percent()); }
+    catch (error) { result = {saved:false,requiresReload:true,error:`Save could not be confirmed. Reload before retrying. ${String(error?.message || error)}`}; }
+    saving = false;
+    if (!result?.saved || !result.verified || result.requiresReload){
+      const requiresReload = result?.requiresReload || result?.indeterminate;
+      saveBlocked = Boolean(requiresReload);
+      save.disabled = Boolean(requiresReload); input.disabled = Boolean(requiresReload); slider.disabled = Boolean(requiresReload); cancel.disabled = false;
+      status.textContent = result?.error || "Failure adjustment was not verified. Reload if the save outcome is unknown.";
+      return;
+    }
+    completedCuttingJobs = window.completedCuttingJobs;
+    close(); toast("Failed Cut adjustment saved"); renderJobs();
+  });
+  document.body.appendChild(dialog); preview(); dialog.showModal(); input.focus();
+  return dialog;
+}
+
 function renderJobs(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -20598,6 +20672,7 @@ function renderJobs(){
 
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
+  wireCuttingJobNetBreakdowns(content);
   setupJobLayout();
   hydrateVisibleCfr05CloudFiles(content);
   setupCfr05InlinePreviewHydration(content);
@@ -20630,7 +20705,7 @@ function renderJobs(){
   };
   queueAttachmentPreviewHydration();
 
-  const jobOverlapMessage = "Jobs might be overlapping. Estimates are not accurate if jobs are set to cut at the same time. Please log hours to get most accurate estimates, however estimates may not be accurate until job is complete.";
+  const jobOverlapMessage = "Jobs might be overlapping. Review the job dates and Hours Taken to check the cutting schedule.";
   const jobTableEl = content.querySelector(".job-table");
   const currentOverlapSignature = jobTableEl?.getAttribute("data-job-overlap-signature") || "";
   if (typeof window !== "undefined"){
@@ -20788,7 +20863,7 @@ function renderJobs(){
   const previewCardMarkup = (file)=>{ const preview=file?.preview; const fallbackImage = String(file?.previewUrl || file?.dataUrl || file?.url || ""); const canUseFallbackImage = /^data:image\//i.test(fallbackImage) || /^https?:\/\//i.test(fallbackImage); const imgSource = (preview?.mode === "image" && preview.content) ? preview.content : (canUseFallbackImage ? fallbackImage : ""); if (imgSource){ return `<div class="job-flow-preview"><img src="${escapeHtml(imgSource)}" alt="Preview of ${escapeHtml(file?.name || "file")}" loading="lazy"></div>`; } const fallback = preview?.content || "Preview unavailable"; return `<div class="job-flow-preview is-empty small muted">${escapeHtml(fallback)}</div>`; };
   const readFlowCollapsedCategories = ()=>{ const raw = Array.isArray(window.jobFlowCollapsedCategories) ? window.jobFlowCollapsedCategories : []; return new Set(raw.map(id => String(id))); };
   const writeFlowCollapsedCategories = (set)=>{ window.jobFlowCollapsedCategories = Array.from(set).map(id => String(id)); };
-  const renderFlowChart = ()=>{ if (!flowChart) return; const query = String(flowFilterInput?.value || "").trim().toLowerCase(); const grouping = String(flowGroupingSelect?.value || "categoryTree"); const hidePreviews = Boolean(flowHidePreviews?.checked); const jobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : []; const completed = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []; const list = jobs.concat(completed).filter(Boolean); const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"; const folders = Array.isArray(window.jobFolders)&&window.jobFolders.length ? window.jobFolders.slice() : [{ id: rootId, name: "All Jobs", parent: null, order: 1 }]; if (!folders.some(folder => String(folder?.id) === String(rootId))) folders.push({ id: rootId, name: "All Jobs", parent: null, order: 1 }); const folderMap = new Map(folders.map(folder => [String(folder.id), folder])); const normalizeCategory=(cat)=>{ const key = cat != null ? String(cat) : rootId; return folderMap.has(key)?key:rootId; }; const projectNumberForJob=(job)=>{ const direct = normalizeProjectNumber(job?.projectNumber); if (direct) return direct; const folderName = folderMap.get(normalizeCategory(job?.cat))?.name || ""; return categoryProjectNumber(folderName) || "0000"; }; const childrenOf=(parentId)=>{ const key=parentId==null?null:String(parentId); return folders.filter(folder => (folder.parent==null?null:String(folder.parent))===key).sort((a,b)=>String(a?.name||"").localeCompare(String(b?.name||""))); }; const categoryOrder=[]; const walkCategory=(id)=>{ const key=String(id); categoryOrder.push(key); childrenOf(key).forEach(child=>walkCategory(child.id)); }; walkCategory(rootId); const categoryCutMap=new Map(categoryOrder.map((id,idx)=>[id,`CAT-${String(idx+1).padStart(3,"0")}`])); const categoryCutLabel=(catId)=>categoryCutMap.get(String(catId||rootId))||"CAT-000"; const filtered=list.filter(job=>{ const project=projectNumberForJob(job); const material=String(job?.material||""); const est=Number(job?.estimateHours); const dateTokens=[job?.startISO,job?.dueISO,job?.completedAtISO].filter(Boolean).join(" "); const fileNames=(Array.isArray(job?.files)?job.files:[]).map(file=>file?.name||"").join(" "); const token=`${project} ${job?.name||""} ${material} ${Number.isFinite(est)?est:""} ${dateTokens} ${fileNames}`.toLowerCase(); return !query || token.includes(query); }); const jobCategoryCutMap=window.CuttingJobDateEditing?.categoryNumbers(jobs,completed)||new Map(); const jobCutLabel=(job)=>window.CuttingJobChronology?.readCutLabel(job)??"—"; const jobCategoryCutLabel=(job)=>jobCategoryCutMap.get(String(job?.id||""))||"0"; const renderJobCard=(job)=>{ const files=Array.isArray(job?.files)?job.files:[]; const fileList=files.length?files.map(file=>`<li><span class="job-flow-file-name">${escapeHtml(file?.name || "Attachment")}</span>${hidePreviews?"":previewCardMarkup(file)}</li>`).join(""):'<li class="small job-flow-empty">No attached files</li>'; const style=categoryStyleAttr(normalizeCategory(job?.cat), folderMap, rootId); return `<article class="job-flow-job-card"${style}><header><div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")} · ${escapeHtml(jobCutLabel(job))} · ${escapeHtml(jobCategoryCutLabel(job))}</div><div class="small job-flow-meta">Project #${escapeHtml(projectNumberForJob(job))}</div><div class="small job-flow-meta">Material: ${escapeHtml(job?.material || "—")}</div><div class="small job-flow-meta">Cut length: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div><div class="small job-flow-meta">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div></header><ul class="job-flow-file-list">${fileList}</ul></article>`; }; let html=""; if (grouping==="categoryTree"){ const byCategory=new Map(); filtered.forEach(job=>{ const cat=normalizeCategory(job?.cat); if (!byCategory.has(cat)) byCategory.set(cat,[]); byCategory.get(cat).push(job); }); const hasDescendantJobs=(categoryId)=>{ const key=String(categoryId); if ((byCategory.get(key)||[]).length>0) return true; return childrenOf(key).some(child=>hasDescendantJobs(String(child.id))); }; const collapsedSet=readFlowCollapsedCategories(); const renderCategoryNode=(categoryId, depth=0)=>{ const key=String(categoryId); if (!hasDescendantJobs(key)) return ""; const folder=folderMap.get(key)||{id:key,name:"Category"}; const projects=new Map(); (byCategory.get(key)||[]).forEach(job=>{ const project=projectNumberForJob(job); if (!projects.has(project)) projects.set(project,[]); projects.get(project).push(job); }); const projectMarkup=Array.from(projects.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([project, projectJobs])=>`<section class="job-flow-project-group"><h6>Project ${escapeHtml(project)}</h6><div class="job-flow-group-grid">${projectJobs.map(renderJobCard).join("")}</div></section>`).join(""); const childMarkup=childrenOf(key).map(child=>renderCategoryNode(String(child.id), depth+1)).join(""); const style=categoryStyleAttr(key, folderMap, rootId); const collapsed=collapsedSet.has(key); return `<div class="job-flow-tree-node" data-depth="${depth}"><div class="job-flow-tree-title-row"><button type="button" class="job-flow-tree-title job-flow-tree-title-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed?"false":"true"}"${style}>${escapeHtml(folder?.name || "Category")} · ${escapeHtml(categoryProjectNumber(folder?.name) || "----")} · ${escapeHtml(categoryCutLabel(key))}</button></div><div class="job-flow-tree-body${collapsed ? " is-collapsed" : ""}">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div></div>`; }; html=`<section class="job-flow-group"><h5>Category tree</h5>${renderCategoryNode(rootId)}</section>`; } else { const groups=new Map(); filtered.forEach(job=>{ const key=grouping==="job"?String(job?.name||"Untitled job"):projectNumberForJob(job); if (!groups.has(key)) groups.set(key,[]); groups.get(key).push(job); }); html=Array.from(groups.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([key,groupJobs])=>`<section class="job-flow-group"><h5>${escapeHtml(grouping==="job"?"Job":"Project")} ${escapeHtml(key)}</h5><div class="job-flow-group-grid">${groupJobs.map(renderJobCard).join("")}</div></section>`).join(""); } flowChart.innerHTML = html || '<p class="small job-flow-empty">No projects match this filter.</p>'; if (flowChart) flowChart.classList.toggle("hide-previews", hidePreviews); };
+  const renderFlowChart = ()=>{ if (!flowChart) return; const query = String(flowFilterInput?.value || "").trim().toLowerCase(); const grouping = String(flowGroupingSelect?.value || "categoryTree"); const hidePreviews = Boolean(flowHidePreviews?.checked); const jobs = Array.isArray(window.cuttingJobs) ? window.cuttingJobs : []; const completed = Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []; const list = jobs.concat(completed).filter(Boolean); const rootId = typeof window.JOB_ROOT_FOLDER_ID === "string" ? window.JOB_ROOT_FOLDER_ID : "jobs_root"; const folders = Array.isArray(window.jobFolders)&&window.jobFolders.length ? window.jobFolders.slice() : [{ id: rootId, name: "All Jobs", parent: null, order: 1 }]; if (!folders.some(folder => String(folder?.id) === String(rootId))) folders.push({ id: rootId, name: "All Jobs", parent: null, order: 1 }); const folderMap = new Map(folders.map(folder => [String(folder.id), folder])); const normalizeCategory=(cat)=>{ const key = cat != null ? String(cat) : rootId; return folderMap.has(key)?key:rootId; }; const projectNumberForJob=(job)=>{ const direct = normalizeProjectNumber(job?.projectNumber); if (direct) return direct; const folderName = folderMap.get(normalizeCategory(job?.cat))?.name || ""; return categoryProjectNumber(folderName) || "0000"; }; const childrenOf=(parentId)=>{ const key=parentId==null?null:String(parentId); return folders.filter(folder => (folder.parent==null?null:String(folder.parent))===key).sort((a,b)=>String(a?.name||"").localeCompare(String(b?.name||""))); }; const categoryOrder=[]; const walkCategory=(id)=>{ const key=String(id); categoryOrder.push(key); childrenOf(key).forEach(child=>walkCategory(child.id)); }; walkCategory(rootId); const categoryCutMap=new Map(categoryOrder.map((id,idx)=>[id,`CAT-${String(idx+1).padStart(3,"0")}`])); const categoryCutLabel=(catId)=>categoryCutMap.get(String(catId||rootId))||"CAT-000"; const filtered=list.filter(job=>{ const project=projectNumberForJob(job); const material=String(job?.material||""); const est=Number(job?.estimateHours); const dateTokens=[job?.startISO,job?.dueISO,job?.completedAtISO].filter(Boolean).join(" "); const fileNames=(Array.isArray(job?.files)?job.files:[]).map(file=>file?.name||"").join(" "); const token=`${project} ${job?.name||""} ${material} ${Number.isFinite(est)?est:""} ${dateTokens} ${fileNames}`.toLowerCase(); return !query || token.includes(query); }); const jobCategoryCutMap=window.CuttingJobDateEditing?.categoryNumbers(jobs,completed)||new Map(); const jobCutLabel=(job)=>window.CuttingJobChronology?.readCutLabel(job)??"—"; const jobCategoryCutLabel=(job)=>jobCategoryCutMap.get(String(job?.id||""))||"0"; const renderJobCard=(job)=>{ const files=Array.isArray(job?.files)?job.files:[]; const fileList=files.length?files.map(file=>`<li><span class="job-flow-file-name">${escapeHtml(file?.name || "Attachment")}</span>${hidePreviews?"":previewCardMarkup(file)}</li>`).join(""):'<li class="small job-flow-empty">No attached files</li>'; const style=categoryStyleAttr(normalizeCategory(job?.cat), folderMap, rootId); return `<article class="job-flow-job-card"${style}><header><div class="job-flow-job-title">${escapeHtml(job?.name || "Untitled job")} · ${escapeHtml(jobCutLabel(job))} · ${escapeHtml(jobCategoryCutLabel(job))}</div><div class="small job-flow-meta">Project #${escapeHtml(projectNumberForJob(job))}</div><div class="small job-flow-meta">Material: ${escapeHtml(job?.material || "—")}</div><div class="small job-flow-meta">Hours Taken: ${Number.isFinite(Number(job?.estimateHours)) ? Number(job.estimateHours).toFixed(1) + " hr" : "—"}</div><div class="small job-flow-meta">${escapeHtml(job?.startISO || "—")} → ${escapeHtml(job?.dueISO || "—")}</div></header><ul class="job-flow-file-list">${fileList}</ul></article>`; }; let html=""; if (grouping==="categoryTree"){ const byCategory=new Map(); filtered.forEach(job=>{ const cat=normalizeCategory(job?.cat); if (!byCategory.has(cat)) byCategory.set(cat,[]); byCategory.get(cat).push(job); }); const hasDescendantJobs=(categoryId)=>{ const key=String(categoryId); if ((byCategory.get(key)||[]).length>0) return true; return childrenOf(key).some(child=>hasDescendantJobs(String(child.id))); }; const collapsedSet=readFlowCollapsedCategories(); const renderCategoryNode=(categoryId, depth=0)=>{ const key=String(categoryId); if (!hasDescendantJobs(key)) return ""; const folder=folderMap.get(key)||{id:key,name:"Category"}; const projects=new Map(); (byCategory.get(key)||[]).forEach(job=>{ const project=projectNumberForJob(job); if (!projects.has(project)) projects.set(project,[]); projects.get(project).push(job); }); const projectMarkup=Array.from(projects.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([project, projectJobs])=>`<section class="job-flow-project-group"><h6>Project ${escapeHtml(project)}</h6><div class="job-flow-group-grid">${projectJobs.map(renderJobCard).join("")}</div></section>`).join(""); const childMarkup=childrenOf(key).map(child=>renderCategoryNode(String(child.id), depth+1)).join(""); const style=categoryStyleAttr(key, folderMap, rootId); const collapsed=collapsedSet.has(key); return `<div class="job-flow-tree-node" data-depth="${depth}"><div class="job-flow-tree-title-row"><button type="button" class="job-flow-tree-title job-flow-tree-title-toggle" data-job-flow-tree-toggle="${escapeHtml(key)}" aria-expanded="${collapsed?"false":"true"}"${style}>${escapeHtml(folder?.name || "Category")} · ${escapeHtml(categoryProjectNumber(folder?.name) || "----")} · ${escapeHtml(categoryCutLabel(key))}</button></div><div class="job-flow-tree-body${collapsed ? " is-collapsed" : ""}">${projectMarkup || '<p class="small job-flow-empty">No direct jobs in this category.</p>'}${childMarkup}</div></div>`; }; html=`<section class="job-flow-group"><h5>Category tree</h5>${renderCategoryNode(rootId)}</section>`; } else { const groups=new Map(); filtered.forEach(job=>{ const key=grouping==="job"?String(job?.name||"Untitled job"):projectNumberForJob(job); if (!groups.has(key)) groups.set(key,[]); groups.get(key).push(job); }); html=Array.from(groups.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([key,groupJobs])=>`<section class="job-flow-group"><h5>${escapeHtml(grouping==="job"?"Job":"Project")} ${escapeHtml(key)}</h5><div class="job-flow-group-grid">${groupJobs.map(renderJobCard).join("")}</div></section>`).join(""); } flowChart.innerHTML = html || '<p class="small job-flow-empty">No projects match this filter.</p>'; if (flowChart) flowChart.classList.toggle("hide-previews", hidePreviews); };
   const noteTextarea = content.querySelector("#jobNoteModalInput");
   const noteJobLabel = content.querySelector("#jobNoteModalJob");
   const noteHistory = content.querySelector("#jobNoteModalHistory");
@@ -23086,7 +23161,7 @@ function renderJobs(){
     }
     if (!Number.isFinite(materialWeight) || materialWeight < 0){ toast("Enter a valid material quantity."); return; }
     if (!Number.isFinite(chargeRate) || chargeRate < 0){ toast("Enter a valid charge rate."); return; }
-    if (!Number.isFinite(costRate) || costRate < 0){ toast("Enter a valid cost rate."); return; }
+    if (!Number.isFinite(costRate)){ toast("Enter a valid cost rate."); return; }
     if (materialCost <= 0 && materialWeight > 0){
       const selectedMaterial = materialSettings.materials.find(m => m.name === material);
       const pricePerLb = Number(selectedMaterial?.pricePerLb || 0);
@@ -23637,6 +23712,8 @@ function renderJobs(){
   }
 
   historyBody?.addEventListener("click", async (e)=>{
+    const failedCut = e.target.closest("[data-history-failed-cut]");
+    if (failedCut){ e.preventDefault(); const trigger = failedCut.closest(".job-actions")?.querySelector("[data-history-actions-toggle]") || failedCut; closeHistoryActionMenu(); showFailedCutDialog(failedCut.getAttribute("data-history-failed-cut"), trigger); return; }
     if (await handleCuttingJobFileActionClick(e)) return;
     const historyActionTrigger = e.target.closest("[data-history-actions-toggle]");
     if (historyActionTrigger){
@@ -23810,7 +23887,7 @@ function renderJobs(){
             chargeRate: Number.isFinite(Number(entry.chargeRate)) && Number(entry.chargeRate) >= 0
               ? Number(entry.chargeRate)
               : JOB_RATE_PER_HOUR,
-            costRate: Number.isFinite(Number(entry.costRate)) && Number(entry.costRate) >= 0
+            costRate: Number.isFinite(Number(entry.costRate))
               ? Number(entry.costRate) : JOB_BASE_COST_PER_HOUR,
             priority: typeof getJobPriority === "function"
               ? getJobPriority(entry)
@@ -23886,7 +23963,6 @@ function renderJobs(){
       if (!pair.ok) return;
       const nameInput = field("name");
       const estimateInput = field("estimateHours");
-      const actualInput = field("actualHours");
       const materialInput = field("material");
       const materialCostInput = field("materialCost");
       const materialQtyInput = field("materialQty");
@@ -23903,10 +23979,6 @@ function renderJobs(){
       const estNum = estVal === "" || estVal == null ? null : Number(estVal);
       const estimateHours = Number.isFinite(estNum) && estNum >= 0 ? estNum : Number(entry.estimateHours) || 0;
 
-      const actVal = actualInput?.value;
-      const actualNum = actVal === "" || actVal == null ? null : Number(actVal);
-      const actualHours = Number.isFinite(actualNum) && actualNum >= 0 ? actualNum : null;
-
       const material = materialInput?.value ?? entry.material ?? "";
       const materialCostVal = materialCostInput?.value;
       const materialCostNum = materialCostVal === "" || materialCostVal == null ? null : Number(materialCostVal);
@@ -23922,7 +23994,7 @@ function renderJobs(){
 
       const costRateVal = costRateInput?.value;
       const costRateNum = costRateVal === "" || costRateVal == null ? null : Number(costRateVal);
-      if (costRateNum != null && (!Number.isFinite(costRateNum) || costRateNum < 0)){ toast("Enter a valid cost rate."); return; }
+      if (costRateNum != null && !Number.isFinite(costRateNum)){ toast("Enter a valid cost rate."); return; }
 
       const notes = notesInput?.value ?? entry.notes ?? "";
 
@@ -23959,13 +24031,12 @@ function renderJobs(){
 
       const fallbackCost = (() => {
         const existingCost = Number(entry.costRate);
-        if (Number.isFinite(existingCost) && existingCost >= 0) return existingCost;
+        if (Number.isFinite(existingCost)) return existingCost;
         const effCost = Number(entry.efficiency?.costRate);
-        if (Number.isFinite(effCost) && effCost >= 0) return effCost;
-        return estimateHours > 0 ? JOB_BASE_COST_PER_HOUR + ((materialCost * materialQty) / estimateHours) : JOB_BASE_COST_PER_HOUR;
+        if (Number.isFinite(effCost)) return effCost;
+        return JOB_BASE_COST_PER_HOUR;
       })();
-      const costRate = Number.isFinite(costRateNum) && costRateNum >= 0 ? costRateNum : fallbackCost;
-      const netRate = chargeRate - costRate;
+      const costRate = Number.isFinite(costRateNum) ? costRateNum : fallbackCost;
 
       entry.name = name;
       entry.estimateHours = estimateHours;
@@ -23975,7 +24046,6 @@ function renderJobs(){
       entry.chargeRate = chargeRate;
       entry.costRate = costRate;
       entry.notes = notes;
-      entry.actualHours = actualHours != null ? actualHours : null;
       entry.files = mergeJobFileReferences(filesBeforeSave, entry.files);
       if (window.DEBUG_MODE) console.info("[cutting-job-files] history save files", {
         jobId: String(id),
@@ -23984,25 +24054,19 @@ function renderJobs(){
       });
       applyManualJobProjectCategory(entry, pair);
 
-      const rate = Number.isFinite(netRate) ? netRate : (Number(entry.efficiency?.rate) || JOB_RATE_PER_HOUR);
-      const deltaHours = actualHours != null ? (estimateHours - actualHours) : (entry.efficiency?.deltaHours ?? null);
-      const gainLoss = deltaHours != null ? deltaHours * rate : (entry.efficiency?.gainLoss ?? null);
-
+      const profit = computeCuttingJobProfit(entry);
       entry.efficiency = {
         ...entry.efficiency,
-        rate,
-        chargeRate,
-        costRate,
-        netRate,
-        expectedHours: estimateHours,
-        actualHours: entry.actualHours,
-        expectedRemaining: 0,
-        actualRemaining: 0,
-        deltaHours,
-        gainLoss
+        rate: profit.netRate,
+        chargeRate: profit.chargeRate,
+        costRate: profit.costRate,
+        netRate: profit.netRate,
+        hoursTaken: profit.hours,
+        totalProfit: profit.totalProfit,
+        gainLoss: profit.totalProfit
       };
 
-      const updates=Object.fromEntries(["name","startISO","completedAtISO","estimateHours","material","materialCost","materialQty","chargeRate","costRate","notes","actualHours","cat","projectNumber","priority","efficiency"].filter(key=>!["startISO","completedAtISO"].includes(key)||entry[key]).map(key=>[key,entry[key]]));
+      const updates=Object.fromEntries(["name","startISO","completedAtISO","estimateHours","material","materialCost","materialQty","chargeRate","costRate","notes","cat","projectNumber","priority","efficiency"].filter(key=>!["startISO","completedAtISO"].includes(key)||entry[key]).map(key=>[key,entry[key]]));
       histSave.disabled=true;
       const result=await saveCuttingJobEdit(id,updates);
       histSave.disabled=false;
@@ -24161,17 +24225,17 @@ function renderJobs(){
       if (chargeVal != null && (!Number.isFinite(chargeVal) || chargeVal < 0)){ toast("Enter a valid charge rate."); return; }
       const costRaw = qs("costRate");
       const costVal = costRaw === "" || costRaw == null ? null : Number(costRaw);
-      if (costVal != null && (!Number.isFinite(costVal) || costVal < 0)){ toast("Enter a valid cost rate."); return; }
+      if (costVal != null && !Number.isFinite(costVal)){ toast("Enter a valid cost rate."); return; }
       const existingCharge = Number.isFinite(Number(j.chargeRate)) && Number(j.chargeRate) >= 0
         ? Number(j.chargeRate)
         : JOB_RATE_PER_HOUR;
       const chargeToSet = chargeVal == null ? existingCharge : chargeVal;
-      const existingCost = Number.isFinite(Number(j.costRate)) && Number(j.costRate) >= 0
+      const existingCost = Number.isFinite(Number(j.costRate))
         ? Number(j.costRate)
         : 45;
       const costToSet = costVal == null ? existingCost : costVal;
       j.name = qs("name") || j.name;
-      j.estimateHours = Math.max(1, Number(qs("estimateHours"))||j.estimateHours||1);
+      j.estimateHours = Math.max(0.01, Number(qs("estimateHours"))||j.estimateHours||1);
       j.material = qs("material") || j.material || "";
       j.materialCost = Math.max(0, Number(qs("materialCost")) || 0);
       j.materialQty = Math.max(0, Number(qs("materialQty")) || 0);

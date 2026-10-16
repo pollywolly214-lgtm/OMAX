@@ -26,6 +26,7 @@ function harness(active=[],completed=[]){
     materialSettings:{materials:[]},pendingNewJobFiles:[],pendingSecureCloudJobFiles:[],recalcMaterialTotals:noop,applyMinutesToHours:noop,fractionToNumber:()=>.25,
     refreshCfr05CloudPresentation:async()=>{},JOB_ROOT_FOLDER_ID:"jobs_root",ensureJobFolderState:()=>window.jobFolders,setJobFolders:value=>{window.jobFolders=value;},normalizeHexColor:()=>null,
     ensureJobCategories:()=>{throw Error("Manual flow must not normalize historical jobs");}});
+  vm.runInContext(fn(fs.readFileSync("js/computations.js","utf8"),"computeCuttingJobProfit"),c);
   c.structuredClone=structuredClone;
   c.showConfirmModal=async options=>{
     const values={"[data-category-name]":{value:window.prompt("name")},"[data-category-project]":{value:window.prompt("project")},"[data-category-create-color]":{value:"#2563eb"},"[data-category-error]":{textContent:""}};
@@ -36,16 +37,16 @@ function harness(active=[],completed=[]){
   for(const name of ["validateManualJobProjectCategory","applyManualJobProjectCategory","addJobFolder"])vm.runInContext(fn(core,name),c);
   for(const name of ["parseCuttingJobDimension","promptCreateCategory","selectManualJobCategory","existingJobCategoryEditMessage","validateExistingJobCategoryEdit","syncManualJobProjectControl","syncManualJobProjectControls"])vm.runInContext(fn(renderers,name),c);
   window.uploadCfr05CuttingFile=async()=>{calls.upload++;return{stage:"completed"};};
-  function dashboard(cat="blanco",project="1254"){
-    const defaults={jobNameInput:"Part",jobEstimateInput:"2",jobChargeInput:"200",jobCostRateInput:"45",jobMaterialInput:"Steel",jobMaterialCostInput:"9",jobMaterialQtyInput:"1",jobStartInput:"2026-10-06",jobDueInput:"2026-10-07",jobProjectInput:project};
+  function dashboard(cat="blanco",project="1254",costRate="45"){
+    const defaults={jobNameInput:"Part",jobEstimateInput:"2",jobChargeInput:"200",jobCostRateInput:costRate,jobMaterialInput:"Steel",jobMaterialCostInput:"9",jobMaterialQtyInput:"1",jobStartInput:"2026-10-06",jobDueInput:"2026-10-07",jobProjectInput:project};
     Object.assign(c,Object.fromEntries(Object.entries(defaults).map(([key,value])=>[key,{value}])));
     c.jobCategoryInput=new Select(cat);c.dashRootCategoryId="jobs_root";c.applyDashMinutesToHours=noop;
     c.jobForm={addEventListener:(_,handler)=>{c.handler=handler;}};
     vm.runInContext(between('  jobForm?.addEventListener("submit"','\n  if (jobCategoryInput){'),c);
     return c.handler({preventDefault:noop});
   }
-  function add(cat="blanco",project="1254",secure=false){
-    const defaults={jobName:"Part",jobEst:"2",jobMaterial:"Steel",jobCharge:"200",jobCostRate:"45",jobMaterialCost:"9",jobMaterialQty:"1",jobStart:"2026-10-06",jobDue:"2026-10-07",jobProjectNumber:project,jobPriority:"1",jobMaterialLengthFt:"2",jobMaterialWidthFt:"2"};
+  function add(cat="blanco",project="1254",secure=false,costRate="45"){
+    const defaults={jobName:"Part",jobEst:"2",jobMaterial:"Steel",jobCharge:"200",jobCostRate:costRate,jobMaterialCost:"9",jobMaterialQty:"1",jobStart:"2026-10-06",jobDue:"2026-10-07",jobProjectNumber:project,jobPriority:"1",jobMaterialLengthFt:"2",jobMaterialWidthFt:"2"};
     Object.assign(elements,Object.fromEntries(Object.entries(defaults).map(([key,value])=>[key,{value,textContent:value}])));
     elements.jobCategory=new Select(cat);elements.addJobForm={addEventListener:(_,handler)=>{c.handler=handler;}};
     c.addJobEstHoursInput=elements.jobEst;c.addJobEstBreakdown=null;c.jobRootCategoryId="jobs_root";
@@ -206,5 +207,21 @@ test("active and history edits stay open until verification, including failed/in
       assert.equal(editing.has("j"),!confirmed);
       assert.equal(renders,confirmed?1:0);
     }
+  }
+});
+
+test("CJPROFIT-01: manual creation accepts signed costs through both forms",async()=>{
+  const dash=harness();await dash.dashboard("blanco","1254","-60");assert.equal(dash.window.cuttingJobs[0].costRate,-60);
+  const add=harness();await add.add("blanco","1254",false,"-60");assert.equal(add.window.cuttingJobs[0].costRate,-60);
+});
+test("CJPROFIT-01: active/history save signed cost and fractional cut time without unrelated changes",async()=>{
+  for(const past of [false,true]){
+    const original=job({costRate:60,chargeRate:150,actualHours:0}),before=structuredClone(original),h=harness(past?[]:[original],past?[original]:[]);
+    await h.edit(past,{cat:"blanco",projectNumber:"1254",costRate:"-80",chargeRate:"200",estimateHours:"0.5",actualHours:"0.5",materialCost:"9",materialQty:"1"});
+    assert.equal(original.costRate,-80);assert.equal(original.chargeRate,200);assert.equal(original.estimateHours,.5);
+    if(past){assert.equal(original.actualHours,0);assert.equal(original.efficiency.netRate,120);assert.equal(original.efficiency.costRate,80);assert.equal(original.efficiency.totalProfit,51);}
+    assert.equal(h.calls.save,1);
+    for(const key of ["id","cat","projectNumber","cutNumber","cutDateISO","cutOrderWithinDay","files","importProvenance","actualHours","manualLogs"])
+      assert.deepEqual(original[key],before[key],key);
   }
 });
