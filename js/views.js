@@ -1986,11 +1986,32 @@ function viewCosts(model){
               <select data-receipt-week-select aria-label="Select purchase history week"></select>
             </label>
             <button type="button" class="btn" data-receipt-save-week>Save week</button>
+            <button type="button" class="btn" data-receipt-new-order>New Order</button>
             <button type="button" class="btn secondary" data-receipt-quick-add-task>Quick add task</button>
             <button type="button" class="btn secondary" data-receipt-clear-all>Clear all</button>
             <button type="button" class="btn secondary" data-receipt-undo-clear disabled>Undo clear</button>
             <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
           </div>
+          <section data-purchase-order-editor hidden aria-label="New purchase order" style="border:1px solid #cfd7e6;border-radius:10px;padding:14px;margin-bottom:14px;">
+            <h4>New Purchase Order</h4>
+            <div class="cost-receipt-controls">
+              <label>Order date<input type="date" data-purchase-order-date required></label>
+              <label>Total shipping ($)<input type="number" min="0" step="0.01" data-purchase-order-shipping value="0" required></label>
+            </div>
+            <div class="cost-weekly-table-wrap">
+              <table class="cost-table cost-receipt-week-table">
+                <thead><tr><th>Item</th><th>Part #</th><th>Qty</th><th>Unit cost</th><th>Line tax</th><th>Inventory link (optional)</th><th>Allocated shipping</th><th>Total spend</th><th></th></tr></thead>
+                <tbody data-purchase-order-items></tbody>
+              </table>
+            </div>
+            <p data-purchase-order-preview aria-live="polite"></p>
+            <p data-purchase-order-status role="alert"></p>
+            <div class="cost-receipt-controls">
+              <button type="button" class="btn secondary" data-purchase-order-add>Add Item</button>
+              <button type="button" class="btn" data-purchase-order-save>Save Order</button>
+              <button type="button" class="btn secondary" data-purchase-order-cancel>Cancel</button>
+            </div>
+          </section>
           <p class="small muted" data-receipt-week-range>—</p>
           <p class="small muted" data-receipt-week-allocation-note hidden>Historical shipping and tax may be allocated across items from the same original order.</p>
           <div class="cost-weekly-table-wrap">

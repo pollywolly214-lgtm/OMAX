@@ -38,6 +38,7 @@ class Row extends Element {
     for(const col of ["total","merchandiseSubtotal"]){if(!this.cells[col])this.cells[col]=new Element();}
   }
   querySelector(selector){ return this.cells[selector.match(/data-col=["']?([^"'\]]+)/)?.[1]] || null; }
+  querySelectorAll(selector){ return selector === "input" ? Object.values(this.cells).filter(cell=> cell instanceof Input) : []; }
 }
 class Body extends Element {
   set innerHTML(html){
@@ -145,10 +146,22 @@ test("untouched historical values and metadata remain exact, including decimal q
   await h.edit(0,"qty","2.25");assert.equal(weeks[0].rows[0].qty,"1.5");await h.edit(0,"qty","3");assert.equal(weeks[0].rows[0].qty,3);
 });
 test("deletion followed by repeated saves preserves the surviving row's complete identity/provenance",async()=>{
-  const survivor=row({id:"existing-id",orderId:"optional-order",import_event_id:"source-b",importProvenance:{sourceRecord:{keep:true}},inventoryItemId:"linked",custom:[1,2]});
+  const survivor=row({id:"existing-id",lineId:"optional-line",import_event_id:"source-b",importProvenance:{sourceRecord:{keep:true}},inventoryItemId:"linked",custom:[1,2]});
   const weeks=[week([row(),survivor])],h=harness({weeks});await h.remove(0);await h.edit(0,"cost","18");await h.edit(0,"cost","19");
   await h.control("save-week").fire("click");await h.control("save-week").fire("click");
   assert.equal(weeks[0].rows.length,1);assert.deepEqual({...weeks[0].rows[0]},{...survivor,cost:19});
+});
+test("saved order lines are view-only and generic edit/remove/clear cannot change their allocations",async()=>{
+  const original=row({lineId:"line-a",orderId:"order-a",orderShippingCents:400,orderDateISO:"2026-10-15"});
+  const weeks=[week([original])],h=harness({weeks}),before=JSON.stringify(weeks);
+  assert.equal(h.input(0,"qty").readOnly,true);assert.match(h.body.html,/Order order-a/);
+  await h.remove(0);assert.equal(JSON.stringify(weeks),before);
+  await h.edit(0,"qty","5");await h.control("save-week").fire("click");assert.equal(JSON.stringify(weeks),before);assert.equal(h.saves+h.autosaves,0);
+  await h.control("clear-all").fire("click");assert.equal(JSON.stringify(weeks),before);
+});
+test("programmatically removing an order row is rejected at the save boundary",async()=>{
+  const weeks=[week([row({lineId:"line-a",orderId:"order-a"})])],h=harness({weeks}),before=JSON.stringify(weeks);
+  h.body.children[0].remove();await h.control("save-week").fire("click");assert.equal(JSON.stringify(weeks),before);assert.equal(h.saves,0);
 });
 for(const [name,result] of [["blocked CAS",{saved:false,blocked:true,error:"revision conflict"}],["contradictory blocked acknowledgement",{saved:true,stateWriteCompleted:true,blocked:true}],["indeterminate",{saved:false,indeterminate:true}],["unacknowledged",{saved:true,stateWriteCompleted:false}],["unavailable",undefined]])test(`${name} saves never confirm success, close, or refresh`,async()=>{
   const h=harness({save:()=>result});await h.open.fire("click");await h.edit(0,"purchased","Draft");await h.edit(0,"qty","2");
