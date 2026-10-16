@@ -3544,7 +3544,7 @@ function viewJobs(){
           <span class="category-color-bar" aria-hidden="true"></span>
           <input type="color" class="category-color-picker" value="${categoryAccentHex(id)}" data-job-folder-color-input="${esc(id)}" aria-label="Choose color for ${esc(folder.name || (isRoot ? "All Jobs" : "Category"))}">
         </span>
-        <button type="button" class="category-color-reset${categoryHasCustomColor(id) ? "" : " is-hidden"}" data-job-folder-color-reset="${esc(id)}" title="Use automatic color">Auto</button>
+        <button type="button" class="category-color-reset${categoryHasCustomColor(id) ? "" : " is-hidden"}" data-job-folder-color-reset="${esc(id)}" title="Use automatic color">Auto Color</button>
       </div>
     <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
       <div class="cost-receipt-backdrop" data-order-repair-close></div>
@@ -4539,15 +4539,6 @@ function viewJobs(){
       <div class="job-category-backdrop" data-job-category-close></div>
       <div class="job-category-modal-card">
         <div class="job-category-modal-heading"><h3 id="jobCategoryManagerTitle">Edit Categories</h3><button type="button" data-job-category-close aria-label="Close categories">×</button></div>
-        <form id="jobCategoryEditForm" class="job-category-edit-form" hidden>
-          <h4>Edit existing category</h4>
-          <input type="hidden" name="categoryId">
-          <label>Project Number <input name="projectNumber" type="text" autocomplete="off" required></label>
-          <label>Category Name <input name="categoryName" type="text" maxlength="120" required></label>
-          <p class="small muted">The category keeps its ID. Linked active and completed jobs keep their IDs and history.</p>
-          <p class="job-category-edit-status" role="status" aria-live="polite"></p>
-          <div class="job-category-edit-actions"><button type="button" data-job-category-edit-cancel>Cancel</button><button type="submit" data-job-category-edit-save>Review &amp; Save</button></div>
-        </form>
         <div class="block job-category-panel" data-job-category-panel>
           <div class="job-category-header">
             <h3>Job Categories</h3>
@@ -4560,6 +4551,31 @@ function viewJobs(){
         </div>
       </div>
     </div>
+
+    <dialog id="jobCategoryEditor" class="job-category-editor" aria-labelledby="jobCategoryEditorTitle" aria-describedby="jobCategoryEditImpact">
+      <form id="jobCategoryEditForm" class="job-category-edit-form">
+        <h3 id="jobCategoryEditorTitle">Edit Category</h3>
+        <input type="hidden" name="categoryId">
+        <section class="job-category-current" aria-labelledby="jobCategoryCurrentTitle">
+          <h4 id="jobCategoryCurrentTitle">Current Category</h4>
+          <dl class="job-category-edit-grid">
+            <div><dt>Project Number</dt><dd data-job-category-current-project></dd></div>
+            <div><dt>Category Name</dt><dd data-job-category-current-name></dd></div>
+          </dl>
+        </section>
+        <section aria-labelledby="jobCategoryNewTitle">
+          <h4 id="jobCategoryNewTitle">New Category</h4>
+          <div class="job-category-edit-grid">
+            <label>Project Number<input name="projectNumber" type="text" autocomplete="off" required></label>
+            <label>Category Name<input name="categoryName" type="text" maxlength="120" required></label>
+          </div>
+        </section>
+        <p id="jobCategoryEditImpact" class="job-category-edit-impact" aria-live="polite"></p>
+        <p class="small muted">This updates the existing category and linked jobs. Job descriptions, cut numbers, dates, files, costs and history are retained.</p>
+        <p class="job-category-edit-status" role="status" aria-live="polite"></p>
+        <div class="job-category-edit-actions"><button type="button" data-job-category-edit-cancel>Cancel</button><button type="submit" data-job-category-edit-save>Save Changes</button></div>
+      </form>
+    </dialog>
 
     <div class="block job-main-block">
       <p data-cutting-job-verification-notice role="alert" class="small" style="padding:10px;border:1px solid #b45309;background:#fff7ed;color:#7c2d12" ${window.__cuttingJobDisplayUnconfirmed ? "" : "hidden"}>Unverified cutting-job display: values below may be previously loaded data or unsaved edits. The latest save has not been verified; do not treat the information below as confirmed.</p>

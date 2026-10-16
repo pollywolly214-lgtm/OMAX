@@ -6567,19 +6567,66 @@ button.job-cloud-preview-button { display: block; width: min(100%, 340px); margi
 .job-dimension-preview { display:block; font-size:12px; color:var(--brand-blue-800); }
 [data-active-copy-status] { overflow-wrap:anywhere; }
 
-/* CJCAT-01B category manager */
+/* CJCAT: restrained category manager and separate, accessible edit dialog. */
 .job-category-modal[hidden]{display:none!important}
-.job-category-modal{position:fixed;inset:0;z-index:2200;display:flex;align-items:center;justify-content:center;padding:20px}
-.job-category-backdrop{position:absolute;inset:0;background:rgba(7,18,36,.7)}
-.job-category-modal-card{position:relative;display:flex;flex-direction:column;width:min(900px,96vw);max-height:calc(100dvh - 40px);overflow:auto;background:#fff;color:#14243d;border-radius:14px;box-shadow:0 20px 55px rgba(0,0,0,.4);padding:18px}
-.job-category-modal-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.job-category-modal-heading h3{margin:0}
-.job-category-modal-heading button{font-size:23px}
-.job-category-modal .job-category-panel{min-width:0;overflow:visible}
-.job-category-modal .job-category-tree{overflow:auto;max-height:65vh}
+.job-category-modal{position:fixed;inset:0;z-index:2200;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
+.job-category-backdrop{position:absolute;inset:0;background:rgb(7 18 36 / 48%)}
+.job-category-modal-card{position:relative;display:flex;flex-direction:column;width:min(900px,100%);max-height:calc(100dvh - 40px);overflow:auto;background:#fff;color:#14243d;border-radius:8px;box-shadow:0 12px 36px rgb(0 0 0 / 20%);padding:24px;box-sizing:border-box}
+.job-category-modal-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:16px;border-bottom:1px solid #e2e7ee}
+.job-category-modal-heading h3{margin:0;font-size:20px}
+.job-category-modal-heading button{font-size:24px;background:transparent;border:0;box-shadow:none;color:#526078;padding:0 8px}
+.job-category-modal .job-category-panel{min-width:0;margin:0;padding:16px 0 0;overflow:visible;background:none;border:0;border-radius:0;box-shadow:none}
+.job-category-modal .job-category-header{flex-wrap:wrap;gap:12px;padding-bottom:12px}
+.job-category-modal .job-category-header h3{font-size:14px;margin:0;color:#526078}
+.job-category-modal .job-category-tree{overflow:auto;min-height:0;max-height:60dvh;gap:0}
+.job-category-modal .job-folder{padding:10px 0;border:0;border-top:1px solid #e2e7ee;border-radius:0;background:none;box-shadow:none;gap:4px;min-width:0}
+.job-category-modal .job-folder-row[data-category-color]{padding:6px 8px;gap:12px;border:0;border-left:3px solid var(--job-category-accent,#a5afbd);border-radius:0;background:none;color:#14243d;box-shadow:none}
+.job-category-modal .job-folder-row[data-category-color]:hover,.job-category-modal .job-folder-row-selected[data-category-color]{background:#f3f6f9}
+.job-category-modal .job-folder-row-info{min-width:0;gap:4px}
+.job-category-modal .job-folder-select{padding:0;background:none;border:0;color:var(--job-category-text,#14243d);font-size:15px;text-shadow:none;overflow-wrap:anywhere;box-shadow:none;border-radius:0}
+.job-category-modal .job-folder-row .job-folder-count{padding:0;color:#526078;background:none;border-radius:0;box-shadow:none;font-size:12px}
+.job-category-modal .job-folder-children{margin:6px 0 0 16px;padding-left:12px;border-left:1px solid #e2e7ee;gap:0;min-width:0}
+.job-category-modal .job-folder-actions{margin:0;padding:0 8px;gap:12px}
+.job-category-modal .job-folder-actions .link{padding:6px 0;background:none;border:0;border-radius:0;box-shadow:none;color:#526078;font-weight:500;letter-spacing:normal;text-shadow:none;transform:none;filter:none;white-space:normal}
+.job-category-modal .job-folder-actions .danger{color:#a33131}
+.job-category-modal .job-folder-actions .link:hover{text-decoration:underline}
+.job-category-modal .job-folder-jobs{margin:4px 8px;border:0;border-radius:0;background:none}
+.job-category-modal .job-folder-jobs summary{padding:6px 0;font-weight:400;font-size:12px;color:#526078;background:none;border:0}
+.job-category-modal .job-folder-joblist{padding:8px 0;gap:8px}
+.job-category-modal .job-folder-job-chip{padding:0;border:0;border-radius:0;box-shadow:none;background:none;text-shadow:none;max-width:100%}
+.job-category-modal .job-title-chip-text{white-space:normal;overflow-wrap:anywhere}
+.job-category-modal .job-folder-row .category-color-control{padding:0;border:0;border-radius:0;background:none;box-shadow:none;gap:8px;flex-wrap:wrap}
+.job-category-modal .category-color-dot,.job-category-modal .category-color-bar{display:none}
+.job-category-modal .category-color-preview{flex:0 0 28px;min-width:28px;width:28px;height:28px;padding:0;background:none;border-radius:4px;box-shadow:none}
+.job-category-modal .category-color-picker{position:static;opacity:1;width:28px;height:28px;border:1px solid #d0d8e2;border-radius:4px;padding:2px;background:#fff}
+.job-category-modal .category-color-reset{font-size:12px;text-transform:none;letter-spacing:normal;font-weight:500;color:#526078;padding:5px 0;background:none;border:0;border-radius:0;box-shadow:none;transform:none}
+.job-category-modal [data-job-folder-add-root]{padding:7px 12px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#243c5b;box-shadow:none}
 body.job-category-modal-open{overflow:hidden}
-.job-category-edit-form{display:grid;gap:10px}
-.job-category-edit-form label{display:grid;gap:4px}
-.job-category-edit-actions{display:flex;justify-content:flex-end;gap:8px}
-.job-category-edit-status{min-height:1.3em}
-@media(max-width:640px){.job-category-modal{padding:8px}.job-category-modal-card{width:100%;max-height:calc(100dvh - 16px);padding:12px}}
+.job-category-editor{width:min(600px,calc(100vw - 32px));max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);overflow:auto;padding:24px;border:1px solid #d5dbe3;border-radius:8px;background:#fff;color:#14243d;box-sizing:border-box}
+.job-category-editor::backdrop{background:rgb(7 18 36 / 48%)}
+.job-category-edit-form{display:grid;gap:16px;min-width:0}
+.job-category-edit-form h3,.job-category-edit-form h4,.job-category-edit-form p{margin:0}
+.job-category-edit-form h3{font-size:20px}
+.job-category-edit-form h4{font-size:14px;margin-bottom:10px}
+.job-category-current{padding-bottom:16px;border-bottom:1px solid #e2e7ee}
+.job-category-edit-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px;margin:0}
+.job-category-edit-grid dt,.job-category-edit-form label{font-size:13px;color:#526078}
+.job-category-edit-grid dd{margin:4px 0 0;overflow-wrap:anywhere;font-weight:600}
+.job-category-edit-form label{display:grid;gap:6px;min-width:0}
+.job-category-edit-form input{width:100%;min-width:0;box-sizing:border-box;padding:9px 10px;border:1px solid #bac6d6;border-radius:5px;font:inherit;font-size:14px;background:#fff;color:#14243d}
+.job-category-edit-form input:focus-visible{outline:2px solid #0a63c2;outline-offset:1px}
+.job-category-edit-impact{font-size:14px;line-height:1.6;overflow-wrap:anywhere}
+.job-category-edit-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid #e2e7ee}
+.job-category-edit-actions button{padding:9px 14px;border:1px solid #bac6d6;border-radius:5px;background:#fff;color:#243c5b;font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.job-category-edit-actions [type="submit"]{background:#0a63c2;border-color:#0a63c2;color:#fff}
+.job-category-edit-actions button:focus-visible{outline:2px solid #0a63c2;outline-offset:2px}
+.job-category-edit-actions button:disabled{opacity:.55;cursor:wait}
+.job-category-edit-status{font-size:14px;color:#8c3b13;overflow-wrap:anywhere}
+.job-category-edit-status:empty{display:none}
+@media(max-width:640px){
+  .job-category-modal{padding:8px}
+  .job-category-modal-card{max-height:calc(100dvh - 16px);padding:16px}
+  .job-category-modal .job-folder-children{margin-left:8px;padding-left:6px}
+  .job-category-editor{padding:18px}
+  .job-category-edit-grid{grid-template-columns:minmax(0,1fr)}
+}

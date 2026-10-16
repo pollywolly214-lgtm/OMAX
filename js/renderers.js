@@ -21516,6 +21516,7 @@ function renderJobs(){
     const editingState = captureEditingJobForms();
     const historyEditingState = captureEditingHistoryJobForms();
     const scrollPosition = captureScrollPosition();
+    const categoryScroll = content.querySelector(".job-category-tree")?.scrollTop || 0;
     renderJobs();
     requestAnimationFrame(()=>{
       restoreScrollPosition(scrollPosition);
@@ -21523,6 +21524,11 @@ function renderJobs(){
       restoreEditingJobForms(editingState);
       restoreEditingHistoryJobForms(historyEditingState);
       syncManualJobProjectControls(content);
+      if(window.jobCategoryManagerOpen){
+        const tree=content.querySelector(".job-category-tree");
+        if(tree)tree.scrollTop=categoryScroll;
+        content.querySelector(".job-category-modal-heading [data-job-category-close]")?.focus({preventScroll:true});
+      }
     });
   };
 
@@ -21561,15 +21567,22 @@ function renderJobs(){
   };
 
   const categoryManager=content.querySelector("#jobCategoryManager");
+  const categoryEditor=content.querySelector("#jobCategoryEditor");
   const categoryEditForm=content.querySelector("#jobCategoryEditForm");
+  let categoryEditTrigger=null, categoryEditSaving=false, categoryEditPreview=null;
   const closeCategoryEditor=()=>{
-    if(categoryEditForm){categoryEditForm.hidden=true;categoryEditForm.reset();}
+    if(categoryEditSaving||window.__categoryMutationPending)return;
+    categoryEditor?.close();
+    categoryEditForm?.reset();
+    categoryEditTrigger?.focus();
   };
   const closeCategoryManager=()=>{
+    if(categoryEditSaving||window.__categoryMutationPending)return;
     closeCategoryEditor();
     window.jobCategoryManagerOpen=false;
     if(categoryManager)categoryManager.hidden=true;
     document.body.classList.remove("job-category-modal-open");
+    content.querySelector("[data-job-category-open]")?.focus();
   };
   const openCategoryManager=()=>{
     window.jobCategoryManagerOpen=true;
@@ -21582,70 +21595,121 @@ function renderJobs(){
   content.querySelector("[data-job-category-open]")?.addEventListener("click",openCategoryManager);
   categoryManager?.querySelectorAll("[data-job-category-close]").forEach(button=>button.addEventListener("click",closeCategoryManager));
   const categoryEscapeHandler=event=>{
+    if(categoryEditor?.open)return; // The native dialog handles Escape and focus containment.
     if(event.key==="Escape"&&window.jobCategoryManagerOpen&&!window.__categoryMutationPending){
       closeCategoryManager();
+    }
+    if(event.key==="Tab"&&window.jobCategoryManagerOpen){
+      const controls=Array.from(categoryManager.querySelectorAll('button, input, summary, [tabindex="0"]')).filter(el=>!el.disabled&&el.getClientRects().length);
+      const first=controls[0],last=controls[controls.length-1];
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
     }
   };
   // The document listener is replaced when renderJobs recreates the page.
   if(window.__jobCategoryEscapeHandler)document.removeEventListener("keydown",window.__jobCategoryEscapeHandler);
   window.__jobCategoryEscapeHandler=categoryEscapeHandler;
   document.addEventListener("keydown",categoryEscapeHandler);
+  categoryEditor?.addEventListener("cancel",event=>{event.preventDefault();closeCategoryEditor();});
   categoryEditForm?.querySelector("[data-job-category-edit-cancel]")?.addEventListener("click",closeCategoryEditor);
+  const categoryEditRequest=()=>({
+    categoryId:categoryEditForm.elements.categoryId.value,
+    projectNumber:categoryEditForm.elements.projectNumber.value,
+    name:categoryEditForm.elements.categoryName.value,
+    expectedOldName:categoryEditForm.dataset.originalName,
+    expectedOldProjectNumber:categoryEditForm.dataset.originalProject
+  });
+  const previewCategoryEdit=()=>window.CuttingJobCategoryEdit?.plan?.({
+    jobFolders:window.jobFolders,cuttingJobs:window.cuttingJobs,
+    completedCuttingJobs:window.completedCuttingJobs
+  },categoryEditRequest());
+  const updateCategoryEditImpact=()=>{
+    const preview=previewCategoryEdit(),impact=categoryEditForm.querySelector(".job-category-edit-impact");
+    categoryEditPreview=preview;
+    if(!preview?.ok){impact.textContent=preview?.reason||"Category update cannot be prepared.";return preview;}
+    const p=preview.summary;
+    impact.textContent=p.changed
+      ? `Changing category ${p.oldFullName} to ${p.newFullName} will update the Project Number and Category information for all ${p.totalCount} associated Cutting Jobs (${p.activeCount} Active, ${p.completedCount} Historical).`
+      : `This category has ${p.totalCount} associated Cutting Jobs (${p.activeCount} Active, ${p.completedCount} Historical). Edit the values above to review your changes.`;
+    return preview;
+  };
+  categoryEditForm?.addEventListener("input",()=>{
+    if(categoryEditSaving)return;
+    if(categoryEditForm.dataset.indeterminate!=="true")categoryEditForm.querySelector(".job-category-edit-status").textContent="";
+    updateCategoryEditImpact();
+  });
   const startCategoryEdit=categoryId=>{
     if(window.__categoryMutationPending)return;
     const folder=ensureCategoryState().find(row=>String(row?.id)===String(categoryId));
     if(!folder||!categoryEditForm){toast("Category was not found.");return;}
     const projectNumber=window.CuttingJobCategoryEdit?.folderKey?.(folder)||"";
     const name=window.CuttingJobCategoryEdit?.categoryName?.(folder,projectNumber)||"";
+    categoryEditTrigger=document.activeElement;
     categoryEditForm.elements.categoryId.value=String(categoryId);
     categoryEditForm.elements.projectNumber.value=projectNumber;
     categoryEditForm.elements.categoryName.value=name;
     categoryEditForm.dataset.originalName=String(folder.name||"");
     categoryEditForm.dataset.originalProject=String(folder.projectNumber??window.CuttingJobHistory?.leadingProject?.(folder.name)??"");
-    categoryEditForm.querySelector(".job-category-edit-status").textContent="";
-    categoryEditForm.hidden=false;
+    categoryEditForm.dataset.indeterminate=String(Boolean(window.__lastIndeterminateSave));
+    categoryEditForm.querySelector("[data-job-category-current-project]").textContent=projectNumber;
+    categoryEditForm.querySelector("[data-job-category-current-name]").textContent=name;
+    categoryEditForm.querySelector(".job-category-edit-status").textContent=window.__lastIndeterminateSave
+      ? "A save outcome is uncertain. Review Recovery Mode and reload authoritative data before editing again." : "";
+    categoryEditForm.querySelector("[data-job-category-edit-save]").disabled=categoryEditForm.dataset.indeterminate==="true";
+    updateCategoryEditImpact();
+    categoryEditor.showModal();
     categoryEditForm.elements.categoryName.focus();
-    categoryEditForm.scrollIntoView({block:"nearest"});
   };
+  // Bind to this render's nodes; the long-lived content delegate retains old closures.
+  content.querySelectorAll("[data-job-folder-rename]").forEach(button=>button.addEventListener("click",event=>{
+    event.preventDefault();
+    startCategoryEdit(button.getAttribute("data-job-folder-rename"));
+  }));
   categoryEditForm?.addEventListener("submit",async event=>{
     event.preventDefault();
-    if(window.__categoryMutationPending)return;
+    if(categoryEditSaving||window.__categoryMutationPending||categoryEditForm.dataset.indeterminate==="true")return;
     const status=categoryEditForm.querySelector(".job-category-edit-status");
     const submit=categoryEditForm.querySelector("[data-job-category-edit-save]");
-    const request={
-      categoryId:categoryEditForm.elements.categoryId.value,
-      projectNumber:categoryEditForm.elements.projectNumber.value,
-      name:categoryEditForm.elements.categoryName.value,
-      expectedOldName:categoryEditForm.dataset.originalName,
-      expectedOldProjectNumber:categoryEditForm.dataset.originalProject
-    };
-    const preview=window.CuttingJobCategoryEdit?.plan?.({
-      jobFolders:window.jobFolders,cuttingJobs:window.cuttingJobs,
-      completedCuttingJobs:window.completedCuttingJobs
-    },request);
+    const request=categoryEditRequest();
+    const reviewed=categoryEditPreview?.summary;
+    const preview=updateCategoryEditImpact();
     if(!preview?.ok){status.textContent=preview?.reason||"Category update cannot be prepared.";return;}
     const p=preview.summary;
     if(!p.changed){status.textContent="No changes to save.";return;}
-    const message=`Change category from "${p.oldFullName}" (Project ${p.oldProjectNumber}) to "${p.newFullName}" (Project ${p.newProjectNumber})?\n\nThis updates ${p.totalCount} cutting jobs: ${p.activeCount} active and ${p.completedCount} historical. Existing job IDs, cut numbers, dates, files, costs and history will be retained.\n\nContinue?`;
-    if(!window.confirm(message))return;
+    if(!reviewed||reviewed.activeCount!==p.activeCount||reviewed.completedCount!==p.completedCount){
+      status.textContent="Associated jobs changed. Review the updated counts above, then choose Save Changes again.";
+      return;
+    }
     request.expectedActiveCount=p.activeCount;
     request.expectedCompletedCount=p.completedCount;
-    submit.disabled=true;
+    categoryEditSaving=true;
+    const controls=Array.from(categoryEditForm.querySelectorAll("input, button"));
+    controls.forEach(control=>{control.disabled=true;});
+    categoryEditForm.setAttribute("aria-busy","true");
     status.textContent="Saving and verifying category and linked cutting jobs…";
     try{
       const result=await window.saveCuttingJobCategoryChange(request);
       if(!result?.saved||!result?.verified){
         status.textContent=result?.error||"Category was not saved.";
-        if(result?.indeterminate)status.textContent+=" Outcome uncertain: review Recovery Mode before retrying.";
+        if(result?.indeterminate){
+          categoryEditForm.dataset.indeterminate="true";
+          status.textContent+=" Outcome uncertain: review Recovery Mode and reload authoritative data before editing again. Do not retry this save.";
+        }
         return;
       }
+      categoryEditSaving=false;
       toast("Category and linked cutting jobs saved and verified.");
       closeCategoryEditor();
       rerenderPreservingState(currentCategoryFilter());
       if(typeof refreshDashboardWidgets==="function")refreshDashboardWidgets();
       else if(typeof renderCalendar==="function")renderCalendar();
     }catch(error){status.textContent=String(error?.message||error);}
-    finally{submit.disabled=false;}
+    finally{
+      categoryEditSaving=false;
+      controls.forEach(control=>{control.disabled=false;});
+      categoryEditForm.removeAttribute("aria-busy");
+      submit.disabled=categoryEditForm.dataset.indeterminate==="true";
+    }
   });
 
   const attemptRemoveCategory = (categoryId)=>{
@@ -22456,13 +22520,6 @@ function renderJobs(){
           window.jobCategoryFilter = String(folder.id);
           rerenderPreservingState(String(folder.id));
         }
-        return;
-      }
-      const renameBtn = event.target.closest("[data-job-folder-rename]");
-      if (renameBtn){
-        event.preventDefault();
-        const catId = renameBtn.getAttribute("data-job-folder-rename");
-        startCategoryEdit(catId);
         return;
       }
       const removeBtn = event.target.closest("[data-job-folder-remove]");
