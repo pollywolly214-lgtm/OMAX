@@ -37,4 +37,14 @@ test("CJPROFIT-01: signed imported costs retain sign and actual minutes become h
     if(record_status==="completed")assert.equal(job.actualHours,minutes/60);
   }
 });
+test("CJPROFIT-01B: imported Hours Taken controls profit despite zero actual minutes",()=>{
+  const vm=require("node:vm"),fs=require("node:fs"),c=vm.createContext({JOB_RATE_PER_HOUR:200,JOB_BASE_COST_PER_HOUR:45});
+  vm.runInContext(fs.readFileSync("js/computations.js","utf8"),c);
+  for(const record_status of ["active","completed"])for(const cost_rate_per_hr of ["45","-45"]){
+    const p=api.preview([{...base,record_status,estimate_hours:"2.8",add_minutes:"0",actual_cut_minutes:"0",completed_date:"2026-01-02",cost_rate_per_hr}],context)[0];
+    assert.equal(p.status,"ready");const job=api.map(p),before=structuredClone(job);
+    assert.equal(job.estimateHours,2.8);assert.ok(Math.abs(c.computeCuttingJobProfit(job).totalProfit-434)<1e-9);
+    assert.deepEqual(job,before);
+  }
+});
 (async()=>{for(const[n,f]of tests){await f();console.log(`ok - ${n}`);}console.log(`1..${tests.length}`);})().catch(e=>{console.error(e);process.exitCode=1;});

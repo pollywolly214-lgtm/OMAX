@@ -9,22 +9,21 @@ function section(source, start, end) {
 }
 function harness() {
   const c = vm.createContext({ JOB_RATE_PER_HOUR:200, JOB_BASE_COST_PER_HOUR:45 });
-  vm.runInContext(section(views, "  const resolveActualHours =", "  const pendingFiles =") +
-    (section(views, "  const resolveActualHours =", "  const pendingFiles =").includes("const resolveChargeRate =") ? "" :
-      section(views, "  const resolveChargeRate =", "  const completedStats =")) +
+  vm.runInContext(fs.readFileSync("js/computations.js", "utf8"), c);
+  vm.runInContext(section(views, "  const resolveJobHours =", "  const pendingFiles =") +
     ";this.total = computeJobNetTotal;this.charge = resolveChargeRate;this.cost = resolveCostRate;", c);
   return c;
 }
-const fixture = (extra = {}) => ({ id:"same-job", chargeRate:150, costRate:-60, estimateHours:9, actualHours:2,
+const fixture = (extra = {}) => ({ id:"same-job", chargeRate:150, costRate:-60, estimateHours:2, actualHours:0,
   materialCost:500, materialQty:3, cat:"project", projectNumber:"0000", cutNumber:"C041",
   cutDateISO:"2026-10-05", cutOrderWithinDay:2, files:[{fileId:"retained"}],
   importProvenance:{sourceRowNumber:7}, efficiency:{chargeRate:999, costRate:999, actualHours:99, netRate:999}, ...extra });
-for (const [chargeRate, costRate, actualHours, rate, total] of [
-  [150,-60,2,90,180], [200,-80,0.5,120,60], [100,-25,1.5,75,112.5], [150,-60,2.8,90,252]
-]) test(`charge ${chargeRate}, expense ${costRate}, ${actualHours} hr yields ${total}`, () => {
+for (const [chargeRate, costRate, estimateHours, rate, total] of [
+  [150,-60,2,90,180], [200,-80,0.5,120,60], [100,-25,1.5,75,112.5], [150,-60,2.8,90,252], [200,-45,2.8,155,434]
+]) test(`charge ${chargeRate}, expense ${costRate}, ${estimateHours} hr yields ${total}`, () => {
   const c = harness();
   for (const historical of [false,true]) for (const sign of [-1,1]) {
-    const job = fixture({chargeRate, costRate:sign*Math.abs(costRate), actualHours,
+    const job = fixture({chargeRate, costRate:sign*Math.abs(costRate), estimateHours,
       ...(historical ? {completedAtISO:"2026-10-06"} : {})});
     assert.equal(c.charge(job) + c.cost(job), rate);
     assert.equal(c.cost(job), costRate);
@@ -36,18 +35,22 @@ test("edits recalculate from authoritative inputs; refresh retains result and un
   assert.equal(c.total(job, job.efficiency), 180);
   job.chargeRate = 200; assert.equal(c.total(job, job.efficiency), 280);
   job.costRate = -80; assert.equal(c.total(job, job.efficiency), 240);
-  job.actualHours = .5; assert.equal(c.total(job, job.efficiency), 60);
+  job.estimateHours = .5; assert.equal(c.total(job, job.efficiency), 60);
   const edited = structuredClone(job);
   assert.equal(harness().total(JSON.parse(JSON.stringify(job)), job.efficiency), 60);
   assert.deepEqual(job, edited, "rendering must not mutate or persist the job");
-  for (const key of Object.keys(before).filter(key => !["chargeRate","costRate","actualHours"].includes(key)))
+  for (const key of Object.keys(before).filter(key => !["chargeRate","costRate","estimateHours"].includes(key)))
     assert.deepEqual(job[key], before[key], key);
 });
-test("zero actual time stays zero; missing actual time uses existing estimate fallback", () => {
+test("Hours Taken alone determines duration, regardless of legacy progress", () => {
   const c = harness();
-  assert.equal(c.total(fixture({actualHours:0}), {actualHours:8}), 0);
-  assert.equal(c.total(fixture({actualHours:null, estimateHours:.5}), {}), 45);
-  assert.equal(c.total(fixture({actualHours:null, estimateHours:9}), {actualHours:1.5}), 135);
+  for (const actualHours of [0,1.5,99,null,undefined]) {
+    const job = fixture({estimateHours:2.8,chargeRate:200,costRate:-45,actualHours,
+      manualLogs:[{dateISO:"2026-10-01",completedHours:99}]});
+    assert.ok(Math.abs(c.total(job, {actualHours:99}) - 434) < 1e-9);
+  }
+  assert.equal(c.total(fixture({estimateHours:0}), {actualHours:99}), 0);
+  assert.equal(c.total(fixture({estimateHours:undefined}), {actualHours:99}), 0);
 });
 test("missing rates use stored efficiency values, but blank/null rates do not become zero", () => {
   const c = harness();

@@ -3695,6 +3695,8 @@ function buildCompletedJob(job, completionISO){
     chargeRate: eff.chargeRate ?? existingChargeRate,
     costRate: eff.costRate ?? null,
     netRate: eff.netRate ?? null,
+    hoursTaken: eff.hoursTaken ?? null,
+    totalProfit: eff.totalProfit ?? null,
     expectedHours: eff.expectedHours ?? null,
     actualHours: eff.actualHours ?? null,
     expectedRemaining: eff.expectedRemaining ?? null,

@@ -26,6 +26,7 @@ function harness(active=[],completed=[]){
     materialSettings:{materials:[]},pendingNewJobFiles:[],pendingSecureCloudJobFiles:[],recalcMaterialTotals:noop,applyMinutesToHours:noop,fractionToNumber:()=>.25,
     refreshCfr05CloudPresentation:async()=>{},JOB_ROOT_FOLDER_ID:"jobs_root",ensureJobFolderState:()=>window.jobFolders,setJobFolders:value=>{window.jobFolders=value;},normalizeHexColor:()=>null,
     ensureJobCategories:()=>{throw Error("Manual flow must not normalize historical jobs");}});
+  vm.runInContext(fn(fs.readFileSync("js/computations.js","utf8"),"computeCuttingJobProfit"),c);
   c.structuredClone=structuredClone;
   c.createCuttingJob=async job=>{calls.save++;window.cuttingJobs.push(job);return{saved:true,verified:true};};
   c.saveCuttingJobEdit=async(id,updates)=>{calls.save++;Object.assign([...window.cuttingJobs,...window.completedCuttingJobs].find(job=>job.id===id),updates);return{saved:true,verified:true};};
@@ -175,12 +176,12 @@ test("CJPROFIT-01: manual creation accepts signed costs through both forms",asyn
 });
 test("CJPROFIT-01: active/history save signed cost and fractional cut time without unrelated changes",async()=>{
   for(const past of [false,true]){
-    const original=job({costRate:60,chargeRate:150}),before=structuredClone(original),h=harness(past?[]:[original],past?[original]:[]);
+    const original=job({costRate:60,chargeRate:150,actualHours:0}),before=structuredClone(original),h=harness(past?[]:[original],past?[original]:[]);
     await h.edit(past,{cat:"blanco",projectNumber:"1254",costRate:"-80",chargeRate:"200",estimateHours:"0.5",actualHours:"0.5",materialCost:"9",materialQty:"1"});
     assert.equal(original.costRate,-80);assert.equal(original.chargeRate,200);assert.equal(original.estimateHours,.5);
-    if(past){assert.equal(original.actualHours,.5);assert.equal(original.efficiency.netRate,120);}
+    if(past){assert.equal(original.actualHours,0);assert.equal(original.efficiency.netRate,120);assert.equal(original.efficiency.costRate,80);assert.equal(original.efficiency.totalProfit,60);}
     assert.equal(h.calls.save,1);
-    for(const key of ["id","cat","projectNumber","cutNumber","cutDateISO","cutOrderWithinDay","files","importProvenance"])
+    for(const key of ["id","cat","projectNumber","cutNumber","cutDateISO","cutOrderWithinDay","files","importProvenance","actualHours","manualLogs"])
       assert.deepEqual(original[key],before[key],key);
   }
 });
