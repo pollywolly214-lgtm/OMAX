@@ -7651,6 +7651,98 @@ function saveCloudNow(saveOptions = {}){
   }
 }
 
+/* CJCAT: one verified backend transaction updates folder metadata and linked job Project Numbers. */
+async function saveCuttingJobCategoryChange(request){
+  const failure=error=>({saved:false,error:String(error?.message||error)});
+  if(window.__categoryMutationPending||window.__pumpLogMutationPending||window.__pumpBaselineMutationPending
+    ||window.__inventoryMaterialMutationPending||!FB.ready||!FB.user||isVercelPreviewRuntime()
+    ||!canWriteCloud("cutting-job category edit"))return failure("Category editing is unavailable while another save or recovery review is active.");
+  if(typeof window.CuttingJobCategoryEdit?.plan!=="function")return failure("Category editor is unavailable.");
+  window.__categoryMutationPending=true;
+  const target=captureCuttingJobSaveTarget();
+  const key=stableStringifyForIntegrity, actor=FB.user.uid,client=getCloudSyncClientId();
+  let writeStarted=false,acknowledged=false;
+  const evidence={request:cloneStructured(request)};
+  const business=state=>Object.fromEntries(Object.entries(state||{}).filter(([field])=>!["syncMeta","saveMeta","syncProcessLog"].includes(field)));
+  const loaded=state=>Object.fromEntries(Object.entries(state||{}).filter(([field])=>field!=="syncProcessLog"));
+  const suspend=error=>{
+    const result={...failure(error),indeterminate:true,stateWriteAttempted:writeStarted,stateWriteCompleted:acknowledged};
+    window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastIndeterminateSave=result;
+    window.__lastCategoryMutationEvidence={...evidence,result};
+    window.__cuttingJobDisplayUnconfirmed=true;refreshCuttingJobVerificationNotice();
+    try{renderRecoveryDiagnosticsPanel();}catch(_){}
+    return result;
+  };
+  const read=async()=>{
+    const envelope=await readInventoryMaterialAuthoritativeState();
+    if(!cuttingJobSaveTargetIsCurrent(target)||envelope?.path!==target.path
+      ||!envelope.state||!Number.isSafeInteger(envelope.revision)
+      ||envelope.revision!==envelope.state.syncMeta?.rev)throw Error("Independent category backend read is incomplete or changed.");
+    return cloneStructured(envelope.state);
+  };
+  try{
+    await cloudSaveQueue;
+    if(hasPendingLocalChanges)throw Error("Other unsaved changes must finish before editing a category.");
+    const source=await read(),revision=source.syncMeta.rev,version=lastLocalMutationAt;
+    evidence.source=source;
+    const sourceKey=key(source),localMatches=()=>cuttingJobSaveTargetIsCurrent(target)
+      &&FB.user?.uid===actor&&!hasPendingLocalChanges&&lastLocalMutationAt===version
+      &&window.__loadedCloudRevisionForSaveGuard===revision
+      &&key(loaded(window.__lastLoadedCloudState))===key(loaded(source))
+      &&key(business(getInventoryIdentityRepairLocalState()))===key(business(source));
+    if(!localMatches()||!checkAuthoritativeIdentityIntegrity(source).valid)throw Error("Category source or identities differ from the loaded workspace. Reload before editing.");
+    const planned=window.CuttingJobCategoryEdit.plan(source,request);
+    if(!planned.ok)throw Error(planned.reason);
+    if(!planned.summary.changed)return {saved:false,unchanged:true,error:"No category changes to save."};
+    // A second source comparison inside CAS rejects changes after the reviewed preview.
+    if(request.expectedOldName!==undefined&&String(request.expectedOldName)!==String(source.jobFolders.find(f=>String(f.id)===String(request.categoryId))?.name??""))
+      throw Error("Category name changed since the editor opened.");
+    if(request.expectedOldProjectNumber!==undefined){
+      const folder=source.jobFolders.find(f=>String(f.id)===String(request.categoryId));
+      const current=String(folder?.projectNumber??window.CuttingJobHistory.leadingProject(folder?.name)??"");
+      if(String(request.expectedOldProjectNumber)!==current)throw Error("Category Project Number changed since the editor opened.");
+    }
+    const intended=cloneStructured(planned.next),expectedFields=["jobFolders","cuttingJobs","completedCuttingJobs"];
+    evidence.intended={summary:planned.summary,fields:expectedFields.map(field=>({field,records:intended[field]?.length}))};
+    const expected=key(Object.fromEntries(expectedFields.map(field=>[field,intended[field]])));
+    const queued=cloudSaveQueue.then(()=>{
+      if(!localMatches())return cloudSaveNoWriteFailure("category_source_changed","Category data changed before the save.");
+      writeStarted=true;
+      return writeAuthoritativeStateSnapshot(intended,{mergeFields:[...expectedFields,"syncMeta"]},{
+        expectedRevision:revision,authoritativeTarget:target,
+        validateSourceState:remote=>key(remote)===sourceKey&&localMatches(),
+        validatePreparedState:pending=>key(Object.fromEntries(expectedFields.map(field=>[field,pending[field]])))===expected&&localMatches()
+      });
+    });
+    cloudSaveQueue=queued.catch(()=>{});
+    const written=await queued;
+    evidence.writeResult={saved:written?.saved,error:written?.error,errorCode:written?.errorCode};
+    acknowledged=written?.saved===true&&written.stateWriteCompleted===true;
+    if(!acknowledged){
+      if(written?.indeterminate||(written?.stateWriteAttempted&&!written?.definiteFailure))return suspend(written?.error||"Category write outcome is uncertain.");
+      writeStarted=false;
+      return failure(written?.error||"Category write was rejected.");
+    }
+    const committed=written.committedState,revisionAfter=committed?.syncMeta?.rev;
+    if(!Number.isSafeInteger(revisionAfter)||revisionAfter<=revision||committed.syncMeta.updatedBy!==client
+      ||expectedFields.some(field=>key(committed[field])!==key(intended[field])))return suspend("Category transaction acknowledgement differs from reviewed changes.");
+    const verified=await read();
+    evidence.verifiedRevision=verified.syncMeta?.rev;
+    if(verified.syncMeta.rev!==revisionAfter||key(verified)!==key(committed)
+      ||!checkAuthoritativeIdentityIntegrity(verified).valid)return suspend("Category readback differed from the committed transaction.");
+    if(!localMatches()||!canWriteCloud("category verified adoption"))return suspend("Workspace changed before category adoption.");
+    const adopted=adoptIdentityCheckedAuthoritativeState(verified);
+    if(!adopted?.loaded||adopted.recovery)return suspend("Verified category state failed authoritative adoption.");
+    persistLocalStateBackup(verified);
+    window.__cuttingJobDisplayUnconfirmed=false;refreshCuttingJobVerificationNotice();
+    return {saved:true,verified:true,summary:planned.summary,revision:revisionAfter};
+  }catch(error){return writeStarted||acknowledged?suspend(error):failure(error);}
+  finally{window.__categoryMutationPending=false;}
+}
+window.saveCuttingJobCategoryChange=saveCuttingJobCategoryChange;
+window.addEventListener?.("beforeunload",event=>{if(window.__categoryMutationPending){event.preventDefault();event.returnValue="";}});
+/* End CJCAT verified category mutation. */
+
 /* PRB verified baseline action; uses the existing queue, writer and backend reader. */
 async function savePumpBaseline(action){
   const failure = error=>({saved:false,error:String(error?.message || error)});
