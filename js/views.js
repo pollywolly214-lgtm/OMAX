@@ -1986,20 +1986,44 @@ function viewCosts(model){
               <select data-receipt-week-select aria-label="Select purchase history week"></select>
             </label>
             <button type="button" class="btn" data-receipt-save-week>Save week</button>
+            <button type="button" class="btn" data-receipt-new-order>New Order</button>
             <button type="button" class="btn secondary" data-receipt-quick-add-task>Quick add task</button>
             <button type="button" class="btn secondary" data-receipt-clear-all>Clear all</button>
             <button type="button" class="btn secondary" data-receipt-undo-clear disabled>Undo clear</button>
             <button type="button" class="btn secondary" data-receipt-export-week>Export week (CSV)</button>
           </div>
+          <section data-purchase-order-editor hidden aria-label="New purchase order" style="border:1px solid #cfd7e6;border-radius:10px;padding:14px;margin-bottom:14px;">
+            <h4 data-purchase-order-title>New Purchase Order</h4>
+            <p class="small muted">Edit Inventory opens the existing Settings workflow. Return to Cost Analysis to resume this draft. Reloading the page discards unsaved drafts.</p>
+            <div class="cost-receipt-controls">
+              <label>Order date<input type="date" data-purchase-order-date required></label>
+              <label>PO Num.<input type="text" data-purchase-order-po placeholder="Optional"></label>
+              <label>Total shipping ($)<input type="number" min="0" step="0.01" data-purchase-order-shipping value="0" required></label>
+              <label>Total tax ($)<input type="number" min="0" step="0.01" data-purchase-order-tax value="0" required></label>
+            </div>
+            <div class="cost-weekly-table-wrap">
+              <table class="cost-table cost-receipt-week-table">
+                <thead><tr><th>Item</th><th>Part #</th><th>Qty</th><th>Unit cost</th><th>Inventory link (optional)</th><th>Allocated shipping</th><th>Allocated tax</th><th>Total spend</th><th></th></tr></thead>
+                <tbody data-purchase-order-items></tbody>
+              </table>
+            </div>
+            <p data-purchase-order-preview aria-live="polite"></p>
+            <p data-purchase-order-status role="alert"></p>
+            <div class="cost-receipt-controls">
+              <button type="button" class="btn secondary" data-purchase-order-add>Add Item</button>
+              <button type="button" class="btn" data-purchase-order-save>Save Order</button>
+              <button type="button" class="btn secondary" data-purchase-order-cancel>Cancel</button>
+            </div>
+          </section>
           <p class="small muted" data-receipt-week-range>—</p>
           <p class="small muted" data-receipt-week-allocation-note hidden>Historical shipping and tax may be allocated across items from the same original order.</p>
-          <div class="cost-weekly-table-wrap">
+          <div data-receipt-week-rows data-receipt-week-groups>
             <table class="cost-table cost-receipt-week-table">
-              <thead><tr><th>Date</th><th>Purchased Item</th><th>Part #</th><th class="purchase-number">Qty</th><th class="purchase-number">Unit Cost</th><th class="purchase-number">Item Subtotal</th><th class="purchase-number">Shipping</th><th class="purchase-number">Tax</th><th class="purchase-number">Total Spend</th><th>Inventory link</th><th>Actions</th></tr></thead>
-              <tbody data-receipt-week-rows></tbody>
-              <tfoot><tr><th colspan="8">Week Total Spend</th><th class="purchase-number" data-receipt-week-subtotal>$0.00</th><th colspan="2"></th></tr></tfoot>
+              <thead><tr><th>Date</th><th>Purchased Item</th><th>PO Num.</th><th>Part #</th><th class="purchase-number">Qty</th><th class="purchase-number">Unit Cost</th><th class="purchase-number">Item Subtotal</th><th class="purchase-number">Shipping</th><th class="purchase-number">Tax</th><th class="purchase-number">Total Spend</th><th>Inventory link</th><th>Actions</th></tr></thead>
+              <tbody data-receipt-legacy-rows></tbody>
             </table>
           </div>
+          <p><strong>Week Total Spend: <span data-receipt-week-subtotal>$0.00</span></strong></p>
           <div class="cost-receipt-summary-controls">
             <label>
               <span>Range</span>
@@ -2018,9 +2042,9 @@ function viewCosts(model){
           <p class="small muted" data-receipt-range-allocation-note hidden>Historical shipping and tax may be allocated across items from the same original order.</p>
           <div class="cost-weekly-table-wrap">
             <table class="cost-table cost-receipt-summary-table">
-              <thead><tr><th>Date</th><th>Purchased Item</th><th>Part #</th><th class="purchase-number">Qty</th><th class="purchase-number">Unit Cost</th><th class="purchase-number">Item Subtotal</th><th class="purchase-number">Shipping</th><th class="purchase-number">Tax</th><th class="purchase-number">Total Spend</th><th>Link status</th></tr></thead>
+              <thead><tr><th>Date</th><th>Purchased Item</th><th>PO Num.</th><th>Part #</th><th class="purchase-number">Qty</th><th class="purchase-number">Unit Cost</th><th class="purchase-number">Item Subtotal</th><th class="purchase-number">Shipping</th><th class="purchase-number">Tax</th><th class="purchase-number">Total Spend</th><th>Link status</th></tr></thead>
               <tbody data-receipt-range-rows></tbody>
-              <tfoot><tr><th colspan="8">Range Total Spend</th><th class="purchase-number" data-receipt-range-subtotal>$0.00</th><th></th></tr></tfoot>
+              <tfoot><tr><th colspan="9">Range Total Spend</th><th class="purchase-number" data-receipt-range-subtotal>$0.00</th><th></th></tr></tfoot>
             </table>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn danger" data-receipt-open-fixer>Fix Unlinked Purchase Links</button></div>
@@ -2333,13 +2357,14 @@ function viewCosts(model){
               <div class="cost-data-center-panel-content" data-dc-panel="spend" hidden>
                 <div class="cost-data-center-search">
                   <label for="costDataCenterSpendSearch">Search purchases</label>
-                  <input id="costDataCenterSpendSearch" type="search" placeholder="Search date, item, part number, or week" data-spend-search>
+                  <input id="costDataCenterSpendSearch" type="search" placeholder="Search date, item, PO, part number, or week" data-spend-search>
                 </div>
                 <table class="cost-table" style="margin-top:10px">
                   <thead>
                     <tr>
                       <th>Purchase date</th>
                       <th>Purchased item</th>
+                      <th>PO Num.</th>
                       <th>Week</th>
                       <th>Part #</th>
                       <th class="purchase-number">Qty</th>
@@ -2352,9 +2377,10 @@ function viewCosts(model){
                   </thead>
                   <tbody data-spend-table-body>
                     ${purchaseDataTable.length ? purchaseDataTable.map(row => `
-                      <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${esc(String(row.dateISO || ""))}" data-spend-week-key="${esc(String(row.weekKey || ""))}" data-spend-row-index="${esc(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${esc(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
+                      <tr data-spend-row title="Click to open this row in Purchase History" style="cursor:pointer;" data-spend-date-iso="${esc(String(row.dateISO || ""))}" data-spend-week-key="${esc(String(row.weekKey || ""))}" data-spend-row-index="${esc(String(Number.isFinite(Number(row.rowIndex)) ? Number(row.rowIndex) : -1))}" data-spend-search-text="${esc(`${row.dateISO || ""} ${row.purchased || ""} ${row.partNumber || ""} ${row.poNumber || ""} ${row.weekLabel || ""}`.toLowerCase())}">
                         <td>${esc(row.dateISO || "—")}</td>
                         <td>${esc(row.purchased || "—")}</td>
+                        <td>${esc(String(row.poNumber ?? "").trim() || "N/A")}</td>
                         <td>${esc(row.weekLabel || "—")}</td>
                         <td>${esc(row.partNumber || "—")}</td>
                         <td class="purchase-number">${esc(row.qtyLabel || "0")}</td>
@@ -2364,7 +2390,7 @@ function viewCosts(model){
                         <td class="purchase-number">${esc(row.taxLabel || "$0.00")}</td>
                         <td class="purchase-number">${esc(row.totalLabel || "$0.00")}</td>
                       </tr>
-                    `).join("") : `<tr><td colspan="10" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>`}
+                    `).join("") : `<tr><td colspan="11" class="cost-table-placeholder">No purchase history rows recorded yet.</td></tr>`}
                   </tbody>
                 </table>
               </div>
