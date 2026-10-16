@@ -57,18 +57,18 @@ class Element{
   addEventListener(name,handler){this.listeners[name]=handler;} focus(){this.focused=true;} setAttribute(){} close(){this.open=false;} remove(){this.removed=true;} showModal(){this.open=true;}
 }
 function popup(saveResult={saved:true,verified:true},failurePercent=0){
-  const source=job({failurePercent}),calls=[],elements=Object.fromEntries(["form","percent","save","cancel","status"].map(key=>[key,new Element()]));
+  const source=job({failurePercent}),calls=[],elements=Object.fromEntries(["form","percent","slider","save","cancel","status"].map(key=>[key,new Element()]));
   elements.percent.value=String(failurePercent);const cells=["failurePercent","revenue","adjustedRevenue","cuttingCost","materialExpense","originalNetProfit","totalProfit","revenueLost"].map(key=>Object.assign(new Element(),{getAttribute:()=>key,key}));
   const dialog=new Element();dialog.querySelector=selector=>elements[/data-failed-cut-([a-z]+)/.exec(selector)?.[1]];dialog.querySelectorAll=()=>cells;
   const c=vm.createContext({JOB_RATE_PER_HOUR:200,JOB_BASE_COST_PER_HOUR:45,window:{completedCuttingJobs:[source]},completedCuttingJobs:[source],document:{createElement:()=>dialog,body:{appendChild(){}}},escapeHtml:String,toast(){},renderJobs(){calls.push("render");},saveCuttingJobFailurePercent:async(id,percent)=>{calls.push({id,percent});return saveResult;}});
-  vm.runInContext(computations,c);const start=renderers.indexOf("function showFailedCutDialog("),end=renderers.indexOf("\nfunction renderJobs(){",start);vm.runInContext(renderers.slice(start,end),c);c.showFailedCutDialog("j",new Element());
+  vm.runInContext(computations,c);const views=fs.readFileSync("js/views.js","utf8");vm.runInContext(views.slice(views.indexOf("function cuttingJobFinancialTone("),views.indexOf("function viewJobs(){")),c);const start=renderers.indexOf("function showFailedCutDialog("),end=renderers.indexOf("\nfunction renderJobs(){",start);vm.runInContext(renderers.slice(start,end),c);c.showFailedCutDialog("j",new Element());
   return{source,calls,elements,dialog,cells,change(value){elements.percent.value=String(value);elements.percent.listeners.input();},submit(){return elements.form.listeners.submit({preventDefault(){}});},value(key){return cells.find(cell=>cell.key===key);}};
 }
 test("popup previews 0/50/100 live, highlights actual negative profit, validates range and Cancel never saves",()=>{
   const p=popup(),before=structuredClone(p.source);assert.equal(p.value("totalProfit").textContent,"$100.00");
   p.change(50);assert.equal(p.value("totalProfit").textContent,"$25.00");assert.equal(p.value("revenueLost").textContent,"$75.00");
   p.change(100);assert.equal(p.value("totalProfit").textContent,"-$50.00");assert.equal(p.value("totalProfit").classes.has("is-negative"),true);
-  assert.equal(p.value("cuttingCost").textContent,"$25.00");assert.equal(p.value("materialExpense").textContent,"$25.00");
+  assert.equal(p.value("cuttingCost").textContent,"-$25.00");assert.equal(p.value("materialExpense").textContent,"-$25.00");
   for(const value of ["",-1,101,"bad"]){p.change(value);assert.equal(p.elements.save.disabled,true);}
   p.elements.cancel.listeners.click();assert.equal(p.dialog.removed,true);assert.deepEqual(p.calls,[]);assert.deepEqual(p.source,before);
 });
@@ -80,4 +80,19 @@ test("popup saves only after submit and closes/renders only on verified success"
 test("saved failure percentage can be reopened, edited, reset, and unknown saves cannot be replayed",async()=>{
   const p=popup({saved:true,verified:true},50);assert.equal(p.elements.percent.value,"50");assert.equal(p.value("totalProfit").textContent,"$25.00");p.change(0);await p.submit();assert.deepEqual(p.calls[0],{id:"j",percent:0});
   const blocked=popup({saved:false,requiresReload:true});blocked.change(50);await blocked.submit();await blocked.submit();assert.equal(blocked.calls.length,1);
+});
+
+test("CJPROFIT-03: slider and typed percentages stay synchronized without rounding or saving",()=>{
+  const p=popup({saved:true,verified:true},10.123456),before=structuredClone(p.source);
+  assert.equal(p.elements.slider.value,"10.123456");
+  p.change(12.3456789);assert.equal(p.elements.slider.value,"12.3456789");
+  p.elements.slider.value="75.125";p.elements.slider.listeners.input();assert.equal(p.elements.percent.value,"75.125");assert.equal(p.value("failurePercent").textContent,"75.125%");
+  assert.equal(p.value("totalProfit").textContent,"-$12.69");assert.equal(p.value("totalProfit").classes.has("job-finance-negative"),true);
+  assert.deepEqual(p.calls,[]);p.elements.cancel.listeners.click();assert.deepEqual(p.source,before);
+});
+test("CJPROFIT-03: slider saves through the unchanged submit flow and locks during verification",async()=>{
+  let resolve;const p=popup(new Promise(done=>resolve=done));p.elements.slider.value="50.25";p.elements.slider.listeners.input();
+  const pending=p.submit();assert.equal(p.elements.slider.disabled,true);assert.equal(p.elements.percent.disabled,true);assert.deepEqual(p.calls,[{id:"j",percent:50.25}]);
+  resolve({saved:true,verified:true});await pending;assert.equal(p.dialog.removed,true);
+  const blocked=popup({saved:false,verified:false,requiresReload:true});blocked.change(50);await blocked.submit();assert.equal(blocked.elements.slider.disabled,true);
 });

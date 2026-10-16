@@ -2692,6 +2692,49 @@ function viewCosts(model){
 `;
 }
 
+function cuttingJobFinancialTone(key, value){
+  if (key === "failurePercent") return value > 0 ? "job-finance-warning" : "job-finance-neutral";
+  if (["cuttingCost", "materialExpense", "revenueLost"].includes(key)) return value > 0 ? "job-finance-negative" : "job-finance-neutral";
+  return value > 0 ? "job-finance-positive" : value < 0 ? "job-finance-negative" : "job-finance-neutral";
+}
+
+function formatCuttingJobFinancialValue(profit, key){
+  if (key === "failurePercent") return `${profit[key]}%`;
+  const value = ["cuttingCost", "materialExpense"].includes(key) ? (-profit[key] || 0) : profit[key];
+  return new Intl.NumberFormat(undefined, {style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(value);
+}
+
+function expandedCuttingJobNetIds(){
+  if (!(window.__expandedCuttingJobNetIds instanceof Set)) window.__expandedCuttingJobNetIds = new Set();
+  return window.__expandedCuttingJobNetIds;
+}
+
+function renderCuttingJobNetBreakdown(job){
+  const profit = computeCuttingJobProfit(job);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const id = String(job.id);
+  const expanded = expandedCuttingJobNetIds().has(id);
+  const detailsId = `jobNetDetails_${encodeURIComponent(id)}`;
+  const money = key => esc(formatCuttingJobFinancialValue(profit, key));
+  const tone = key => cuttingJobFinancialTone(key, profit[key]);
+  const rate = value => esc(new Intl.NumberFormat(undefined, {style:"currency",currency:"USD",minimumFractionDigits:0,maximumFractionDigits:20}).format(value));
+  const hours = esc(String(profit.hours));
+  const fields = [["failurePercent","Failure percentage"],["revenue","Original revenue"],["adjustedRevenue","Revenue remaining"],
+    ["cuttingCost","Full cutting expense"],["materialExpense","Full material expense"],["originalNetProfit","Original net profit"],
+    ["totalProfit","Adjusted net profit"],["revenueLost","Revenue lost / potential profit reduction"]];
+  return `<div class="job-net-summary" data-job-net-id="${esc(id)}">
+    <div class="job-net-total">Net Total: <strong class="${tone("totalProfit")}">${money("totalProfit")}</strong></div>
+    <div class="${tone("revenue")}">Revenue: ${rate(profit.chargeRate)}/hr × ${hours} hr = ${money("revenue")}</div>
+    <div class="${tone("materialExpense")}">Material Expense: ${money("materialExpense")}</div>
+    <div class="${tone("cuttingCost")}">Cutting Expense: ${rate(-profit.costRate || 0)}/hr × ${hours} hr = ${money("cuttingCost")}</div>
+    <div class="${tone("failurePercent")}">Failure: ${money("failurePercent")}</div>
+    <button type="button" class="job-net-toggle" data-job-net-toggle aria-expanded="${expanded}" aria-controls="${esc(detailsId)}">${expanded ? "Collapse" : "Expand"}</button>
+    <dl class="job-net-breakdown" id="${esc(detailsId)}" data-job-net-details ${expanded ? "" : "hidden"}>
+      ${fields.map(([key,label])=>`<dt>${label}</dt><dd class="${tone(key)}">${money(key)}</dd>`).join("")}
+    </dl>
+  </div>`;
+}
+
 function viewJobs(){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const textEsc = (str)=> String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -3858,18 +3901,7 @@ function viewJobs(){
           </td>
           <td class="job-col job-col-files">${buildFileCellMarkup(job.id, jobFiles)}</td>
           <td class="job-col job-col-impact">
-            <div class="job-impact-stack">
-              <div class="job-impact-header">
-                <span class="job-impact ${impactClass}">${netTotalDisplay}</span>
-              </div>
-              <div class="job-impact-meta">${esc(efficiencySummaryText)}</div>
-              <dl class="job-impact-metrics">
-                <div><dt>Charge</dt><dd>${chargeDisplay}</dd></div>
-                <div><dt>Cost</dt><dd>${costDisplay}</dd></div>
-                <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
-                <div><dt>Net total</dt><dd class="${impactClass}">${netTotalDisplay}</dd></div>
-              </dl>
-            </div>
+            ${renderCuttingJobNetBreakdown(job)}
           </td>
           <td class="job-col job-col-note">
             ${notePreview.preview
@@ -3883,12 +3915,12 @@ function viewJobs(){
           </td>
           <td class="job-col job-col-actions">
             <div class="job-actions">
-              <button type="button" data-history-failed-cut="${esc(String(job.id))}">Failed Cut${computeCuttingJobProfit(job).failurePercent ? ` (${computeCuttingJobProfit(job).failurePercent}%)` : ""}</button>
               <button type="button" class="job-actions-trigger" data-history-actions-toggle="${job.id}" aria-haspopup="true" aria-expanded="false" aria-controls="${esc(actionMenuId)}">
                 <span class="job-actions-trigger-label">Actions</span>
                 <span class="job-actions-trigger-caret" aria-hidden="true">▾</span>
               </button>
               <div class="job-actions-menu" id="${esc(actionMenuId)}" data-history-actions-menu="${job.id}" hidden>
+                <button type="button" data-history-failed-cut="${esc(String(job.id))}">Failed Cut — ${computeCuttingJobProfit(job).failurePercent}%</button>
                 <button type="button" data-history-activate="${job.id}">Make active copy</button>
                 <button type="button" data-history-edit="${job.id}">Edit</button>
                 <button type="button" class="danger" data-history-delete="${job.id}">Delete</button>
@@ -4277,19 +4309,7 @@ function viewJobs(){
           <td class="job-col job-col-status">${statusDisplay}</td>
           <td class="job-col job-col-files">${buildFileCellMarkup(j.id, jobFiles)}</td>
           <td class="job-col job-col-impact">
-            <div class="job-impact-stack">
-              <div class="job-impact-header">
-                <span class="job-impact ${impactClass}">${impactDisplay}</span>
-              </div>
-              <div class="job-impact-meta">${esc(efficiencySummaryText)}</div>
-              <dl class="job-impact-metrics">
-                <div><dt>Charge</dt><dd>${chargeDisplay}</dd></div>
-                <div><dt>Cost</dt><dd>${costDisplay}</dd></div>
-                <div><dt>Net/hr</dt><dd class="${netClass}">${netDisplay}</dd></div>
-                <div><dt>Net total</dt><dd class="${impactClass}">${impactDisplay}</dd></div>
-                <div><dt>Queue ahead</dt><dd>${backlogHours > 0 ? `${backlogHours.toFixed(1)} hr` : 'None'}</dd></div>
-              </dl>
-            </div>
+            ${renderCuttingJobNetBreakdown(j)}
           </td>
           <td class="job-col job-col-note">
             ${notePreview.preview
