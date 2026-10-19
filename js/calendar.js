@@ -2946,6 +2946,36 @@ function restoreCriticalIntervalTasks(){
   return changed;
 }
 
+// Rebuild only the browser-local projection; leave existing events/calculations alone.
+function renderWaterQualityCalendarEvents(){
+  const container = document.getElementById("months");
+  if (!container) return;
+  container.querySelectorAll("[data-cal-water-quality]").forEach(chip => chip.remove());
+  const checks = typeof renderWaterQualityTracker !== "undefined" ? renderWaterQualityTracker.readChecks() : [];
+  const byDate = {};
+  checks.forEach(check => { (byDate[check.date] ||= []).push(check); });
+  container.querySelectorAll(".day[data-date-iso]").forEach(cell => {
+    (byDate[cell.dataset.dateIso] || []).forEach(check => {
+      const chip = document.createElement("div");
+      chip.className = `event cal-water-quality ${check.softness === "Pass" ? "status-approved" : "status-denied"}`;
+      chip.dataset.calWaterQuality = check.id;
+      chip.setAttribute("role", "button");
+      chip.tabIndex = 0;
+      chip.textContent = `Water Quality · ${check.time} · ${check.ppm} PPM · Water Softness ${check.softness} · ${check.initials}`;
+      chip.title = `${chip.textContent} · Browser-local${check.note ? " · " + check.note : ""}`;
+      chip.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        document.getElementById("waterQualityModal")?.dispatchEvent(new CustomEvent("water-quality-open-check", { detail:{ id:check.id } }));
+      });
+      chip.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " "){ event.preventDefault(); event.stopPropagation(); chip.click(); }
+      });
+      cell.insertBefore(chip, cell.querySelector(".day-add-bubble"));
+    });
+  });
+}
+
 function renderCalendar(){
   // Rendering is read-only. Recovery runs only from explicit load/recovery flows.
   const container = $("#months");
@@ -3765,6 +3795,7 @@ const jobsMap = {};
     monthDiv.appendChild(grid);
     container.appendChild(monthDiv);
   }
+  renderWaterQualityCalendarEvents();
   wireCalendarBubbles();
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
 }

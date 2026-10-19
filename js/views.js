@@ -40,6 +40,17 @@ function renderAverageHoursBanner(contextLabel){
 `;
 }
 
+function viewWaterQualityFields(prefix){
+  return `<label>Date<input id="${prefix}Date" name="date" type="date" required></label>
+    <label>Time<input id="${prefix}Time" name="time" type="time" required></label>
+    <label>PPM<input id="${prefix}PPM" name="ppm" type="number" step="any" required></label>
+    <label>Water Softness<select id="${prefix}Softness" name="softness" required>
+      <option value="">Select Pass / Fail</option><option value="Pass">Pass</option><option value="Fail">Fail</option>
+    </select></label>
+    <label>Operator Initials<input id="${prefix}Initials" name="initials" type="text" required></label>
+    <label class="water-quality-note-field">Note (optional)<input id="${prefix}Note" name="note" type="text"></label>`;
+}
+
 function viewDashboard(){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const cur   = RENDER_TOTAL ?? currentTotal();
@@ -232,6 +243,18 @@ function viewDashboard(){
           <p class="small muted">Baseline adapts to your average logged hours per day.</p>
         </div>
       </div>
+      <div class="dashboard-window" data-dashboard-window="waterQuality">
+        <section class="block water-quality-block" aria-labelledby="waterQualityHeading">
+          <h3 id="waterQualityHeading">Water Quality</h3>
+          <p class="water-quality-note" id="waterQualityHelp">Choose Water Softness Pass or Fail from your test. Saved checks stay in this browser only; they are not synced or included in OMAX backups.</p>
+          <form id="waterQualityForm" class="mini-form water-quality-fields" aria-describedby="waterQualityHelp">
+            ${viewWaterQualityFields("waterQuality")}
+            <button type="submit">Submit</button>
+          </form>
+          <p id="waterQualityStatus" class="water-quality-note" role="status"></p>
+          <button type="button" id="waterQualityViewLog">View Water Quality Log</button>
+        </section>
+      </div>
     </div>
 
     <div class="block calendar-block">
@@ -251,6 +274,29 @@ function viewDashboard(){
 
       <div id="months"></div>
       <div class="small">Hover a due item for actions. Click to pin the bubble. Use the arrows to browse months and toggle “Show All Months” to scroll through the schedule.</div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="waterQualityModal" hidden>
+    <div class="modal-card water-quality-modal-card" role="dialog" aria-modal="true" aria-labelledby="waterQualityLogHeading">
+      <button type="button" class="modal-close" id="waterQualityCloseLog" aria-label="Close Water Quality Log">×</button>
+      <h3 id="waterQualityLogHeading">Water Quality Log</h3>
+      <p class="water-quality-note">Saved in this browser only. Dates and times use your local timezone.</p>
+      <p id="waterQualityLogStatus" class="water-quality-note" role="status"></p>
+      <form id="waterQualityEditForm" hidden>
+        <h4>Edit check</h4>
+        <div class="mini-form water-quality-fields">${viewWaterQualityFields("waterQualityEdit")}</div>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="waterQualityCancelEdit">Cancel</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+      <div class="water-quality-table-wrap" tabindex="0" role="region" aria-label="Water quality checks, scroll horizontally for more columns">
+        <table aria-label="Water quality checks">
+          <thead><tr><th scope="col">Date</th><th scope="col">Time</th><th scope="col">PPM</th><th scope="col">Water Softness</th><th scope="col">Initials</th><th scope="col">Note</th><th scope="col">Edit</th></tr></thead>
+          <tbody id="waterQualityRows"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
