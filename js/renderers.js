@@ -6117,6 +6117,57 @@ function syncNewCuttingJobSaveControls(){
   });
 }
 
+// Deliberately private page memory: never included in app snapshots or storage.
+const renderWaterQualityTracker = (() => {
+  const checks = [];
+  return function(root){
+    const form = root.querySelector("#waterQualityForm");
+    if (!form) return;
+    const date = form.querySelector("#waterQualityDate");
+    const ppm = form.querySelector("#waterQualityPPM");
+    const result = form.querySelector("#waterQualityResult");
+    const initials = form.querySelector("#waterQualityInitials");
+    const rows = root.querySelector("#waterQualityRows");
+    const status = root.querySelector("#waterQualityStatus");
+    const today = new Date();
+    date.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+    function renderRows(){
+      rows.replaceChildren();
+      checks.forEach(check => {
+        const row = document.createElement("tr");
+        [check.date, check.ppm, check.result, check.initials].forEach((value, index) => {
+          const cell = document.createElement("td");
+          if (index === 2){
+            const chip = document.createElement("span");
+            chip.className = `status-chip ${check.result === "Pass" ? "status-approved" : "status-denied"}`;
+            chip.textContent = value;
+            cell.appendChild(chip);
+          } else {
+            cell.textContent = value;
+          }
+          row.appendChild(cell);
+        });
+        rows.appendChild(row);
+      });
+      status.textContent = checks.length ? `${checks.length} check${checks.length === 1 ? "" : "s"} in this session.` : "No checks in this session.";
+    }
+
+    initials.addEventListener("input", () => initials.setCustomValidity(""));
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      initials.setCustomValidity(initials.value.trim() ? "" : "Enter operator initials.");
+      if (!form.reportValidity() || !Number.isFinite(ppm.valueAsNumber) || !["Pass", "Fail"].includes(result.value)) return;
+      checks.unshift({ date:date.value, ppm:ppm.valueAsNumber, result:result.value, initials:initials.value.trim() });
+      renderRows();
+      ppm.value = "";
+      result.value = "";
+      ppm.focus();
+    });
+    renderRows();
+  };
+})();
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   const activeDashboardModal = document.getElementById("dashboardAddModal");
@@ -6124,6 +6175,7 @@ function renderDashboard(){
     return;
   }
   content.innerHTML = viewDashboard();
+  renderWaterQualityTracker(content);
   setAppSettingsContext("dashboard");
   wireDashboardSettingsMenu();
 

@@ -6693,3 +6693,13 @@ body.job-category-modal-open{overflow:hidden}
 .failed-cut-slider-label { margin-top: 12px; }
 .failed-cut-dialog input[type="range"] { width: 100%; accent-color: var(--brand-blue-800, #0a63c2); cursor: pointer; }
 .failed-cut-slider-scale { display: flex; justify-content: space-between; font-size: 11px; color: #4b5874; }
+
+/* Session-only dashboard water quality checks. */
+.water-quality-block { margin: 16px 0; }
+.water-quality-block .mini-form { align-items: flex-end; }
+.water-quality-block label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
+.water-quality-block input, .water-quality-block select { width: 150px; max-width: 100%; box-sizing: border-box; }
+.water-quality-block #waterQualityInitials { width: 100px; }
+.water-quality-note { color: #42506c; font-size: 13px; }
+.water-quality-table-wrap { overflow-x: auto; }
+.water-quality-block td { overflow-wrap: anywhere; }
