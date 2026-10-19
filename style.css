@@ -6693,3 +6693,25 @@ body.job-category-modal-open{overflow:hidden}
 .failed-cut-slider-label { margin-top: 12px; }
 .failed-cut-dialog input[type="range"] { width: 100%; accent-color: var(--brand-blue-800, #0a63c2); cursor: pointer; }
 .failed-cut-slider-scale { display: flex; justify-content: space-between; font-size: 11px; color: #4b5874; }
+
+/* Browser-local Water Quality entry form and log. */
+.water-quality-block { margin: 0; }
+.water-quality-fields { align-items: flex-end; }
+.water-quality-fields label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; min-width: 0; }
+.water-quality-fields input, .water-quality-fields select { width: 150px; max-width: 100%; box-sizing: border-box; padding: 6px; }
+.water-quality-fields input[name="initials"] { width: 100px; }
+.water-quality-fields select { width: 180px; }
+.water-quality-note { color: #42506c; font-size: 13px; }
+.water-quality-error { color: #b3261e; font-weight: 600; }
+.water-quality-modal-card { width: min(960px, 94vw); min-width: 0; box-sizing: border-box; }
+.water-quality-modal-card h3 { padding-right: 30px; }
+.water-quality-modal-card form { margin-bottom: 16px; }
+.water-quality-modal-card form[hidden] { display: none; }
+.water-quality-table-wrap { max-width: 100%; overflow-x: auto; }
+.water-quality-table-wrap table { min-width: 740px; box-shadow: none; }
+.water-quality-table-wrap td { overflow-wrap: anywhere; max-width: 240px; }
+.water-quality-table-wrap td:nth-child(1), .water-quality-table-wrap td:nth-child(2) { white-space: nowrap; }
+.water-quality-table-wrap button { padding: 6px 12px; border: 1px solid #c5d1e8; border-radius: 6px; color: #0a63c2; background: #eef3fb; cursor: pointer; }
+.water-quality-table-wrap button:disabled { opacity: .6; cursor: default; }
+
+.cal-water-quality { overflow-wrap: anywhere; }

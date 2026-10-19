@@ -6117,13 +6117,183 @@ function syncNewCuttingJobSaveControls(){
   });
 }
 
+// Water Quality uses only this dedicated browser-local key, never OMAX snapshots.
+const renderWaterQualityTracker = (() => {
+  const storageKey = "omax.waterQualityChecks.v1";
+  const fields = ["date", "time", "ppm", "softness", "initials", "note"];
+  function readChecks(){
+    const raw = localStorage.getItem(storageKey);
+    const checks = raw === null ? [] : JSON.parse(raw);
+    const ids = new Set();
+    if (!Array.isArray(checks) || !checks.every(check => {
+      if (!check || typeof check.id !== "string" || !check.id || ids.has(check.id)) return false;
+      ids.add(check.id);
+      return typeof check.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(check.date)
+        && typeof check.time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(check.time)
+        && Number.isFinite(check.ppm) && ["Pass", "Fail"].includes(check.softness)
+        && typeof check.initials === "string" && check.initials.trim()
+        && typeof check.note === "string";
+    })) throw Error("Unreadable Water Quality records");
+    return checks;
+  }
+  function localTime(){
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  }
+  const render = function(root){
+    const form = root.querySelector("#waterQualityForm");
+    if (!form) return;
+    const modal = root.querySelector("#waterQualityModal");
+    const editor = modal.querySelector("#waterQualityEditForm");
+    const rows = modal.querySelector("#waterQualityRows");
+    const openButton = root.querySelector("#waterQualityViewLog");
+    const closeButton = modal.querySelector("#waterQualityCloseLog");
+    const statuses = [root.querySelector("#waterQualityStatus"), modal.querySelector("#waterQualityLogStatus")];
+    let checks = [], editingId = null;
+    const today = new Date();
+    form.elements.date.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    form.elements.time.value = localTime();
+
+    function status(message, error = false){
+      statuses.forEach(element => {
+        element.textContent = message;
+        element.classList.toggle("water-quality-error", error);
+      });
+    }
+    function renderRows(){
+      rows.replaceChildren();
+      checks.forEach(check => {
+        const row = document.createElement("tr");
+        row.dataset.checkId = check.id;
+        fields.forEach(field => {
+          const cell = document.createElement("td");
+          if (field === "softness"){
+            const chip = document.createElement("span");
+            chip.className = `status-chip ${check.softness === "Pass" ? "status-approved" : "status-denied"}`;
+            chip.textContent = check.softness;
+            cell.appendChild(chip);
+          } else cell.textContent = check[field];
+          row.appendChild(cell);
+        });
+        const action = document.createElement("td"), button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Edit";
+        button.disabled = editingId !== null;
+        button.addEventListener("click", () => {
+          editingId = check.id;
+          fields.forEach(field => { editor.elements[field].value = check[field]; });
+          editor.elements.initials.setCustomValidity("");
+          editor.hidden = false;
+          renderRows();
+          editor.elements.date.focus();
+        });
+        action.appendChild(button);
+        row.appendChild(action);
+        rows.appendChild(row);
+      });
+    }
+    function load(){
+      try {
+        checks = readChecks();
+        renderRows();
+        status(`${checks.length} saved check${checks.length === 1 ? "" : "s"} in this browser.`);
+      } catch (_error){
+        status("Could not read Water Quality storage. Existing data is kept; saving is blocked until storage can be read.", true);
+      }
+    }
+    function cancelEdit(){
+      const id = editingId;
+      editingId = null;
+      editor.hidden = true;
+      editor.reset();
+      editor.elements.initials.setCustomValidity("");
+      renderRows();
+      Array.from(rows.children).find(row => row.dataset.checkId === id)?.querySelector("button")?.focus();
+    }
+    function save(source, id = null){
+      source.elements.initials.setCustomValidity(source.elements.initials.value.trim() ? "" : "Enter operator initials.");
+      if (!source.reportValidity() || !Number.isFinite(source.elements.ppm.valueAsNumber)) return false;
+      try {
+        // Re-read before changing one entry so other stored entries are retained.
+        const next = readChecks();
+        const check = { id:id || crypto.randomUUID() };
+        fields.forEach(field => { check[field] = source.elements[field].value.trim(); });
+        check.ppm = source.elements.ppm.valueAsNumber;
+        if (!["Pass", "Fail"].includes(check.softness)) return false;
+        if (id){
+          const index = next.findIndex(entry => entry.id === id);
+          if (index === -1) throw Error("Water Quality record missing");
+          next[index] = check;
+        } else next.unshift(check);
+        localStorage.setItem(storageKey, JSON.stringify(next));
+        checks = next;
+        renderRows();
+        status(id ? "Check updated in this browser." : "Check saved in this browser.");
+        renderWaterQualityCalendarEvents();
+        return true;
+      } catch (_error){
+        status("Could not save Water Quality check. No changes were saved. Check browser storage and try again; your entered values are kept.", true);
+        return false;
+      }
+    }
+    [form, editor].forEach(source => source.elements.initials.addEventListener("input", () => source.elements.initials.setCustomValidity("")));
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      if (!save(form)) return;
+      ["ppm", "softness", "note"].forEach(field => { form.elements[field].value = ""; });
+      form.elements.time.value = localTime();
+      form.elements.ppm.focus();
+    });
+    editor.addEventListener("submit", event => {
+      event.preventDefault();
+      if (save(editor, editingId)) cancelEdit();
+    });
+    modal.querySelector("#waterQualityCancelEdit").addEventListener("click", cancelEdit);
+    function close(){
+      cancelEdit();
+      modal.classList.remove("is-visible");
+      modal.hidden = true;
+      openButton.focus();
+    }
+    openButton.addEventListener("click", () => {
+      load();
+      modal.hidden = false;
+      modal.classList.add("is-visible");
+      closeButton.focus();
+    });
+    modal.addEventListener("water-quality-open-check", event => {
+      openButton.click();
+      const row = Array.from(rows.children).find(entry => entry.dataset.checkId === event.detail?.id);
+      row?.scrollIntoView({ block:"nearest" });
+      row?.querySelector("button")?.focus();
+    });
+    closeButton.addEventListener("click", close);
+    modal.addEventListener("click", event => { if (event.target === modal) close(); });
+    modal.addEventListener("keydown", event => {
+      if (event.key === "Escape"){ event.preventDefault(); event.stopPropagation(); close(); }
+      if (event.key === "Tab"){
+        const controls = Array.from(modal.querySelectorAll('button, input, select, [tabindex="0"]')).filter(element => !element.disabled && element.getClientRects().length);
+        const first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first){ event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last){ event.preventDefault(); first.focus(); }
+      }
+    });
+    load();
+  };
+  // Read-only calendar projection; malformed/unavailable storage stays untouched.
+  render.readChecks = () => { try { return readChecks(); } catch (_error){ return []; } };
+  return render;
+})();
+
 function renderDashboard(){
   const content = $("#content"); if (!content) return;
   const activeDashboardModal = document.getElementById("dashboardAddModal");
-  if (activeDashboardModal && activeDashboardModal.classList.contains("is-visible")){
+  if ((activeDashboardModal && activeDashboardModal.classList.contains("is-visible"))
+      || document.getElementById("waterQualityModal")?.classList.contains("is-visible")){
     return;
   }
   content.innerHTML = viewDashboard();
+  renderWaterQualityTracker(content);
   setAppSettingsContext("dashboard");
   wireDashboardSettingsMenu();
 
