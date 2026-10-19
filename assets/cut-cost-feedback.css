@@ -1,6 +1,12 @@
 /* Scoped to CCR calculator and its native dialogs; other pages keep their theme. */
 .cut-cost-surface{background:#fff;color:#0a1f3f;border:1px solid #aab8ca;border-radius:12px;padding:14px;color-scheme:light;}
-.cut-cost-card{margin-bottom:16px;}
+.cut-cost-card{margin:0;}
+.cost-layout:not(.has-custom-layout) [data-cost-window="cutCostFeedback"]{grid-column:1 / -1;}
+[data-cost-window="cutCostFeedback"] .cut-cost-summary,[data-cost-window="cutCostFeedback"] [data-cut-cost-config]{flex-shrink:0;}
+[data-cut-cost-job]{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;}
+[data-cut-cost-job] label{display:flex;align-items:center;gap:6px;}
+.cut-cost-job-info{position:fixed;inset:auto;margin:0;width:min(320px,calc(100vw - 16px));max-height:70vh;overflow:auto;padding:12px;background:#fff;color:#0a1f3f;border:1px solid #64748b;border-radius:8px;box-shadow:0 8px 24px #0003;font-size:13px;line-height:1.5;}
+.cut-cost-job-info p{color:inherit;margin:8px 0 0;}
 .cut-cost-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px;}
 .cut-cost-summary h3{font-size:15px;margin:0;}
 .cut-cost-summary strong{font-size:15px;}

@@ -2048,6 +2048,7 @@ function viewCosts(model){
     </div>
 
     <div class="dashboard-layout cost-layout" id="costLayout">
+      <div class="dashboard-window" data-cost-window="cutCostFeedback"></div>
       <div class="dashboard-window" data-cost-window="overview">
         <div class="block cost-overview-block">
           <h3>Cost Overview</h3>

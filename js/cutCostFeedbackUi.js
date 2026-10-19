@@ -5,6 +5,7 @@
   const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const money=value=>Number.isFinite(value)?'$'+value.toFixed(2):'INSUFFICIENT DATA';
   let saving=false;
+  const jobControllers=new WeakMap();
   const saved=()=>api.settings(window.appConfig?.cutCostFeedback);
   const today=()=>ymd(new Date());
   const model=()=>computeCostModel();
@@ -129,8 +130,8 @@
     body.querySelector('[data-cut-cost-meter-history]').onclick=()=>{modal.close();location.hash='#/';requestAnimationFrame(()=>{renderDashboard();document.getElementById('editLogHistoryBtn')?.click();});};
   }
   function mountCosts(root,current){
-    const host=root.querySelector('.cost-container');if(!host)return;
-    host.insertAdjacentHTML('afterbegin',`<section class="cut-cost-surface cut-cost-card" data-cut-cost-calculator>
+    const host=root.querySelector('[data-cost-window="cutCostFeedback"]');if(!host||host.querySelector('[data-cut-cost-calculator]'))return;
+    host.insertAdjacentHTML('afterbegin',`<section class="block cut-cost-surface cut-cost-card" data-cut-cost-calculator>
       <div class="cut-cost-summary"><h3>Calculated Cut Cost/Hr<br><strong data-cut-cost-summary-rate></strong></h3><div>Maintenance Cost/Hr<br><strong data-cut-cost-summary-maintenance></strong></div><div>Garnet Cost/Hr<br><strong data-cut-cost-summary-garnet></strong></div><div><span data-cut-cost-summary-window></span><br><span data-cut-cost-measurement-window></span><br><span data-cut-cost-measured-through></span><br><span data-cut-cost-summary-status role="status"></span></div><div class="cut-cost-actions"><button type="button" data-cut-cost-configure aria-expanded="false">Configure</button><button type="button" data-cut-cost-review-open hidden>Review Missing Data</button></div></div>
       <div data-cut-cost-config hidden><p class="small">Operating-cost estimate: completed maintenance + assumed garnet consumption. Purchase History remains an independent spending comparison.</p><div class="modal-grid">
         <label>Date window<select data-cut-cost-field="days">${[30,60,90,180].map(n=>`<option value="${n}">${n} days</option>`).join('')}<option value="custom">Custom range</option></select></label><label>Start date<input type="date" data-cut-cost-field="startDate"></label><label>End date<input type="date" data-cut-cost-field="endDate"></label>
@@ -158,32 +159,54 @@
     panel.querySelector('[data-cut-cost-save]').addEventListener('click',async()=>{
       const button=panel.querySelector('[data-cut-cost-save]'),status=panel.querySelector('[data-cut-cost-status]');button.disabled=true;inputs.forEach(input=>input.disabled=true);status.textContent=' Saving and verifying…';
       const result=await saveConfig(draft());inputs.forEach(input=>input.disabled=false);if(result.saved)delete window.__cutCostFeedbackDraft;update();status.textContent=result.saved?' Settings saved and verified.':' '+result.error;
+      if(result.saved)panel.dispatchEvent(new Event('cut-cost-settings-saved'));
     });update();
   }
 
   function mountJob(root,id){
-    const input=root.querySelector('#'+id);if(!input)return;
-    input.insertAdjacentHTML('afterend',`<span data-cut-cost-job><label>Cut Cost/Hr source<select data-cut-cost-source><option value="manual">Existing manual rate</option><option value="calculated">Calculated from Cost Analysis</option></select></label><span class="small" data-cut-cost-preview></span></span>`);
-    const panel=input.parentElement.querySelector('[data-cut-cost-job]'),select=panel.querySelector('select'),preview=panel.querySelector('[data-cut-cost-preview]');
-    let manual=input.value;
+    const input=root.querySelector('#'+id);if(!input||jobControllers.has(input))return;
+    const infoId=id+'CutCostInfo';
+    input.insertAdjacentHTML('afterend',`<span data-cut-cost-job><label>Cut Cost/Hr source<select data-cut-cost-source><option value="manual">Manual Override</option><option value="calculated">Calculated from Cost Analysis</option></select></label><button type="button" class="chart-info-button" data-cut-cost-info-open aria-label="About this job's Cut Cost/Hr" aria-controls="${infoId}" aria-expanded="false">i</button><span class="small" data-cut-cost-preview role="status"></span><div class="cut-cost-job-info" data-cut-cost-info id="${infoId}" popover="auto" role="note"></div></span>`);
+    const panel=input.parentElement.querySelector('[data-cut-cost-job]'),select=panel.querySelector('select'),preview=panel.querySelector('[data-cut-cost-preview]'),info=panel.querySelector('[data-cut-cost-info]'),button=panel.querySelector('[data-cut-cost-info-open]');
+    let manual=input.value,overridden=false,pinned=false;
+    const details=result=>{
+      info.innerHTML=`<strong>Cost Analysis operating-cost estimate</strong><p>Maintenance Cost/Hr: ${esc(money(result.maintenanceCostPerHour))}<br>Garnet Cost/Hr: ${esc(money(result.garnetCostPerHour))}<br>Calculated Cut Cost/Hr: ${esc(money(result.cutCostPerHour))}</p><p>Saved requested window: ${esc(result.startDate||'unavailable')} to ${esc(result.endDate||'unavailable')}<br>Measurement window: ${esc(result.measurementStartDate||'unavailable')} to ${esc(result.measurementEndDate||'unavailable')}</p><p>The numerical rate is saved with this job and will not change afterward. You can enter a manual override.</p>${result.valid?'':`<p>${(result.warnings||[]).map(esc).join('<br>')}</p>`}`;
+    };
+    const usable=result=>result.valid&&Number.isFinite(result.cutCostPerHour)&&result.cutCostPerHour>0&&Number(result.cutCostPerHour.toFixed(2))>0;
+    const choose=()=>{
+      const result=calculate();details(result);
+      if(!usable(result)){select.value='manual';delete input.dataset.calculatedCutCost;input.value=manual;preview.textContent='Calculated rate unavailable; using manual/default.';if(result.valid)info.insertAdjacentHTML('beforeend','<p>A calculated rate must exceed $0.00 to populate a new job.</p>');return;}
+      select.value='calculated';input.value=result.cutCostPerHour.toFixed(2);input.dataset.calculatedCutCost=String(result.cutCostPerHour);preview.textContent='';
+    };
+    const preserve=rate=>{
+      manual=input.value;overridden=true;delete input.dataset.calculatedCutCost;select.value='manual';preview.textContent='';
+      if(Number.isFinite(Number(rate))&&Number(rate)>0&&input.value===Number(rate).toFixed(2)){input.dataset.calculatedCutCost=String(rate);select.value='calculated';overridden=false;}
+      const result=calculate();details(result);if(!usable(result))preview.textContent='Calculated rate unavailable; using manual/default.';
+    };
+    jobControllers.set(input,{refresh(){if(!overridden)choose();},preserve});
     select.addEventListener('change',()=>{
-      if(select.value==='manual'){input.value=manual;delete input.dataset.calculatedCutCost;preview.textContent='Manual Cut Cost/Hr.';return;}
-      manual=input.value;
-      const result=calculate();preview.textContent=`Requested ${result.startDate} to ${result.endDate}; measured ${result.measurementStartDate||"unavailable"} to ${result.measurementEndDate||"unavailable"}: ${money(result.cutCostPerHour)}. Calculated operating-cost estimate. Edit the rate to override manually.`;
-      if(!result.valid){select.value='manual';delete input.dataset.calculatedCutCost;return;}
-      input.value=result.cutCostPerHour.toFixed(2);input.dataset.calculatedCutCost=String(result.cutCostPerHour);
+      if(select.value==='manual'){input.value=manual;preserve();return;}
+      manual=input.value;overridden=false;choose();
     });
-    input.addEventListener('input',()=>{select.value='manual';delete input.dataset.calculatedCutCost;manual=input.value;preview.textContent='Manual override.';});
-    input.form?.addEventListener('reset',()=>{select.value='manual';delete input.dataset.calculatedCutCost;preview.textContent='';});
+    input.addEventListener('input',()=>preserve());
+    input.form?.addEventListener('reset',()=>Promise.resolve().then(()=>{manual=input.value;overridden=false;choose();}));
+    const show=()=>{const result=calculate();details(result);if(result.valid&&!usable(result))info.insertAdjacentHTML('beforeend','<p>A calculated rate must exceed $0.00 to populate a new job.</p>');info.showPopover();const rect=button.getBoundingClientRect(),width=info.getBoundingClientRect().width;info.style.left=Math.max(8,Math.min(rect.left,innerWidth-width-8))+'px';info.style.top=Math.max(8,Math.min(rect.bottom+6,innerHeight-info.getBoundingClientRect().height-8))+'px';};
+    button.addEventListener('pointerenter',show);
+    button.addEventListener('pointerleave',()=>{if(!pinned)info.hidePopover();});
+    button.addEventListener('click',()=>{if(pinned){info.hidePopover();pinned=false;}else{show();pinned=true;}});
+    info.addEventListener('toggle',()=>{const open=info.matches(':popover-open');button.setAttribute('aria-expanded',String(open));if(!open)pinned=false;});
+    const draft=id==='jobCostRate'?window.jobAddDraft:null;
+    if(draft&&Object.hasOwn(draft,'costRate'))preserve(draft.calculatedCutCost);else choose();
   }
+  function refreshJob(input,options){const controller=input&&jobControllers.get(input);if(options?.preserve)controller?.preserve(options.calculatedRate);else controller?.refresh();}
   function jobRate(input){
     if(!input)return NaN;
     if(input.dataset.calculatedCutCost===undefined)return input.value===''?45:Number(input.value);
     const result=calculate();
-    if(!result.valid||result.cutCostPerHour!==Number(input.dataset.calculatedCutCost)){
+    if(!result.valid||result.cutCostPerHour<=0||result.cutCostPerHour!==Number(input.dataset.calculatedCutCost)){
       toast('Calculated rate changed or is incomplete. Select the calculated source again to review it, or enter a manual rate.');return NaN;
     }
     return result.cutCostPerHour;
   }
-  window.OMAXCutCostFeedbackUi=Object.freeze({calculate,saveConfig,saveRepair,saveHours,mountCosts,mountJob,jobRate});
+  window.OMAXCutCostFeedbackUi=Object.freeze({calculate,saveConfig,saveRepair,saveHours,mountCosts,mountJob,refreshJob,jobRate});
 })();
