@@ -6124,6 +6124,7 @@ function renderDashboard(){
     return;
   }
   content.innerHTML = viewDashboard();
+  window.OMAXCutCostFeedbackUi?.mountJob(content, "dashJobCostRate");
   setAppSettingsContext("dashboard");
   wireDashboardSettingsMenu();
 
@@ -8112,7 +8113,7 @@ function renderDashboard(){
     const materialCost = materialCostRaw === "" ? 0 : Number(materialCostRaw);
     const materialQty  = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
     const chargeRate = chargeRaw === "" ? 200 : Number(chargeRaw);
-    const costRate = costRateRaw === "" ? 45 : Number(costRateRaw);
+    const costRate = window.OMAXCutCostFeedbackUi ? window.OMAXCutCostFeedbackUi.jobRate(jobCostRateInput) : (costRateRaw === "" ? 45 : Number(costRateRaw));
     if (!name || !isFinite(est) || est <= 0 || !start || !due){ toast("Fill job fields."); return; }
     if (!Number.isFinite(materialCost) || materialCost < 0){ toast("Enter a valid material cost."); return; }
     if (!Number.isFinite(materialQty) || materialQty < 0){ toast("Enter a valid material quantity."); return; }
@@ -13559,6 +13560,7 @@ function renderCosts(){
     ? model.jobSeries.slice()
     : [];
   content.innerHTML = viewCosts(model);
+  window.OMAXCutCostFeedbackUi?.mountCosts(content, model);
   const pendingWeeklyScrollState = (typeof window !== "undefined" && window.__costWeeklyScrollState && typeof window.__costWeeklyScrollState === "object")
     ? { ...window.__costWeeklyScrollState }
     : null;
@@ -17264,18 +17266,18 @@ const appendEmptyRow = (focusFirst = false)=>{
     const maintenanceRange = filterChartSeriesByRange(maintenanceSeriesBase, months);
     const spendRange = filterChartSeriesByRange(totalSpendSeriesBase, months);
     const jobRange = filterChartSeriesByRange(jobSeriesBase, months);
-    const maintenanceCostTotalInWindow = maintenanceRange.points.reduce((sum, item) => {
-      const value = Number(item?.value) || 0;
-      return sum + Math.abs(value);
-    }, 0);
+    const maintenanceRowsInWindow = (model.maintenanceCostRows || []).filter(row=>Number.isFinite(maintenanceRange.domainStart) && Number.isFinite(maintenanceRange.domainEnd) && row.dateISO >= ymd(new Date(maintenanceRange.domainStart)) && row.dateISO <= ymd(new Date(maintenanceRange.domainEnd)));
+    const maintenanceCostTotalInWindow = maintenanceRowsInWindow.reduce((sum, row)=>sum + row.totalCost, 0);
     const totalCutHoursInWindow = jobRange.points.reduce((sum, item) => {
       const hours = Number(item?.cutHours) || 0;
       return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
     }, 0);
-    const maintenanceCostPerCutValue = totalCutHoursInWindow > 0
-      ? (maintenanceCostTotalInWindow / totalCutHoursInWindow)
-      : 0;
-    const maintenanceCostPerCutLabel = formatCurrencyUnsigned(maintenanceCostPerCutValue);
+    const maintenanceHourCoverage = window.OMAXCutCostFeedback && Number.isFinite(maintenanceRange.domainStart) && Number.isFinite(maintenanceRange.domainEnd)
+      ? window.OMAXCutCostFeedback.actualHours(window, ymd(new Date(maintenanceRange.domainStart)), ymd(new Date(maintenanceRange.domainEnd)), resolveEffectiveDailyCutHours) : null;
+    const incompleteMaintenance = maintenanceRowsInWindow.some(row=>row.costIncomplete);
+    const maintenanceActualHours = maintenanceHourCoverage?.complete ? maintenanceHourCoverage.hours : null;
+    const maintenanceCostPerCutValue = maintenanceActualHours > 0 && !incompleteMaintenance ? maintenanceCostTotalInWindow / maintenanceActualHours : null;
+    const maintenanceCostPerCutLabel = maintenanceCostPerCutValue == null ? "INSUFFICIENT DATA" : formatCurrencyUnsigned(maintenanceCostPerCutValue);
     const totalSpendInWindow = spendRange.points.reduce((sum, item) => {
       const value = Number(item?.value) || 0;
       return sum + Math.abs(value);
@@ -17319,7 +17321,7 @@ const appendEmptyRow = (focusFirst = false)=>{
       maintenanceCostPerCutEl.textContent = maintenanceCostPerCutLabel;
       maintenanceCostPerCutEl.setAttribute(
         "title",
-        `Average maintenance cost per cut hour (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${totalCutHoursInWindow.toFixed(1)} total cut hr.`
+        `Average maintenance cost per cut hour (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${maintenanceActualHours == null ? "unknown" : maintenanceActualHours.toFixed(1)} actual cut hr. Configured maintenance costs are estimates.`
       );
     }
     const spendPerCutEl = content.querySelector("[data-spend-cost-per-cut-label]");
@@ -17536,8 +17538,10 @@ function computeCostModel(){
     ? Number(RENDER_TOTAL)
     : (typeof currentTotal === "function" ? Number(currentTotal() || 0) : 0);
 
-  const intervalTasksAll = Array.isArray(tasksInterval) ? tasksInterval : [];
-  const asReqTasksAll = Array.isArray(tasksAsReq) ? tasksAsReq : [];
+  // Legacy read helpers normalize occurrence maps in place. Report on shallow
+  // task copies so calculating a rate cannot alter the new-job save baseline.
+  const intervalTasksAll = Array.isArray(tasksInterval) ? tasksInterval.map(task=>task && ({...task})) : [];
+  const asReqTasksAll = Array.isArray(tasksAsReq) ? tasksAsReq.map(task=>task && ({...task})) : [];
   const { calendarCostByTemplateId } = buildCalendarMaintenanceHistory({
     intervalTasks: intervalTasksAll,
     asReqTasks: asReqTasksAll
@@ -19984,6 +19988,11 @@ function computeCostModel(){
     });
   });
 
+  if (window.OMAXCutCostFeedback){
+    const corrected = window.OMAXCutCostFeedback.maintenanceRows(maintenanceDataTableRows, window, compatibilityRows);
+    maintenanceDataTableRows.splice(0, maintenanceDataTableRows.length, ...corrected);
+  }
+
   taskDateGroups.forEach((dateList, taskId) => {
     const normalizedDates = Array.isArray(dateList) ? dateList.filter(Boolean) : [];
     const uniqueDates = [...new Set(normalizedDates)].sort((a, b) => b.localeCompare(a));
@@ -20534,7 +20543,10 @@ function computeCostModel(){
     const hours = Number(item?.cutHours) || 0;
     return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
   }, 0);
-  const maintenanceCostPerCutValue = totalCutHoursAll > 0 ? (maintenanceCostTotalAll / totalCutHoursAll) : 0;
+  const maintenanceDates = maintenanceDataTableRows.map(row=>row.dateISO).filter(Boolean).sort();
+  const maintenanceHoursAll = window.OMAXCutCostFeedback && maintenanceDates.length
+    ? window.OMAXCutCostFeedback.actualHours(window, maintenanceDates[0], maintenanceDates.at(-1), resolveEffectiveDailyCutHours) : null;
+  const maintenanceCostPerCutValue = maintenanceHoursAll?.complete && !maintenanceDataTableRows.some(row=>row.costIncomplete) ? maintenanceCostTotalAll / maintenanceHoursAll.hours : null;
   const totalSpendAll = totalSpendSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
   const totalSpendPerCutValue = totalCutHoursAll > 0 ? (totalSpendAll / totalCutHoursAll) : 0;
 
@@ -20555,14 +20567,15 @@ function computeCostModel(){
     maintenanceAverageValue,
     maintenanceAverageLabel: formatterCurrency(maintenanceAverageValue, { showPlus: true, decimals: 0 }),
     maintenanceCostPerCutValue,
-    maintenanceCostPerCutLabel: formatterCurrency(maintenanceCostPerCutValue, { decimals: maintenanceCostPerCutValue < 1000 ? 2 : 0 }),
-    maintenanceCostPerCutWindowLabel: "6 months",
+    maintenanceCostPerCutLabel: maintenanceCostPerCutValue == null ? "INSUFFICIENT DATA" : formatterCurrency(maintenanceCostPerCutValue, { decimals: maintenanceCostPerCutValue < 1000 ? 2 : 0 }),
+    maintenanceCostPerCutWindowLabel: "available maintenance history",
     totalSpendPerCutValue,
     totalSpendPerCutLabel: formatterCurrency(totalSpendPerCutValue, { decimals: totalSpendPerCutValue < 1000 ? 2 : 0 }),
     cuttingAverageValue,
     cuttingAverageLabel: formatterCurrency(cuttingAverageValue, { showPlus: true, decimals: 0 }),
     orderRequestSummary,
     maintenanceDataTable,
+    maintenanceCostRows: maintenanceDataTableRows,
     purchaseDataTable,
     cuttingJobsDataTable,
     efficiencySnapshot,
@@ -21253,6 +21266,7 @@ function renderJobs(){
 
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
+  window.OMAXCutCostFeedbackUi?.mountJob(content, "jobCostRate");
   wireCuttingJobNetBreakdowns(content);
   setupJobLayout();
   hydrateVisibleCfr05CloudFiles(content);
@@ -23904,7 +23918,7 @@ function renderJobs(){
         const materialWeight = materialQtyRaw === "" ? 0 : Number(materialQtyRaw);
         const materialQty = 1;
         const chargeRate = chargeRaw === "" ? 200 : Number(chargeRaw);
-        const costRate = costRateRaw === "" ? 45 : Number(costRateRaw);
+        const costRate = window.OMAXCutCostFeedbackUi ? window.OMAXCutCostFeedbackUi.jobRate(document.getElementById("jobCostRate")) : (costRateRaw === "" ? 45 : Number(costRateRaw));
         if (!name || !isFinite(est) || est<=0 || !start || !due){ setNewCuttingJobFeedback("Fill job fields."); return; }
         if (!Number.isFinite(materialCost) || materialCost < 0){
           materialCost = 0;
