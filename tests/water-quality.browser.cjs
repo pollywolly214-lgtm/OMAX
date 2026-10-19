@@ -8,7 +8,7 @@ const path = require("node:path");
 const http = require("node:http");
 const { chromium } = require(process.env.OMAX_PLAYWRIGHT_PATH || "playwright");
 
-test("water quality: local time, modal editing, refresh persistence and protected-data isolation", { timeout:60000 }, async t => {
+test("water quality: dashboard layout, calendar projection, editing and local persistence", { timeout:60000 }, async t => {
   const root = path.resolve(__dirname, "..");
   const server = http.createServer(async (req, res) => {
     const pathname = new URL(req.url, "http://localhost").pathname;
@@ -62,6 +62,12 @@ test("water quality: local time, modal editing, refresh persistence and protecte
   const cloud = () => page.evaluate(() => readCurrentCloudStateReadOnly());
   const snapshot = () => page.evaluate(() => compactStateForStorage(snapshotState({ skipLocalFileCacheSync:true })));
   const beforeCloud = await cloud(), beforeState = await snapshot();
+  const otherEvents = () => page.locator("#months .event:not([data-cal-water-quality]), #months .job-bar").evaluateAll(elements => elements.map(element => element.outerHTML));
+  const beforeEvents = await otherEvents();
+  const calendarChecks = page.locator("#months [data-cal-water-quality]");
+  const dayChecks = date => page.locator(`#months .day[data-date-iso="${date}"] [data-cal-water-quality]`);
+  assert.equal(await page.locator('#dashboardLayout > [data-dashboard-window="waterQuality"] #waterQualityForm').count(), 1);
+  assert.equal(await page.locator("#dashboardLayout .calendar-block").count(), 0);
   await page.evaluate(() => {
     window.__waterQualityWrites = [];
     for (const name of ["saveCloudNow", "saveCloudDebounced"]){
@@ -96,6 +102,17 @@ test("water quality: local time, modal editing, refresh persistence and protecte
   assert.equal(initial.length, 3);
   assert.equal(new Set(initial.map(check => check.id)).size, 3);
   assert.equal(initial[2].note, "");
+  assert.equal(await dayChecks("2026-10-18").count(), 1);
+  assert.equal(await dayChecks("2026-10-19").count(), 2);
+  assert.equal(await calendarChecks.count(), 3);
+  assert.match(await dayChecks("2026-10-18").textContent(), /Water Quality.*08:15.*125.5 PPM.*Water Softness Pass.*RY/);
+  assert.deepEqual(await otherEvents(), beforeEvents);
+  await dayChecks("2026-10-18").click();
+  assert.equal(await modal.isVisible(), true);
+  assert.equal(await rows.nth(2).getByRole("button", { name:"Edit", exact:true }).evaluate(button => button === document.activeElement), true);
+  await close();
+  await dayChecks("2026-10-18").focus(); await page.keyboard.press("Enter");
+  assert.equal(await modal.isVisible(), true); await close();
   await open();
   assert.equal(await modal.isVisible(), true);
   assert.deepEqual(await modal.locator("th").allTextContents(), ["Date", "Time", "PPM", "Water Softness", "Initials", "Note", "Edit"]);
@@ -132,6 +149,12 @@ test("water quality: local time, modal editing, refresh persistence and protecte
   assert.deepEqual(edited[0], initial[0]); assert.deepEqual(edited[2], initial[2]);
   assert.deepEqual(edited[1], { id:initial[1].id, date:"2026-10-17", time:"07:05", ppm:42.25, softness:"Pass", initials:"CD", note:"Rechecked water" });
   assert.deepEqual(await rows.nth(1).locator("td").allTextContents(), ["2026-10-17", "07:05", "42.25", "Pass", "CD", "Rechecked water", "Edit"]);
+  assert.equal(await calendarChecks.count(), 3);
+  assert.equal(await dayChecks("2026-10-19").count(), 1);
+  assert.equal(await dayChecks("2026-10-17").count(), 1);
+  assert.equal(await dayChecks("2026-10-17").getAttribute("data-cal-water-quality"), initial[1].id);
+  assert.match(await dayChecks("2026-10-17").textContent(), /07:05.*42.25 PPM.*Water Softness Pass.*CD/);
+  assert.deepEqual(await otherEvents(), beforeEvents);
   const writes = await page.evaluate(() => __waterQualityWrites);
   assert.equal(writes.length, 4);
   assert.ok(writes.every(([operation, storageKey]) => operation === "setItem" && storageKey === key));
@@ -161,6 +184,8 @@ test("water quality: local time, modal editing, refresh persistence and protecte
   assert.notEqual(await page.locator("#calendarRangeLabel").textContent(), range);
   await page.locator("#calendarPrevMonthBtn").click();
   assert.equal(await page.locator("#calendarRangeLabel").textContent(), range);
+  assert.equal(await calendarChecks.count(), 3);
+  assert.deepEqual(await otherEvents(), beforeEvents);
   await page.locator("#calendarAddBtn").click();
   assert.equal(await page.locator("#dashboardAddModal").isVisible(), true);
   await page.locator("#dashboardModalClose").click();
@@ -191,6 +216,8 @@ test("water quality: local time, modal editing, refresh persistence and protecte
   await editor.getByRole("button", { name:"Cancel", exact:true }).click();
   await close(); await page.reload(); await form.waitFor(); await open();
   assert.equal(await rows.count(), 3); assert.deepEqual(await stored(), edited);
+  assert.equal(await calendarChecks.count(), 3);
+  assert.equal(await dayChecks("2026-10-17").count(), 1);
   assert.deepEqual(await rows.nth(1).locator("td").allTextContents(), ["2026-10-17", "07:05", "42.25", "Pass", "CD", "Rechecked water", "Edit"]);
   assert.deepEqual(await cloud(), beforeCloud);
   await close();
@@ -218,5 +245,98 @@ test("water quality: local time, modal editing, refresh persistence and protecte
   assert.match(await page.locator("#waterQualityStatus").textContent(), /Could not save/);
   assert.equal(await entry("ppm").inputValue(), "125.5");
   assert.deepEqual(await cloud(), beforeCloud);
+  // Seed a previously saved layout without Water Quality in this disposable profile.
+  const layoutPage = await context.newPage();
+  layoutPage.on("pageerror", error => errors.push(error.message));
+  layoutPage.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+  layoutPage.setDefaultTimeout(8000);
+  await layoutPage.clock.setFixedTime(new Date("2026-10-20T02:30:00Z"));
+  const loadLayout = async () => {
+    await layoutPage.goto(origin + "/?devsafe=1");
+    await layoutPage.waitForFunction(() => window.OMAXDevSafe?.active && window.__initialAdoptComplete);
+  };
+  await loadLayout();
+  // Settle built-in seed anchors before taking the protected-data baseline.
+  assert.equal((await layoutPage.evaluate(() => saveCloudNow())).saved, true);
+  await loadLayout();
+  assert.equal((await layoutPage.evaluate(() => saveCloudNow())).saved, true);
+  // The existing native layout saver also refreshes derived opportunity rollups.
+  // Initialize those fixture values before asserting all protected fields stay equal.
+  await layoutPage.evaluate(() => saveCloudDebounced());
+  await layoutPage.waitForFunction(() => window.opportunityRollups?.length === 4);
+  assert.equal((await layoutPage.evaluate(() => saveCloudNow())).saved, true);
+  const legacy = {
+    averageHours:{ x:0, y:0, width:1000, height:160 },
+    totalHours:{ x:0, y:180, width:400, height:250 },
+    nextDue:{ x:420, y:180, width:500, height:250 },
+    pumpLog:{ x:0, y:450, width:1000, height:480 },
+    pumpChart:{ x:0, y:950, width:1000, height:400 },
+    timeEfficiency:{ x:0, y:1370, width:1000, height:420 }
+  };
+  await layoutPage.evaluate(async legacy => {
+    if (!OMAXDevSafe.active || typeof firebase !== "undefined") throw Error("Disposable backend required");
+    const ref = OMAXDevSafe.db.doc(FB.docRef.path), state = (await ref.get()).data();
+    // Include the existing derived display baseline so native layout saves have no fixture drift.
+    await ref.set({ ...state, opportunityRollups:window.opportunityRollups, dashboardLayout:legacy });
+  }, legacy);
+  await loadLayout();
+  const layoutState = () => layoutPage.evaluate(() => JSON.parse(JSON.stringify(getDashboardLayoutState().layoutById)));
+  const added = await layoutState();
+  for (const [id, box] of Object.entries(legacy)) assert.deepEqual(added[id], box, `preserve legacy ${id}`);
+  assert.ok(added.waterQuality.y >= 1814, "new window appended below saved windows");
+  const protectedCloud = () => layoutPage.evaluate(async () => {
+    const data = await readCurrentCloudStateReadOnly();
+    for (const key of ["dashboardLayout", "syncMeta", "saveMeta", "syncProcessLog"]) delete data[key];
+    return data;
+  });
+  const layoutBefore = await protectedCloud();
+  const windowBox = layoutPage.locator('[data-dashboard-window="waterQuality"]');
+  const viewStyle = () => windowBox.evaluate(element => ({ x:parseFloat(element.style.left), y:parseFloat(element.style.top), width:parseFloat(element.style.width), height:parseFloat(element.style.height) }));
+  const originalBox = await viewStyle();
+  await layoutPage.locator("#dashboardSettingsToggle").click();
+  await layoutPage.locator("#dashboardEditToggle").click();
+  assert.equal(await layoutPage.locator("#dashboardLayout").evaluate(element => element.classList.contains("is-editing")), true);
+  assert.equal(await layoutPage.locator(".calendar-block .dashboard-drag-handle, .calendar-block .dashboard-resize-handle").count(), 0);
+  const drag = windowBox.locator(":scope > .dashboard-drag-handle");
+  await drag.scrollIntoViewIfNeeded();
+  const dragRect = await drag.boundingBox();
+  await layoutPage.mouse.move(dragRect.x + dragRect.width / 2, dragRect.y + dragRect.height / 2);
+  await layoutPage.mouse.down(); await layoutPage.mouse.move(dragRect.x + dragRect.width / 2, dragRect.y + dragRect.height / 2 + 70, { steps:5 }); await layoutPage.mouse.up();
+  assert.ok((await viewStyle()).y > originalBox.y, "native drag moves the window");
+  const resize = windowBox.locator(":scope > .dashboard-resize-se");
+  await resize.scrollIntoViewIfNeeded();
+  const resizeRect = await resize.boundingBox(), beforeResize = await viewStyle();
+  await layoutPage.mouse.move(resizeRect.x + resizeRect.width / 2, resizeRect.y + resizeRect.height / 2);
+  await layoutPage.mouse.down(); await layoutPage.mouse.move(resizeRect.x + resizeRect.width / 2 - 80, resizeRect.y + resizeRect.height / 2 + 60, { steps:5 }); await layoutPage.mouse.up();
+  const resized = await viewStyle();
+  assert.ok(resized.width < beforeResize.width, "native resize changes width");
+  assert.ok(resized.height > beforeResize.height, "native resize changes height");
+  await layoutPage.locator("#dashboardEditPopupButton").click();
+  const savedLayout = await layoutState();
+  for (const [id, box] of Object.entries(legacy)) assert.deepEqual(savedLayout[id], box);
+  assert.equal((await layoutPage.evaluate(() => saveCloudNow())).saved, true);
+  assert.deepEqual(await protectedCloud(), layoutBefore, "only layout configuration changed");
+  await loadLayout();
+  assert.deepEqual(await layoutState(), savedLayout);
+  assert.deepEqual(await viewStyle(), resized);
+  assert.equal(await windowBox.locator("#waterQualityForm").isVisible(), true);
+  assert.equal(await layoutPage.locator("#months [data-cal-water-quality]").count(), 3);
+  const movedForm = windowBox.locator("#waterQualityForm");
+  await movedForm.locator('[name="ppm"]').fill("55");
+  await movedForm.locator('[name="softness"]').selectOption("Fail");
+  await movedForm.locator('[name="initials"]').fill("EF");
+  await movedForm.getByRole("button", { name:"Submit", exact:true }).click();
+  assert.equal(await layoutPage.locator("#months [data-cal-water-quality]").count(), 4);
+  await windowBox.locator("#waterQualityViewLog").click();
+  await layoutPage.locator("#waterQualityRows tr").first().getByRole("button", { name:"Edit", exact:true }).click();
+  await layoutPage.locator('#waterQualityEditForm [name="note"]').fill("After layout refresh");
+  await layoutPage.locator("#waterQualityEditForm").getByRole("button", { name:"Save", exact:true }).click();
+  await layoutPage.locator("#waterQualityCloseLog").click();
+  await loadLayout();
+  assert.deepEqual(await layoutState(), savedLayout);
+  assert.equal(await layoutPage.locator("#months [data-cal-water-quality]").count(), 4);
+  assert.equal(await layoutPage.evaluate(key => JSON.parse(localStorage.getItem(key))[0].note, key), "After layout refresh");
+  assert.deepEqual(await protectedCloud(), layoutBefore);
+  await layoutPage.close();
   assert.deepEqual(errors, []);
 });

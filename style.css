@@ -6695,7 +6695,7 @@ body.job-category-modal-open{overflow:hidden}
 .failed-cut-slider-scale { display: flex; justify-content: space-between; font-size: 11px; color: #4b5874; }
 
 /* Browser-local Water Quality entry form and log. */
-.water-quality-block { margin: 16px 0; grid-column: 1 / -1; }
+.water-quality-block { margin: 0; }
 .water-quality-fields { align-items: flex-end; }
 .water-quality-fields label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; min-width: 0; }
 .water-quality-fields input, .water-quality-fields select { width: 150px; max-width: 100%; box-sizing: border-box; padding: 6px; }
@@ -6713,3 +6713,5 @@ body.job-category-modal-open{overflow:hidden}
 .water-quality-table-wrap td:nth-child(1), .water-quality-table-wrap td:nth-child(2) { white-space: nowrap; }
 .water-quality-table-wrap button { padding: 6px 12px; border: 1px solid #c5d1e8; border-radius: 6px; color: #0a63c2; background: #eef3fb; cursor: pointer; }
 .water-quality-table-wrap button:disabled { opacity: .6; cursor: default; }
+
+.cal-water-quality { overflow-wrap: anywhere; }

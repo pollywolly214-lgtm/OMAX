@@ -243,18 +243,19 @@ function viewDashboard(){
           <p class="small muted">Baseline adapts to your average logged hours per day.</p>
         </div>
       </div>
+      <div class="dashboard-window" data-dashboard-window="waterQuality">
+        <section class="block water-quality-block" aria-labelledby="waterQualityHeading">
+          <h3 id="waterQualityHeading">Water Quality</h3>
+          <p class="water-quality-note" id="waterQualityHelp">Choose Water Softness Pass or Fail from your test. Saved checks stay in this browser only; they are not synced or included in OMAX backups.</p>
+          <form id="waterQualityForm" class="mini-form water-quality-fields" aria-describedby="waterQualityHelp">
+            ${viewWaterQualityFields("waterQuality")}
+            <button type="submit">Submit</button>
+          </form>
+          <p id="waterQualityStatus" class="water-quality-note" role="status"></p>
+          <button type="button" id="waterQualityViewLog">View Water Quality Log</button>
+        </section>
+      </div>
     </div>
-
-    <section class="block water-quality-block" aria-labelledby="waterQualityHeading">
-      <h3 id="waterQualityHeading">Water Quality</h3>
-      <p class="water-quality-note" id="waterQualityHelp">Choose Water Softness Pass or Fail from your test. Saved checks stay in this browser only; they are not synced or included in OMAX backups.</p>
-      <form id="waterQualityForm" class="mini-form water-quality-fields" aria-describedby="waterQualityHelp">
-        ${viewWaterQualityFields("waterQuality")}
-        <button type="submit">Submit</button>
-      </form>
-      <p id="waterQualityStatus" class="water-quality-note" role="status"></p>
-      <button type="button" id="waterQualityViewLog">View Water Quality Log</button>
-    </section>
 
     <div class="block calendar-block">
       <h3>Calendar</h3>

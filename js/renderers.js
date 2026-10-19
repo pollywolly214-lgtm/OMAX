@@ -6140,7 +6140,7 @@ const renderWaterQualityTracker = (() => {
     const now = new Date();
     return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   }
-  return function(root){
+  const render = function(root){
     const form = root.querySelector("#waterQualityForm");
     if (!form) return;
     const modal = root.querySelector("#waterQualityModal");
@@ -6229,6 +6229,7 @@ const renderWaterQualityTracker = (() => {
         checks = next;
         renderRows();
         status(id ? "Check updated in this browser." : "Check saved in this browser.");
+        renderWaterQualityCalendarEvents();
         return true;
       } catch (_error){
         status("Could not save Water Quality check. No changes were saved. Check browser storage and try again; your entered values are kept.", true);
@@ -6260,6 +6261,12 @@ const renderWaterQualityTracker = (() => {
       modal.classList.add("is-visible");
       closeButton.focus();
     });
+    modal.addEventListener("water-quality-open-check", event => {
+      openButton.click();
+      const row = Array.from(rows.children).find(entry => entry.dataset.checkId === event.detail?.id);
+      row?.scrollIntoView({ block:"nearest" });
+      row?.querySelector("button")?.focus();
+    });
     closeButton.addEventListener("click", close);
     modal.addEventListener("click", event => { if (event.target === modal) close(); });
     modal.addEventListener("keydown", event => {
@@ -6273,6 +6280,9 @@ const renderWaterQualityTracker = (() => {
     });
     load();
   };
+  // Read-only calendar projection; malformed/unavailable storage stays untouched.
+  render.readChecks = () => { try { return readChecks(); } catch (_error){ return []; } };
+  return render;
 })();
 
 function renderDashboard(){
