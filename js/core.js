@@ -2785,11 +2785,9 @@ function startWorkspaceStateListener(){
     if (incomingBy !== localClientId && localEditAgeMs >= 0 && localEditAgeMs < 15000) return;
     if (incomingRev && incomingRev <= lastAppliedCloudRevision) return;
     if (incomingRev && incomingBy === localClientId && incomingRev === lastAppliedCloudRevision) return;
-    adoptState(incoming || {});
-    window.__loadedCloudRevisionForSaveGuard = incomingRev;
-    window.__lastLoadedCloudState = cloneStructured(incoming || {});
-    if (typeof resetHistoryToCurrent === "function") resetHistoryToCurrent();
-    if (incomingRev > 0) lastAppliedCloudRevision = incomingRev;
+    // Realtime adoption must establish the same exact evidence and live
+    // bindings as initial loading, without seeding or normalizing business data.
+    adoptIdentityCheckedAuthoritativeState(incoming);
     refreshRouteSafely();
   }, (err)=>{
     console.warn("Workspace realtime sync listener error", err);
@@ -4077,6 +4075,29 @@ function applyJobFileCacheToJobs(jobs, cache){
 
 function snapshotState(options = {}){
   refreshGlobalCollections();
+  if (window.__inventoryIdentityLocalEvidence && window.__lastLoadedCloudState){
+    // Authoritative adoption deliberately preserves raw records. Running those
+    // records through UI normalizers here used to invent defaults, discard
+    // extension fields and even mutate folder bindings during a baseline read.
+    // Compare and save the actual live evidence instead; the writer still runs
+    // the firewall, protected-data preflight, CAS and verification checks.
+    const source=window.__lastLoadedCloudState;
+    const result=cloneStructured(source);
+    const live={totalHistory,tasksInterval,tasksAsReq,inventory,cuttingJobs,completedCuttingJobs,orderRequests,garnetCleanings,dailyCutHours,opportunityRollups,weeklyCostReports,receiptTrackerWeeks,maintenanceTasksV2,maintenanceCalendarInstancesV2,maintenanceOccurrencesV2,deletedItems,appConfig,jobFolders,orderRequestTab};
+    for(const name of window.__inventoryIdentityDisplayFields||[]){
+      if(!["schema","syncMeta","saveMeta","syncProcessLog"].includes(name))live[name]=window[name];
+    }
+    for(const [name,value]of Object.entries(live)){
+      // Missing optional collections stay missing until an action creates data.
+      if(Object.prototype.hasOwnProperty.call(source,name)||(Array.isArray(value)?value.length>0:value&&typeof value==="object"&&Object.keys(value).length>0))result[name]=cloneStructured(value);
+    }
+    for(const [name,loaded,value]of [["dashboardLayout",window.cloudDashboardLayoutLoaded,window.cloudDashboardLayout],["costLayout",window.cloudCostLayoutLoaded,window.cloudCostLayout],["jobLayout",window.cloudJobLayoutLoaded,window.cloudJobLayout]]){
+      if(loaded&&(Object.prototype.hasOwnProperty.call(source,name)||Object.keys(value||{}).length))result[name]=cloneStructured(value);
+    }
+    result.saveMeta={lastSavedAt:new Date().toISOString(),lastSaveStatus:"pending",lastSaveError:"",lastSaveSizeBytes:0};
+    result.syncMeta={...source.syncMeta,rev:Math.max(Date.now(),(Number(lastAppliedCloudRevision)||0)+1),updatedAtISO:new Date().toISOString(),updatedBy:getCloudSyncClientId()};
+    return result;
+  }
   if (!options.skipLocalFileCacheSync){
     const jobFileCache = readJobFileCache();
     syncJobFileCacheFromJobs(cuttingJobs, jobFileCache);
