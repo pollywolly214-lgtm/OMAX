@@ -4680,7 +4680,9 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
           && stableStringifyForIntegrity(pending[field])===stableStringifyForIntegrity(remote[field])
           ? pending[field] : merge(pending[field],remote[field],baseline);
         pending.totalHistory = mergeUnlessIdentical("totalHistory",mergeTotalHistoryForSave,totalHistoryBaseline);
-        pending.dailyCutHours = mergeUnlessIdentical("dailyCutHours",mergeDailyCutHoursForSave);
+        // An isolated day repair already proves its exact source and prepared state.
+        // Preserve other daily records/provenance instead of normalizing the array.
+        if (!(options.preserveExactDailyCutHours && options.validateSourceState && options.validatePreparedState)) pending.dailyCutHours = mergeUnlessIdentical("dailyCutHours",mergeDailyCutHoursForSave);
         if (options.pumpLogMutation){
           // Date-keyed merging would resurrect the original day after a correction.
           // Only the exact single-record operation can retain its prepared pump field.

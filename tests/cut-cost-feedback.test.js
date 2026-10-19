@@ -23,10 +23,10 @@ test('custom invalid/future dates cannot produce a rate',()=>{for(const changes 
 test('manual zero, missing days, sparse meters and retention never invent cutting hours',()=>{const s=state();assert.equal(calc(s).actualCuttingHours,5);s.dailyCutHours.pop();assert.equal(calc(s).cutCostPerHour,null);s.dailyCutHours=[];s.totalHistory=[{dateISO:'2026-10-17',hours:100},{dateISO:'2026-10-19',hours:110}];assert.equal(calc(s).valid,false);s.totalHistory.splice(1,0,{dateISO:'2026-10-18',hours:105});assert.equal(calc(s).actualCuttingHours,10);s.dailyCutHours=[{dateISO:'2026-10-18',hours:0,source:'manual'}];assert.equal(calc(s).actualCuttingHours,5);s.totalHistory[2].hours=99;assert.equal(calc(s).valid,false);});
 test('zero hours, invalid raw evidence, missing prices/durations block selected calculated rate',()=>{const s=state();s.dailyCutHours[0].hours=0;assert.equal(calc(s).valid,false);s.dailyCutHours[0].hours='invalid';assert.equal(calc(s).valid,false);s.dailyCutHours[0].hours=4;delete s.tasksInterval[0].price;assert.equal(calc(s).dataCompleteness.incompleteEvents,1);assert.equal(calc(s).cutCostPerHour,null);});
 test('configuration normalization and reload preserve exact inputs and do not alter historic rates',()=>{const ctx=hoursHarness(),source={cutCostFeedback:config},normalized=ctx.normalizeAppConfig(source);assert.deepEqual(JSON.parse(JSON.stringify(normalized.cutCostFeedback)),config);assert.equal(Object.hasOwn(ctx.normalizeAppConfig({}),'cutCostFeedback'),false,'Viewing the feature cannot append unsaved defaults to an existing workspace baseline');assert.equal(api.settings(ctx.normalizeAppConfig({}).cutCostFeedback).shippingCost,494/3);const s=state();s.completedCuttingJobs=[{id:'old',costRate:45}];const before=structuredClone(s);calc(s);assert.deepEqual(s,before);assert.match(core,/const JOB_BASE_COST_PER_HOUR = 30;/);});
-function saveHarness(mode){
- let server={syncMeta:{rev:7},appConfig:{dailyHours:8,unknown:'preserve'},completedCuttingJobs:[{id:'old',costRate:45}],inventory:[{id:'keep'}],receiptTrackerWeeks:[]},writes=0;
+function saveHarness(mode,extra={}){
+ let server={syncMeta:{rev:7},appConfig:{dailyHours:8,unknown:'preserve'},completedCuttingJobs:[{id:'old',costRate:45}],inventory:[{id:'keep'}],receiptTrackerWeeks:[],...structuredClone(extra)},writes=0;
  const clone=value=>structuredClone(value);
- const db={async runTransaction(callback){let next;const result=await callback({get:async()=>({exists:true,data:()=>clone(server)}),set(ref,value,options){assert.deepEqual(JSON.parse(JSON.stringify(options)),{mergeFields:['appConfig','syncMeta']});next=clone(value);}});if(next){server=next;writes++;}return result;}};
+ const db={async runTransaction(callback){let next;const result=await callback({get:async()=>({exists:true,data:()=>clone(server)}),set(ref,value,options){assert.ok(options.mergeFields.includes('syncMeta'));next=clone(value);}});if(next){server=next;writes++;}return result;}};
  const window={OMAXCutCostFeedback:api,appConfig:clone(server.appConfig),__loadedCloudRevisionForSaveGuard:7};
  const ctx=vm.createContext({window,console,Date,setTimeout,clearTimeout,ymd:()=> '2026-10-19',canWriteCloud:()=>!window.__recoveryInspectMode,FB:{ready:true,user:{uid:'fixture'},app:{options:{projectId:'local'}},db,docRef:{path:'fixture'}},isVercelPreviewRuntime:()=>false,cloudSaveQueue:Promise.resolve(),hasPendingLocalChanges:false,lastLocalMutationAt:1,stableStringify:value=>JSON.stringify(value),cloneStructured:clone,persistLocalStateBackup(){},cloudSaveNoWriteFailure:code=>({saved:false,definiteFailure:true,error:code}),renderRecoveryDiagnosticsPanel(){},adoptIdentityCheckedAuthoritativeState(verified){window.appConfig=clone(verified.appConfig);window.__loadedCloudRevisionForSaveGuard=verified.syncMeta.rev;return {loaded:true,recovery:false};}});
  ctx.writeAuthoritativeStateSnapshot=async(pending,options,guards)=>{
@@ -67,3 +67,15 @@ test('new-job rate checks freshly resolved data and never silently accepts a sta
 });
 
 test('retained deleted-task history uses its preserved task configuration',()=>{const s=state();s.deletedItems=[{type:'task',payload:s.tasksInterval[0]}];s.tasksInterval=[];const result=api.maintenanceRows([row()],s);assert.equal(result[0].totalCost,160);assert.equal(result[0].costIncomplete,false);});
+
+test('occurrence and hour repairs use the same verified isolated writer; CAS and Recovery Mode stay enforced',async()=>{
+ const repair=require('../js/cutCostRepair'),extra=state();extra.dailyCutHours.push({dateISO:'2026-10-17',hours:0,source:'auto',custom:{keep:true}});
+ for(const mode of [undefined,'unknown','conflict','recovery']){
+  const h=saveHarness(mode,extra);Object.assign(h.window,structuredClone(extra));h.window.OMAXCutCostRepair=repair;h.ctx.genId=()=> 'repair-fixture';
+  const target=repair.describe(h.server,row()),before=h.server;if(mode==='conflict')h.conflict();if(mode==='recovery')h.window.__recoveryInspectMode=true;
+  const result=await h.window.OMAXCutCostFeedbackUi.saveRepair(target,{parts:0,duration:0});
+  if(mode===undefined){assert.equal(result.verificationCompleted,true);assert.deepEqual(h.server.tasksInterval[0].manualHistory.slice(0,-1),before.tasksInterval[0].manualHistory);assert.deepEqual(h.server.completedCuttingJobs,before.completedCuttingJobs);}
+  else{assert.equal(result.saved,false);assert.equal(h.writes,0);if(mode==='unknown')assert.equal(h.window.__recoveryInspectMode,true);}
+ }
+ const h=saveHarness(undefined,extra);h.window.OMAXCutCostRepair=repair;const result=await h.window.OMAXCutCostFeedbackUi.saveHours([['2026-10-17',0]]);assert.equal(result.verificationCompleted,true);assert.deepEqual(h.server.dailyCutHours.find(row=>row.dateISO==='2026-10-17').custom,{keep:true});assert.deepEqual(h.server.tasksInterval,extra.tasksInterval);
+});

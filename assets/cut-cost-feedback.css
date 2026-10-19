@@ -1,0 +1,23 @@
+/* Scoped to CCR calculator and its native dialogs; other pages keep their theme. */
+.cut-cost-surface{background:#fff;color:#0a1f3f;border:1px solid #aab8ca;border-radius:12px;padding:14px;color-scheme:light;}
+.cut-cost-card{margin-bottom:16px;}
+.cut-cost-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px;}
+.cut-cost-summary h3{font-size:15px;margin:0;}
+.cut-cost-summary strong{font-size:15px;}
+.cut-cost-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.cut-cost-surface :is(h3,h4,p,label,span,dt,dd,strong,small,li,th,td){color:inherit;}
+.cut-cost-surface :is(p,label,dt,dd,small,li,th,td){font-size:14px;}
+.cut-cost-surface :is(input,select){background:#fff;color:#0a1f3f;border:1px solid #64748b;border-radius:5px;padding:7px;}
+.cut-cost-surface :is(input,select):disabled{background:#f1f5f9;color:#475569;opacity:1;}
+.cut-cost-surface button{background:#edf2fa;color:#0a1f3f;border:1px solid #64748b;border-radius:6px;padding:7px 10px;cursor:pointer;}
+.cut-cost-surface button.primary{background:#0a63c2;color:#fff;border-color:#0a63c2;}
+.cut-cost-surface button:disabled{background:#e2e8f0;color:#475569;opacity:1;cursor:default;}
+.cut-cost-surface [data-cut-cost-config]{border-top:1px solid #cbd5e1;margin-top:12px;padding-top:12px;}
+.cut-cost-surface [hidden]{display:none!important;}
+.cut-cost-breakdown{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;}
+.cut-cost-breakdown dd{font-weight:700;margin:3px 0;}
+dialog.cut-cost-surface{width:min(1000px,94vw);max-height:88vh;margin:auto;}
+dialog.cut-cost-surface::backdrop{background:rgba(15,23,42,.55);}
+.cut-cost-table-wrap{overflow-x:auto;}
+.cut-cost-date-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;list-style:none;padding:0;}
+.cut-cost-surface section+section{border-top:1px solid #cbd5e1;margin-top:16px;padding-top:8px;}

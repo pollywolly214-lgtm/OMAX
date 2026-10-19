@@ -33,7 +33,7 @@
   // Validate evidence before using the existing ACH resolver. Missing days are unknown,
   // and sparse/clamped meter deltas must not masquerade as a day's actual cutting.
   function actualHours(state,startDate,endDate,resolve){
-    const warnings=[],daily=new Map(),totals=new Map(),bad=new Set();
+    const warnings=[],missingDates=[],daily=new Map(),totals=new Map(),bad=new Set();
     for(const row of state.dailyCutHours||[]){
       const key=date(row?.dateISO||row?.date||row?.dateIso),hours=number(row?.hours);
       if(!key)continue;
@@ -54,14 +54,14 @@
       const manual=row?.source==='manual';
       const metered=previous!==undefined&&current!==undefined&&current>=previous&&current-previous<=24&&!bad.has(shift(key,-1));
       // Daily-only automatic entries have no auditable interval baseline.
-      if(bad.has(key)||(!manual&&!metered)){missing++;continue;}
+      if(bad.has(key)||(!manual&&!metered)){missing++;missingDates.push(key);continue;}
       const value=manual?row.hours:effective.get(key);
-      if(!Number.isFinite(value)||value<0||value>24){missing++;continue;}
+      if(!Number.isFinite(value)||value<0||value>24){missing++;missingDates.push(key);continue;}
       hours+=value;
     }
     if(missing)warnings.push(`${missing} day(s) lack trustworthy actual hours. Enter explicit daily hours (including zero) or adjacent daily meter readings. Sparse readings and history retention may limit coverage.`);
     if(!missing&&hours===0)warnings.push('The selected window contains zero cutting hours.');
-    return {hours:missing?null:hours,missingDays:missing,complete:!missing&&hours>0,warnings};
+    return {hours:missing?null:hours,missingDays:missing,missingDates,complete:!missing&&hours>0,warnings};
   }
   function maintenanceRows(rows,state,compatibility=[]){
     const legacy=[...(state.tasksInterval||[]),...(state.tasksAsReq||[]),...(state.deletedItems||[]).filter(item=>item.type==='task'&&item.payload).map(item=>item.payload)],v2=state.maintenanceTasksV2||[];
@@ -86,7 +86,7 @@
       const removed=family.some(member=>(Array.isArray(member.removedOccurrences)?member.removedOccurrences:Object.keys(member.removedOccurrences||{})).some(value=>date(value?.dateISO||value)===key));
       if(!isV2&&(removed||['removed','uncompleted','canceled','cancelled'].includes(String(allHistory.at(-1)?.status||'').toLowerCase())))continue;
       const history=allHistory.filter(entry=>!['scheduled','removed','uncompleted','canceled','cancelled'].includes(String(entry.status||'').toLowerCase()));
-      const occurrence=history.at(-1)||{};
+      const occurrence=history.filter(entry=>entry.source==='cut_cost_correction').sort((a,b)=>String(a.recordedAtISO||'').localeCompare(String(b.recordedAtISO||''))).at(-1)||history.at(-1)||{};
       const durationTask=family.find(member=>number(member.occurrenceHours?.[key])!==null)||task;
       const rawParts=isV2?stream?.partsCostSnapshot:occurrence.partsCostSnapshot??occurrence.partsCost??occurrence.calendarPrice;
       const configuredParts=task?.price??task?.cost??task?.calendarPrice;
@@ -96,9 +96,11 @@
       const garnetMaterial=!/\b(?:valve|tube|nozzle|liner|hose|seal|inspection|repair|replacement|replace)\b/i.test(row.taskName||task?.name||'')&&/\b(?:garnet|abrasive)\b/i.test(row.taskName||task?.name||'')&&(/\b(?:refill|replenish|purchase|load|add|consumption|fill)\b/i.test(row.taskName||task?.name||'')||/^(?:garnet|abrasive)(?: material)?$/i.test(row.taskName||task?.name||''));
       const partCost=garnetMaterial?0:parts;
       const incomplete=partCost===null||hours===null;
+      const repairTask=family.find(member=>number(member.occurrenceHours?.[key])!==null)||family.find(member=>(member.manualHistory||[]).includes(occurrence))||family.find(member=>(member.completedDates||[]).includes(key))||task;
+      const costFields={parts:{value:partCost,source:garnetMaterial?'Hourly garnet formula':number(rawParts)!==null?'Occurrence-specific':'Configured default'},duration:{value:hours,source:number(occurrenceHours)!==null?'Occurrence-specific':'Configured default'}};
       const importedSource=stream?.provenance?.importProvenance?.sourceRecord;
-      const estimated=number(rawParts)===null||number(occurrenceHours)===null||(importedSource&&number(importedSource.parts_cost_snapshot)===null);
-      out.push({...row,maintenanceHrs:hours??0,partCost:partCost??0,chargeRate:30,laborCost:(hours??0)*30,totalCost:(partCost??0)+(hours??0)*30,costIncomplete:incomplete,costEstimated:estimated,garnetMaterialExcluded:garnetMaterial});
+      const estimated=number(rawParts)===null||number(occurrenceHours)===null||(importedSource&&number(importedSource.parts_cost_snapshot)===null&&!(state.maintenanceOccurrencesV2||[]).some(event=>event.rootOccurrenceId===row.rootOccurrenceId&&event.source==='cut_cost_correction'));
+      out.push({...row,maintenanceHrs:hours??0,partCost:partCost??0,chargeRate:30,laborCost:(hours??0)*30,totalCost:(partCost??0)+(hours??0)*30,costIncomplete:incomplete,costEstimated:Boolean(estimated),costFields,repairTaskId:repairTask?.id??row.taskId,garnetMaterialExcluded:garnetMaterial});
     }
     return out;
   }
@@ -116,7 +118,7 @@
     const maintenanceCostPerHour=hours.complete?maintenanceCost/hours.hours:null;
     const cutCostPerHour=hours.complete&&!incomplete&&abrasive.valid?maintenanceCostPerHour+abrasive.costPerHour:null;
     const valid=Number.isFinite(cutCostPerHour);
-    return {...range,valid,actualCuttingHours:hours.hours,partsCost,laborCost,maintenanceCost,maintenanceCostPerHour,garnetCostPerHour:abrasive.costPerHour,cutCostPerHour:valid?cutCostPerHour:null,eventCount:events.length,dataCompleteness:{missingDays:hours.missingDays,incompleteEvents:incomplete,estimatedEvents:estimated},warnings:[...warnings,...hours.warnings]};
+    return {...range,valid,actualCuttingHours:hours.hours,partsCost,laborCost,maintenanceCost,maintenanceCostPerHour,garnetCostPerHour:abrasive.costPerHour,cutCostPerHour:valid?cutCostPerHour:null,eventCount:events.length,dataCompleteness:{missingDays:hours.missingDays,incompleteEvents:incomplete,estimatedEvents:estimated},review:{missingMaintenance:events.filter(row=>row.costIncomplete),defaultedMaintenance:events.filter(row=>row.costEstimated),missingDates:hours.missingDates},warnings:[...warnings,...hours.warnings]};
   }
   return Object.freeze({DEFAULTS,settings,garnet,windowRange,actualHours,maintenanceRows,calculate});
 });
