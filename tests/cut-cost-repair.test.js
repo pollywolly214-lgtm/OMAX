@@ -20,11 +20,11 @@ test('V2 correction is an append to the exact moved root; reopening makes the ta
  const result=repair.planMaintenance(state,target,{parts:25,duration:.1},stamp);assert.deepEqual(result.pending.maintenanceOccurrencesV2.slice(1),before.maintenanceOccurrencesV2);assert.equal(result.pending.maintenanceOccurrencesV2[0].rootOccurrenceId,'root');assert.equal(result.pending.maintenanceOccurrencesV2[0].partsCostSnapshot,25);assert.deepEqual(result.pending.tasksInterval,before.tasksInterval);assert.deepEqual(state,before);
  state.maintenanceOccurrencesV2.unshift({...base,id:'reopen',eventType:'uncompleted',recordedAtISO:'2026-10-19T12:00:00Z'});assert.throws(()=>repair.planMaintenance(state,target,{parts:25,duration:.1},stamp),/no longer completed|changed/);
 });
-test('missing/defaulted maintenance and missing-day lists match counts; zero is present',()=>{
+test('missing/defaulted maintenance and meter-issue lists match counts; zero is present',()=>{
  const state=fixture();state.tasksInterval[0].occurrenceHours={'2026-10-18':0};delete state.tasksInterval[0].price;delete state.tasksInterval[0].downtimeHours;
  const rows=api.maintenanceRows([row,{...row,dateISO:'2026-10-19'}],state);
  const result=api.calculate({state,rows,config:{...api.DEFAULTS,days:'custom',startDate:'2026-10-18',endDate:'2026-10-19'},today:'2026-10-19',resolve:()=>new Map()});
- assert.equal(result.review.missingMaintenance.length,result.dataCompleteness.incompleteEvents);assert.equal(result.review.defaultedMaintenance.length,result.dataCompleteness.estimatedEvents);assert.deepEqual(result.review.missingDates,['2026-10-18','2026-10-19']);assert.equal(rows[0].costFields.duration.value,0);assert.equal(rows[0].costIncomplete,false);
+ assert.equal(result.review.missingMaintenance.length,result.dataCompleteness.incompleteEvents);assert.equal(result.review.defaultedMaintenance.length,result.dataCompleteness.estimatedEvents);assert.deepEqual(result.review.missingDates,[]);assert.ok(result.review.meterIssues.some(item=>item.code==='missing_start'));assert.equal(rows[0].costFields.duration.value,0);assert.equal(rows[0].costIncomplete,false);
 });
 test('daily repair accepts explicit zero, replaces auto source and preserves unrelated record provenance/order',()=>{
  const state=fixture(),before=structuredClone(state),out=repair.planHours(state,[['2026-10-18',0],['2026-10-19',0]],stamp.atISO);assert.deepEqual(state,before);assert.equal(out.pending.dailyCutHours[0].source,'manual');assert.deepEqual(out.pending.dailyCutHours[0].provenance,{keep:true});assert.deepEqual(out.pending.completedCuttingJobs,before.completedCuttingJobs);assert.equal(out.pending.dailyCutHours[1].hours,0);

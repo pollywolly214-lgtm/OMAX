@@ -17266,14 +17266,14 @@ const appendEmptyRow = (focusFirst = false)=>{
     const maintenanceRange = filterChartSeriesByRange(maintenanceSeriesBase, months);
     const spendRange = filterChartSeriesByRange(totalSpendSeriesBase, months);
     const jobRange = filterChartSeriesByRange(jobSeriesBase, months);
-    const maintenanceRowsInWindow = (model.maintenanceCostRows || []).filter(row=>Number.isFinite(maintenanceRange.domainStart) && Number.isFinite(maintenanceRange.domainEnd) && row.dateISO >= ymd(new Date(maintenanceRange.domainStart)) && row.dateISO <= ymd(new Date(maintenanceRange.domainEnd)));
+    const maintenanceHourCoverage = window.OMAXCutCostFeedback && Number.isFinite(maintenanceRange.domainStart) && Number.isFinite(maintenanceRange.domainEnd)
+      ? window.OMAXCutCostFeedback.actualHours(window, ymd(new Date(maintenanceRange.domainStart)), ymd(new Date(maintenanceRange.domainEnd)), resolveEffectiveDailyCutHours) : null;
+    const maintenanceRowsInWindow = (model.maintenanceCostRows || []).filter(row=>maintenanceHourCoverage?.measurementStartDate && row.dateISO > maintenanceHourCoverage.measurementStartDate && row.dateISO <= maintenanceHourCoverage.measurementEndDate);
     const maintenanceCostTotalInWindow = maintenanceRowsInWindow.reduce((sum, row)=>sum + row.totalCost, 0);
     const totalCutHoursInWindow = jobRange.points.reduce((sum, item) => {
       const hours = Number(item?.cutHours) || 0;
       return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
     }, 0);
-    const maintenanceHourCoverage = window.OMAXCutCostFeedback && Number.isFinite(maintenanceRange.domainStart) && Number.isFinite(maintenanceRange.domainEnd)
-      ? window.OMAXCutCostFeedback.actualHours(window, ymd(new Date(maintenanceRange.domainStart)), ymd(new Date(maintenanceRange.domainEnd)), resolveEffectiveDailyCutHours) : null;
     const incompleteMaintenance = maintenanceRowsInWindow.some(row=>row.costIncomplete);
     const maintenanceActualHours = maintenanceHourCoverage?.complete ? maintenanceHourCoverage.hours : null;
     const maintenanceCostPerCutValue = maintenanceActualHours > 0 && !incompleteMaintenance ? maintenanceCostTotalInWindow / maintenanceActualHours : null;
@@ -17321,7 +17321,7 @@ const appendEmptyRow = (focusFirst = false)=>{
       maintenanceCostPerCutEl.textContent = maintenanceCostPerCutLabel;
       maintenanceCostPerCutEl.setAttribute(
         "title",
-        `Average maintenance cost per cut hour (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${maintenanceActualHours == null ? "unknown" : maintenanceActualHours.toFixed(1)} actual cut hr. Configured maintenance costs are estimates.`
+        `Average maintenance cost per cut hour (${windowLabel}) = total maintenance cost ${formatCurrencyUnsigned(maintenanceCostTotalInWindow)} ÷ ${maintenanceActualHours == null ? "unknown" : maintenanceActualHours.toFixed(1)} actual cut hr. Requested ${ymd(new Date(maintenanceRange.domainStart))} to ${ymd(new Date(maintenanceRange.domainEnd))}; measured ${maintenanceHourCoverage?.measurementStartDate || "unavailable"} to ${maintenanceHourCoverage?.measurementEndDate || "unavailable"}; expenses after baseline through ending reading inclusive. Configured maintenance costs are estimates.`
       );
     }
     const spendPerCutEl = content.querySelector("[data-spend-cost-per-cut-label]");
@@ -20538,7 +20538,6 @@ function computeCostModel(){
   const cuttingAverageValue = jobSeries.length
     ? (jobSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / jobSeries.length)
     : 0;
-  const maintenanceCostTotalAll = maintenanceSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
   const totalCutHoursAll = jobSeries.reduce((sum, item) => {
     const hours = Number(item?.cutHours) || 0;
     return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
@@ -20546,7 +20545,9 @@ function computeCostModel(){
   const maintenanceDates = maintenanceDataTableRows.map(row=>row.dateISO).filter(Boolean).sort();
   const maintenanceHoursAll = window.OMAXCutCostFeedback && maintenanceDates.length
     ? window.OMAXCutCostFeedback.actualHours(window, maintenanceDates[0], maintenanceDates.at(-1), resolveEffectiveDailyCutHours) : null;
-  const maintenanceCostPerCutValue = maintenanceHoursAll?.complete && !maintenanceDataTableRows.some(row=>row.costIncomplete) ? maintenanceCostTotalAll / maintenanceHoursAll.hours : null;
+  const measuredMaintenanceRows = maintenanceDataTableRows.filter(row=>maintenanceHoursAll?.measurementStartDate && row.dateISO > maintenanceHoursAll.measurementStartDate && row.dateISO <= maintenanceHoursAll.measurementEndDate);
+  const maintenanceCostTotalAll = measuredMaintenanceRows.reduce((sum,row)=>sum+row.totalCost,0);
+  const maintenanceCostPerCutValue = maintenanceHoursAll?.complete && !measuredMaintenanceRows.some(row=>row.costIncomplete) ? maintenanceCostTotalAll / maintenanceHoursAll.hours : null;
   const totalSpendAll = totalSpendSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
   const totalSpendPerCutValue = totalCutHoursAll > 0 ? (totalSpendAll / totalCutHoursAll) : 0;
 
