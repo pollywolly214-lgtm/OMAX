@@ -371,7 +371,7 @@ function normalizeAppConfig(config){
     if (typeof config.mondayStartLookback === "boolean") normalized.mondayStartLookback = config.mondayStartLookback;
     normalized.maintenanceCalendarNewRecordsSystem = "v2";
   }
-  if (typeof window !== "undefined" && window.OMAXCutCostFeedback) normalized.cutCostFeedback = window.OMAXCutCostFeedback.settings(config?.cutCostFeedback);
+  if (typeof window !== "undefined" && window.OMAXCutCostFeedback && Object.hasOwn(config || {}, "cutCostFeedback")) normalized.cutCostFeedback = window.OMAXCutCostFeedback.settings(config.cutCostFeedback);
   return normalized;
 }
 
