@@ -92,12 +92,13 @@ test("current Cost Data Center rows and financial selector use exactly the same 
 
 test("actual final Cost cards use shared report and withhold combined result; native breakdown safely renders all components",()=>{
   const c=vm.createContext({window:{OMAXFinancialReconciliation:api,receiptTrackerWeeks:[]},completedCuttingJobs:fixture(),computeCuttingJobProfit:profit,
-    getPurchaseFinancials:purchases.getPurchaseFinancials,maintenanceDataTableRows:[],annualForecastFromCentral:9000,remainderProjection:2000,currentYear:2026,
+    getPurchaseFinancials:purchases.getPurchaseFinancials,cutCostFeedback:null,maintenanceDataTableRows:[],annualForecastFromCentral:9000,remainderProjection:2000,currentYear:2026,
     projectionMethod:"annualized_average",projectionWindowConfig:{label:"YTD"},financialAnalysisDate:"2026-10-20",summaryCards:[],jobSummary:{},ymd:()=>"2026-10-20",formatterCurrency:n=>String(n),renderAverageHoursBanner:()=>""});
   vm.runInContext(section(renderers,"  const financialReconciliation =","  return {\n    summaryCards,")+";this.report=financialReconciliation;",c);
   near(Number(c.summaryCards.find(card=>card.key==="cuttingJobs").value),539);assert.equal(c.summaryCards.find(card=>card.key==="combinedImpact").value,"Unavailable");
   vm.runInContext(section(views,"function renderFinancialPeriodControl(","function cuttingJobFinancialTone("),c);
   c.report.rows[0].name='<img src=x onerror=alert(1)>';
+  c.report.rateAnalysis.rows[0].name=c.report.rows[0].name;
   const before=JSON.stringify(c.report);const html=c.renderFinancialBreakdown(c.report);
   assert.match(html,/Financial Breakdown/);assert.match(html,/\$539\.00/);assert.match(html,/-\$50\.00/);assert.match(html,/Runtime cost rates can already include maintenance/);
   assert.ok(!html.includes('<img'));assert.match(html,/&lt;img/);assert.equal(JSON.stringify(c.report),before);
@@ -110,6 +111,70 @@ test("period control only changes a transient shared view preference, without sa
   vm.runInContext(section(renderers,"function bindFinancialPeriodControls(","function renderCosts("),c);
   c.bindFinancialPeriodControls({querySelectorAll:()=>[{value:"7d",addEventListener:(name,fn)=>{assert.equal(name,"change");handler=fn;}}]},()=>renders++);
   const before=JSON.stringify(records);handler();assert.equal(c.window.__cuttingFinancialRange,"7d");assert.equal(renders,1);assert.equal(JSON.stringify(records),before);
+});
+
+test("loaded saved rates explain weighted runtime expense and largest losses without substituting the $45 what-if",()=>{
+  // Controlled arithmetic matching the supplied summary, not production records.
+  const jobs=freeze([base({id:"high",estimateHours:70,chargeRate:250,costRate:-475,materialCost:1361.81,materialQty:1}),
+    base({id:"low",estimateHours:2,chargeRate:250,costRate:72.5,materialCost:0})]);
+  const r=build({completedJobs:jobs});near(r.totals.runtimeExpense,33395);near(r.totals.net,-16756.81);
+  assert.equal(r.rateAnalysis.hours,72);near(r.rateAnalysis.weightedCostRate,33395/72);
+  assert.equal(r.rateAnalysis.groups[0].rate,475);assert.equal(r.largestLosses[0].id,"high");assert.equal(r.rateAnalysis.aboveCharge,1);
+  near(r.rateAnalysis.comparison.runtimeExpense,3240);near(r.rateAnalysis.comparison.net,13398.19);
+  near(r.totals.net,18000-33395-1361.81);assert.equal(jobs[0].costRate,-475);
+});
+
+test("snapshot total cost includes material and must never be presented as a runtime-only rate",()=>{
+  const jobs=[base({estimateHours:72,costRate:45,materialCost:30155,materialQty:1})];
+  const r=build({completedJobs:jobs});assert.equal(r.totals.runtimeExpense+r.totals.materialExpense,33395);
+  assert.equal(r.rateAnalysis.weightedCostRate,45,"total expense / hours is not the runtime rate");
+  const c=vm.createContext({window:{OMAXFinancialReconciliation:api},financialAnalysisDate:"2026-10-20",completedCuttingJobs:jobs,cuttingJobs:[],computeCuttingJobProfit:profit,
+    computeJobEfficiency:()=>({}),resolveCategoryName:()=>"Category",formatterCurrency:String,formatHoursValue:String,JOB_RATE_PER_HOUR:250,JOB_BASE_COST_PER_HOUR:30});
+  vm.runInContext(section(renderers,"  const resolveCuttingJobHours =","  let maintenanceSeries =")+
+    section(renderers,"  const completedJobsForDataCenter =","  const taskById =")+";this.snapshot=efficiencySnapshot;",c);
+  assert.equal(c.snapshot.totalExpenseLabel,"-33395");assert.equal(c.snapshot.runtimeExpenseLabel,"-3240");assert.equal(c.snapshot.materialExpenseLabel,"-30155");
+  assert.equal(c.snapshot.calculatorDefaults.costRate,45);
+  assert.ok(!views.includes('class="label">Total run cost'));assert.ok(!views.includes('class="label">Avg run cost'));
+});
+
+test("rate evidence distinguishes saved, imported blank defaults, legacy cache and canonical fallback",()=>{
+  const r=build({completedJobs:[base({costRate:45,chargeRate:200,import_event_id:"x",importProvenance:{cost_rate_per_hr:"",charge_rate_per_hr:""}}),
+    base({id:"legacy",costRate:"",chargeRate:null,efficiency:{costRate:-800,chargeRate:0}}),
+    base({id:"fallback",costRate:null,chargeRate:-1})]});
+  const [saved,legacy,fallback]=r.rateAnalysis.rows;
+  assert.equal(saved.costEvidence.source,"Saved job rate");assert.equal(saved.costEvidence.importBlank,true);assert.equal(saved.profit.costRate,45);
+  assert.equal(legacy.costEvidence.source,"Stored legacy efficiency rate");assert.equal(legacy.profit.costRate,800);assert.equal(legacy.profit.chargeRate,0);
+  assert.equal(fallback.costEvidence.source,"Canonical fallback");assert.equal(fallback.profit.costRate,30);assert.equal(fallback.profit.chargeRate,250);
+});
+
+test("expense presentation is negative once, projections stay separate and a true job loss is never reversed",()=>{
+  const c=vm.createContext({window:{OMAXFinancialReconciliation:api,receiptTrackerWeeks:[{rows:[{date:"2026-10-20",purchased:"Part",cost:15,qty:2}]}]},
+    completedCuttingJobs:[base({chargeRate:0})],computeCuttingJobProfit:profit,getPurchaseFinancials:purchases.getPurchaseFinancials,cutCostFeedback:null,
+    maintenanceDataTableRows:[{dateISO:"2026-10-20",totalCost:55,partCost:40,laborCost:15,costEstimated:false}],
+    annualForecastFromCentral:9000,remainderProjection:2000,currentYear:2026,projectionMethod:"annualized_average",projectionWindowConfig:{label:"YTD"},
+    financialAnalysisDate:"2026-10-20",summaryCards:[],jobSummary:{},formatterCurrency:String});
+  vm.runInContext(section(renderers,"  const financialReconciliation =","  return {\n    summaryCards,")+";this.report=financialReconciliation;",c);
+  const card=key=>c.summaryCards.find(card=>card.key===key);
+  assert.equal(card("cuttingJobs").value,"-135");assert.equal(card("cuttingJobs").tone,"negative");
+  assert.equal(card("recordedPurchases").value,"-30");assert.equal(card("maintenanceExpenses").value,"-55");assert.equal(card("maintenanceForecast").value,"-9000");
+  assert.match(card("maintenanceForecast").hint,/projected expense -2000/);assert.equal(c.report.purchases.total,30);assert.equal(c.report.maintenance.knownSubtotal,55);
+  near(c.report.totals.net,-135);assert.equal(c.report.netWaterjetImpact,null);assert.equal(c.report.coverage.interimNet,-135);
+  assert.match(card("combinedImpact").hint,/Interim modeled Cutting Job Net Profit: -135/);
+  vm.runInContext(section(views,"function renderFinancialPeriodControl(","function cuttingJobFinancialTone("),c);
+  const html=c.renderFinancialBreakdown(c.report);assert.match(html,/-\$30\.00/);assert.match(html,/-\$55\.00/);assert.match(html,/-\$9,000\.00/);
+  assert.match(html,/Interim modeled Cutting Job Net Profit: -\$135\.00/);assert.match(html,/No maintenance, purchase subtotal or annual forecast is subtracted again/);
+});
+
+test("combined coverage reports actual evidence and current CCR components without retroactively allocating costs",()=>{
+  const currentRate=freeze({valid:true,startDate:"2026-07-23",endDate:"2026-10-20",measurementStartDate:"2026-07-22",measurementEndDate:"2026-10-19",
+    actualCuttingHours:100,maintenanceCostPerHour:20,garnetCostPerHour:24,cutCostPerHour:44,warnings:["Consumption modeled"]});
+  const r=build({currentRate,purchaseWeeks:[{rows:[{date:"2026-10-20",purchased:"Garnet",cost:500,qty:1}]}],
+    maintenanceRows:[{dateISO:"2026-10-20",totalCost:55,partCost:40,laborCost:15,costEstimated:false}],forecast:{annual:9453.99}});
+  assert.equal(r.coverage.currentCCR.total,44);assert.equal(r.coverage.currentCCR.hours,100);assert.equal(r.coverage.interimNet,539);
+  assert.match(r.coverageReason,/3 job\(s\).*component\/allocation evidence/);assert.match(r.coverageReason,/Purchase spending is not allocated/);
+  assert.match(r.coverageReason,/electricity, water, disposal/);assert.match(r.coverage.resolution,/effective dates/);
+  assert.equal(r.netWaterjetImpact,null);near(r.totals.net,539);
+  const empty=build({completedJobs:[]});assert.ok(!empty.coverageReason.includes("nonzero runtime"));assert.equal(empty.netWaterjetImpact,null);
 });
 
 test("maintenance forecast uses calendar days across Chicago DST rather than counting an extra remaining day",()=>{

@@ -5309,10 +5309,14 @@ function refreshTimeEfficiencyWidget(widget){
   if (widget.metrics.goal) widget.metrics.goal.textContent = formatTimeEfficiencyHours(data.baselineHours);
   if (widget.metrics.average){
     const avg = data.averageDailyHours;
-    widget.metrics.average.textContent = (avg != null && Number.isFinite(avg) && avg > 0)
+    widget.metrics.average.textContent = (avg != null && Number.isFinite(avg) && avg >= 0)
       ? formatTimeEfficiencyHours(avg)
       : "—";
+    widget.metrics.average.title = data.usageAverage.description;
+    widget.metrics.average.dataset.efficiencyTooltip = data.usageAverage.description;
   }
+  const averageNote = widget.root.querySelector("[data-efficiency-average-note]");
+  if (averageNote) averageNote.textContent = data.usageAverage.description;
   if (widget.metrics.percent) widget.metrics.percent.textContent = formatTimeEfficiencyPercent(data.efficiencyPercent);
   if (widget.metrics.percentGoal) widget.metrics.percentGoal.textContent = formatTimeEfficiencyPercent(data.efficiencyGoalPercent);
   if (widget.metrics.diffTarget){
@@ -5366,7 +5370,7 @@ function refreshTimeEfficiencyWidget(widget){
       || (data && data.description)
       || widget.labelEl.textContent
       || "";
-    widget.labelEl.textContent = labelText;
+    widget.labelEl.textContent = `Utilization period: ${data.startISO} to ${data.endISO}${days === 7 ? " (Monday–Sunday)" : ` (${labelText})`}.`;
   }
   widget.lastStartISO = data.startISO || null;
   widget.lastEndISO = data.endISO || null;
@@ -19927,6 +19931,10 @@ function computeCostModel(){
   const efficiencySnapshot = {
     countLabel: String(efficiencyCount),
     totalHoursLabel: formatHoursValue(efficiencyTotals.hours),
+    totalExpenseLabel: formatterCurrency(-efficiencyTotals.cost, { decimals: 2 }),
+    averageExpenseLabel: formatterCurrency(efficiencyCount ? -efficiencyTotals.cost/efficiencyCount : 0, { decimals: 2 }),
+    runtimeExpenseLabel: formatterCurrency(-efficiencyTotals.labor, { decimals: 2 }),
+    materialExpenseLabel: formatterCurrency(-efficiencyTotals.material, { decimals: 2 }),
     totalCostLabel: formatterCurrency(efficiencyTotals.cost, { decimals: efficiencyTotals.cost < 1000 ? 2 : 0 }),
     averageCostLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.cost / efficiencyCount) : 0, { decimals: 2 }),
     totalProfitLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
@@ -20670,7 +20678,7 @@ function computeCostModel(){
     const hours = Number(item?.cutHours) || 0;
     return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
   }, 0);
-  const cutCostFeedback = window.OMAXCutCostFeedback?.calculate({state:window,rows:maintenanceDataTableRows,config:window.appConfig?.cutCostFeedback,today:ymd(new Date())});
+  const cutCostFeedback = window.OMAXCutCostFeedback?.calculate({state:window,rows:maintenanceDataTableRows,config:window.appConfig?.cutCostFeedback,today:financialAnalysisDate});
   const maintenanceCostPerCutValue = cutCostFeedback?.maintenanceCostPerHour ?? null;
   const totalSpendInFinancialPeriod = selectedSpendSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
   const totalSpendPerCutValue = totalCutHoursInFinancialPeriod > 0 ? (totalSpendInFinancialPeriod / totalCutHoursInFinancialPeriod) : 0;
@@ -20680,23 +20688,25 @@ function computeCostModel(){
     completedJobs: completedCuttingJobs, profit: computeCuttingJobProfit,
     range: window.__cuttingFinancialRange, today: financialAnalysisDate,
     maintenanceRows: maintenanceDataTableRows, purchaseWeeks: window.receiptTrackerWeeks || [],
-    purchaseFinancials: getPurchaseFinancials,
+    purchaseFinancials: getPurchaseFinancials, currentRate: cutCostFeedback,
     forecast: { annual: annualForecastFromCentral, remaining: remainderProjection, year: currentYear,
       method: projectionMethod, sourceWindow: projectionWindowConfig.label }
   });
   const financialMoney = value => value == null ? "Unavailable" : formatterCurrency(value, {decimals:2, showPlus:true});
+  const financialExpense = value => value == null ? "Unavailable" : financialMoney(value === 0 ? 0 : -Math.abs(value));
+  const financialTone = value => value == null || value === 0 ? "neutral" : value < 0 ? "negative" : "positive";
   const financialWindow = financialReconciliation.window.description;
   summaryCards.splice(0, summaryCards.length,
-    {key:"cuttingJobs",icon:"✂",title:"Cutting Job Net Profit",value:financialMoney(financialReconciliation.totals.net),
+    {key:"cuttingJobs",icon:"✂",title:"Cutting Job Net Profit",value:financialMoney(financialReconciliation.totals.net),tone:financialTone(financialReconciliation.totals.net),
       hint:`${financialReconciliation.totals.count} completed jobs · ${financialWindow}. Modeled using canonical job rates; see Financial Breakdown.`},
-    {key:"recordedPurchases",icon:"$",title:"Recorded purchases",value:financialMoney(financialReconciliation.purchases.total),
+    {key:"recordedPurchases",icon:"$",title:"Recorded purchases",value:financialExpense(financialReconciliation.purchases.total),tone:"negative",
       hint:`${financialWindow}. Purchase History spending; not all purchases are maintenance or verified payments. Shown separately.`},
-    {key:"maintenanceExpenses",icon:"⚙",title:"Maintenance event costs",value:financialMoney(financialReconciliation.maintenance.knownSubtotal),
+    {key:"maintenanceExpenses",icon:"⚙",title:"Maintenance event costs",value:financialExpense(financialReconciliation.maintenance.knownSubtotal),tone:"negative",
       hint:`${financialWindow}. Known subtotal with modeled labor; estimated/defaulted and incomplete events are identified below. Not subtracted again.`},
-    {key:"maintenanceForecast",icon:"↗",title:`Projected maintenance (${currentYear})`,value:financialMoney(annualForecastFromCentral),
-      hint:`Annual estimate, not historical loss. Source: ${projectionWindowConfig.label}. Remaining-year estimate ${financialMoney(remainderProjection)}.`},
-    {key:"combinedImpact",icon:"Σ",title:"Net Waterjet Financial Impact",value:"Unavailable",
-      hint:financialReconciliation.coverageReason}
+    {key:"maintenanceForecast",icon:"↗",title:`Projected maintenance (${currentYear})`,value:financialExpense(annualForecastFromCentral),tone:"negative",
+      hint:`Annual projected expense, not historical loss. Source: ${projectionWindowConfig.label}. Remaining-year projected expense ${financialExpense(remainderProjection)}.`},
+    {key:"combinedImpact",icon:"Σ",title:"Net Waterjet Financial Impact",value:financialMoney(financialReconciliation.netWaterjetImpact),tone:"neutral",
+      hint:`Interim modeled Cutting Job Net Profit: ${financialMoney(financialReconciliation.coverage.interimNet)} · ${financialWindow}. Full net requires expense allocation and verified coverage; see Financial Breakdown.`}
   );
   jobSummary.countLabel = `${financialReconciliation.totals.count} completed · ${financialWindow}`;
   jobSummary.totalLabel = financialMoney(financialReconciliation.totals.net);

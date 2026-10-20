@@ -368,6 +368,8 @@ body.pump-notes-open,body.pump-baseline-open { overflow:hidden; }
 .cost-card-body{ display:flex; flex-direction:column; gap:4px; }
 .cost-card-title{ font-weight:600; color:#13294a; }
 .cost-card-value{ font-size:22px; font-weight:700; color:var(--brand-blue-400); text-shadow:0 3px 10px rgba(16, 70, 150, 0.35); }
+.cost-card-value.financial-tone-negative{ color:#b53939; }
+.cost-card-value.financial-tone-positive{ color:#2e7d32; }
 .cost-card-hint{ color:#1e3352; font-size:12px; opacity:0.7; }
 
 .cost-chart-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }

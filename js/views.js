@@ -226,8 +226,8 @@ function viewDashboard(){
                 <span class="value" data-efficiency-goal data-efficiency-tooltip="End goal: full-window goal hours using your configured weekly goal." title="End goal: full-window goal hours using your configured weekly goal.">—</span>
             </div>
             <div class="time-efficiency-metric">
-              <span class="label">Avg usage/day</span>
-                <span class="value" data-efficiency-average data-efficiency-tooltip="Average logged cutting hours per day across the selected window." title="Average logged cutting hours per day across the selected window.">—</span>
+              <span class="label">Avg usage/calendar day</span>
+                <span class="value" data-efficiency-average data-efficiency-tooltip="Cumulative meter hours per elapsed calendar day; see measured boundaries." title="Cumulative meter hours per elapsed calendar day; see measured boundaries.">—</span>
             </div>
             <div class="time-efficiency-metric">
               <span class="label">Gap vs goal</span>
@@ -239,6 +239,7 @@ function viewDashboard(){
             </div>
           </div>
           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
+          <p class="small muted" data-efficiency-average-note></p>
           <p class="small muted">How this works: <strong>Go off average</strong> uses your average cut hours/day. <strong>Go off maximum</strong> uses your dashboard daily-hours goal (default 8 hr/day) and respects the weekend include/exclude setting.</p>
           <p class="small muted">Baseline adapts to your average logged hours per day.</p>
         </div>
@@ -1353,8 +1354,10 @@ function renderFinancialPeriodControl(windowRange, id){
 function renderFinancialBreakdown(report){
   const esc = value => String(value ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const money = value => Number.isFinite(value) ? new Intl.NumberFormat(undefined,{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(value) : "Unavailable";
+  const expense = value => value == null ? "Unavailable" : money(value === 0 ? 0 : -Math.abs(value));
   const t = report.totals, m = report.maintenance, p = report.purchases;
-  const metric = (label,value) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`;
+  const rates = report.rateAnalysis, ccr = report.coverage.currentCCR;
+  const metric = (label,value) => `<div><dt>${esc(label)}</dt><dd${String(value).startsWith("-") ? ' class="job-finance-negative"' : ""}>${esc(value)}</dd></div>`;
   const jobName = row => `${esc(row.name)} <span class="muted">(${esc(row.id ?? "ID missing")})</span>`;
   return `<details class="financial-breakdown" data-financial-breakdown>
     <summary>Financial Breakdown <span>${t.count} completed jobs · ${esc(report.window.description)}</span></summary>
@@ -1365,26 +1368,45 @@ function renderFinancialBreakdown(report){
       ${metric("Gross cutting-job revenue",money(t.grossRevenue))}${metric("Failed-cut revenue adjustment",money(t.failureReduction == null ? null : -t.failureReduction))}
       ${metric("Adjusted cutting-job revenue",money(t.revenue))}${metric("Runtime expense",money(t.runtimeExpense == null ? null : -t.runtimeExpense))}
       ${metric("Material expense",money(t.materialExpense == null ? null : -t.materialExpense))}${metric("Canonical Cutting Job Net Profit",money(t.net))}
+      ${metric("Total modeled job expense (runtime + material)",expense(t.runtimeExpense==null || t.materialExpense==null ? null : t.runtimeExpense+t.materialExpense))}
       ${metric("Average Net Profit / completed job",money(t.average))}
     </dl>
     <p class="small">Net profit = Hours Taken × charge rate × (1 − failed-cut % / 100) − runtime expense − material unit cost × quantity. Legitimate separate cuts remain separate, including matching names, projects and dates.</p>
+    ${t.net<0 ? `<p class="job-finance-negative">This loaded population has a modeled loss: adjusted revenue ${money(t.revenue)} + runtime expense ${expense(t.runtimeExpense)} + material expense ${expense(t.materialExpense)} = ${money(t.net)}. The rows below reproduce saved inputs; they do not verify that a historical rate represented legitimate operating costs. Review rate sources, import defaults and largest losses before correcting any source data.</p>` : ""}
+    <h4>Runtime rate evidence from these same jobs</h4>
+    <p>The snapshot's total modeled job expense includes both runtime and material. Dividing that total by job hours does not isolate the runtime cost/hr; use the weighted runtime rate below.</p>
+    <dl class="financial-metrics">
+      ${metric("Hours Taken in this financial population",rates.hours)}${metric("Weighted runtime expense / job hour",`${money(rates.weightedCostRate)}/hr`)}
+      ${metric("Weighted gross charge / job hour",`${money(rates.weightedChargeRate)}/hr`)}${metric("Jobs: runtime rate exceeds adjusted charge rate",rates.aboveCharge)}
+      ${metric("Imported jobs included",rates.imported)}${metric("What-if runtime expense at $45/hr",expense(rates.comparison.runtimeExpense))}
+      ${metric("What-if net at $45/hr (same revenue/material)",money(rates.comparison.net))}
+    </dl>
+    <p class="small">Runtime expense is Σ(Hours Taken × absolute effective saved cost/hr); material expense is separate. The weighted rate divides that expense by these jobs' Hours Taken, not machine-hour readings from the utilization snapshot. A negative stored cost rate is an expense magnitude, not a refund. The $45/hr comparison changes only cost/hr, keeping each job's charge, failure and material inputs; the temporary calculator can also override charge/hr and narrow the financial range. Neither model replaces saved rates or proves actual operating cost. Blank import rates are materialized as $200/hr charge and $45/hr cost by the importer; missing legacy rates instead fall back to $250/hr charge and $30/hr cost in the canonical helper. Original import cells and current saved values can differ after edits.</p>
+    <details><summary>Runtime expense by effective rate and source</summary><div class="financial-table-scroll"><table class="cost-table"><thead><tr><th>Cost / hr</th><th>Source</th><th>Jobs</th><th>Hours Taken</th><th>Runtime expense</th><th>Net profit</th></tr></thead><tbody>
+      ${rates.groups.map(group=>`<tr><td>${money(group.rate)}</td><td>${esc(group.source)}</td><td>${group.count}</td><td>${esc(group.hours)}</td><td>${expense(group.runtimeExpense)}</td><td>${money(group.net)}</td></tr>`).join("") || '<tr><td colspan="6">No eligible jobs.</td></tr>'}
+    </tbody></table></div></details>
     <details><summary>Included completed jobs (${t.count})</summary><div class="financial-table-scroll"><table class="cost-table">
-      <thead><tr><th>Job / ID</th><th>Completion date</th><th>Hours Taken</th><th>Gross revenue</th><th>Failed-cut adjustment</th><th>Runtime expense</th><th>Material expense</th><th>Net Total</th></tr></thead>
-      <tbody>${report.rows.map(row=>`<tr data-financial-job-id="${esc(row.id ?? "")}"><td>${jobName(row)}</td><td>${esc(row.completionDate)}</td><td>${esc(row.profit.hours)}</td><td>${money(row.profit.revenue)}</td><td>${money(-row.profit.revenueLost)}</td><td>${money(-row.profit.cuttingCost)}</td><td>${money(-row.profit.materialExpense)}</td><td>${money(row.profit.totalProfit)}</td></tr>`).join("") || '<tr><td colspan="8">No completed jobs in this period.</td></tr>'}</tbody></table></div></details>
+      <thead><tr><th>Job / ID</th><th>Completion date</th><th>Hours Taken</th><th>Effective charge / hr</th><th>Effective cost / hr</th><th>Rate evidence</th><th>Gross revenue</th><th>Failed-cut adjustment</th><th>Runtime expense</th><th>Material expense</th><th>Net Total</th></tr></thead>
+      <tbody>${rates.rows.map(row=>`<tr data-financial-job-id="${esc(row.id ?? "")}"><td>${jobName(row)}</td><td>${esc(row.completionDate)}</td><td>${esc(row.profit.hours)}</td><td>${money(row.profit.chargeRate)}</td><td>${money(row.profit.costRate)}</td><td>Charge: ${esc(row.chargeEvidence.source)} (${esc(row.chargeEvidence.supplied ?? "missing")}); cost: ${esc(row.costEvidence.source)} (${esc(row.costEvidence.supplied ?? "missing")}). ${row.costEvidence.imported ? `Imported. Original charge/cost cells: ${esc(row.chargeEvidence.importValue ?? "not retained")} / ${esc(row.costEvidence.importValue ?? "not retained")}.${row.costEvidence.importBlank || row.chargeEvidence.importBlank ? " Blank source rate: importer default may apply." : ""}` : ""}</td><td>${money(row.profit.revenue)}</td><td>${expense(row.profit.revenueLost)}</td><td>${expense(row.profit.cuttingCost)}</td><td>${expense(row.profit.materialExpense)}</td><td class="${row.profit.totalProfit<0 ? "job-finance-negative" : row.profit.totalProfit>0 ? "job-finance-positive" : ""}">${money(row.profit.totalProfit)}</td></tr>`).join("") || '<tr><td colspan="11">No completed jobs in this period.</td></tr>'}</tbody></table></div></details>
     <h4>Largest negative job contributors</h4>
-    ${report.largestLosses.length ? `<ul>${report.largestLosses.map(row=>`<li>${jobName(row)} · ${esc(row.completionDate)} · <strong>${money(row.profit.totalProfit)}</strong></li>`).join("")}</ul>` : '<p>No negative-profit jobs in this period.</p>'}
+    ${report.largestLosses.length ? `<ul>${report.largestLosses.map(row=>`<li>${jobName(row)} · ${esc(row.completionDate)} · <strong class="job-finance-negative">${money(row.profit.totalProfit)}</strong> = adjusted revenue ${money(row.profit.adjustedRevenue)} + runtime ${expense(row.profit.cuttingCost)} + material ${expense(row.profit.materialExpense)}; ${esc(row.profit.hours)} hr × ${money(row.profit.costRate)}/hr, charge ${money(row.profit.chargeRate)}/hr, failed cut ${esc(row.profit.failurePercent)}%.</li>`).join("")}</ul>` : '<p>No negative-profit jobs in this period.</p>'}
     <h4>Missing or defaulted financial fields</h4>
     ${report.warnings.length ? `<ul>${report.warnings.map(issue=>`<li>${issue.count} job(s): ${esc(issue.message)}</li>`).join("")}</ul><details><summary>Jobs with financial warnings</summary><ul>${report.rows.filter(row=>row.issues.length).map(row=>`<li>${jobName(row)}: ${row.issues.map(issue=>esc(issue.message)).join(" ")}</li>`).join("")}</ul></details>` : '<p>No missing/defaulted inputs detected.</p>'}
     <p class="small">Canonical defaults are preserved for reconciliation and disclosed above. Missing failed-cut information is unknown even when the calculation uses 0%. No source records are edited.</p>
     <h4>Expenses and projections — shown separately</h4>
     <dl class="financial-metrics">
-      ${metric("Recorded purchases (all purchased items)",money(p.total))}${metric("Purchase rows included / incomplete",`${p.count} / ${p.incomplete}`)}
-      ${metric("Maintenance event costs with recorded inputs",money(m.recordedInputs))}${metric("Maintenance event costs with estimated/default inputs",money(m.estimated))}
-      ${metric("Modeled maintenance labor within event subtotals",money(m.modeledLabor))}${metric("Incomplete maintenance events (excluded from subtotals)",m.incomplete)}
-      ${metric(`Annual maintenance forecast (${report.forecast.year})`,money(report.forecast.annual))}${metric("Remaining-year maintenance estimate",money(report.forecast.remaining))}
+      ${metric("Recorded purchases (all purchased items)",expense(p.total))}${metric("Purchase rows included / incomplete",`${p.count} / ${p.incomplete}`)}
+      ${metric("Maintenance event costs with recorded inputs",expense(m.recordedInputs))}${metric("Maintenance event costs with estimated/default inputs",expense(m.estimated))}
+      ${metric("Modeled maintenance labor within event subtotals",expense(m.modeledLabor))}${metric("Incomplete maintenance events (excluded from subtotals)",m.incomplete)}
+      ${metric(`Annual maintenance forecast (${report.forecast.year}, projected expense)`,expense(report.forecast.annual))}${metric("Remaining-year projected maintenance expense",expense(report.forecast.remaining))}
     </dl>
     <p class="small">Purchases and maintenance event subtotals use ${esc(report.window.description)}. Purchase History totals are recorded spending, not proof of payment or maintenance-only expense; ${p.invalidDates} purchase row(s) have invalid/missing dates. Maintenance event costs include modeled labor at $30/hr; recorded inputs do not establish actual cash paid. Incomplete events have no complete expense total. Forecast source: ${esc(report.forecast.sourceWindow)}; ${esc(report.forecast.method)}. Forecasts describe the current year, separately from the selected historical period.</p>
-    <p><strong>Net Waterjet Financial Impact: Unavailable.</strong> ${esc(report.coverageReason)} No maintenance, purchase subtotal or annual forecast is subtracted again from canonical job profit. Unused machine capacity is not an expense in this report.</p>
+    <h4>Net Waterjet Financial Impact: ${money(report.netWaterjetImpact)}</h4>
+    <p><strong>Interim modeled Cutting Job Net Profit: ${money(report.coverage.interimNet)}</strong> · ${esc(report.window.description)}. This subtotal already deducts saved runtime rates and material expense.</p>
+    <p>Current CCR estimate = (maintenance event parts + modeled labor) ÷ measured machine hours + modeled garnet consumption at delivered price per pound. Garnet refill material is excluded from CCR event parts to avoid counting it twice; refill labor remains included. Electricity, water and disposal are not explicit CCR components. This current estimate is not evidence of any historical job rate's composition.</p>
+    ${ccr ? `<p data-financial-ccr>Current saved CCR window: ${esc(ccr.startDate)} to ${esc(ccr.endDate)}; observed meter span ${esc(ccr.measurementStartDate)} to ${esc(ccr.measurementEndDate)}, ${esc(ccr.hours ?? "unavailable")} hours. Maintenance ${money(ccr.maintenance)}/hr + garnet ${money(ccr.garnet)}/hr = ${money(ccr.total)}/hr (${ccr.valid ? "modeled operating-cost estimate" : "incomplete estimate"}). ${(ccr.warnings || []).map(esc).join(" ")}</p>` : '<p>Current CCR components are unavailable in this report.</p>'}
+    <ul>${report.coverage.blockers.map(reason=>`<li>${esc(reason)}</li>`).join("")}</ul>
+    <p>${esc(report.coverage.resolution)} No maintenance, purchase subtotal or annual forecast is subtracted again from canonical job profit. Forecasts remain separate projections. Unused machine capacity is not an expense in this report.</p>
     <details><summary>Excluded jobs and changes from the previous all-time card</summary>
       <p>Previous card eligibility applied to these same loaded records: ${report.previousAllTime.count} jobs, ${money(report.previousAllTime.net)}. Current selection: ${t.count} jobs, ${money(t.net)}. Differences below identify period, date or settings-link eligibility changes; this is not a reproduction of an earlier production screenshot.</p>
       <div class="financial-table-scroll"><table class="cost-table"><thead><tr><th>Job / ID</th><th>Completion date supplied</th><th>Canonical net</th><th>Population change</th></tr></thead><tbody>
@@ -1803,7 +1825,7 @@ function viewCosts(model){
                 <div class="cost-card-icon">${esc(card.icon || "")}</div>
                 <div class="cost-card-body">
                   <div class="cost-card-title">${esc(card.title || "")}</div>
-                  <div class="cost-card-value">${esc(card.value || "")}</div>
+                  <div class="cost-card-value${["negative","positive","neutral"].includes(card.tone) ? ` financial-tone-${card.tone}` : ""}">${esc(card.value || "")}</div>
                   <div class="cost-card-hint">${esc(card.hint || "")}</div>
                   ${cuttingOpenBtn}
                 </div>
@@ -2567,10 +2589,7 @@ function viewCosts(model){
                   <div><span class="label">Avg net gain / row</span><span>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
                 </div>
                 <table class="cost-table" style="margin-top:10px">
-                  <thead><tr><th>Task</th>
-                  <th>Source</th><th>Date</th>
-                  <th>Original</th>
-                  <th>Note</th><th>Hours</th><th>Part cost</th><th>Run cost</th><th>Total cost</th><th>Net gain</th><th>Job link</th></tr></thead>
+                  <thead><tr><th>Job</th><th>Completion date</th><th>Hours Taken</th><th>Material cost</th><th>Runtime cost</th><th>Total cost</th><th>Net profit</th><th>Job link</th></tr></thead>
                   <tbody>
                     ${efficiencyRows.map(row => `
                       <tr data-efficiency-row-link data-efficiency-job-id="${esc(row.id || "")}">
@@ -2688,7 +2707,7 @@ function viewCosts(model){
       <div class="cost-data-center-body">
         <div class="time-efficiency-inline" id="costTimeEfficiency">
           <div class="time-efficiency-inline-header">
-            <span class="time-efficiency-inline-title">Cutting time efficiency</span>
+            <span class="time-efficiency-inline-title">Utilization period (machine hours)</span>
             <div class="time-efficiency-controls">
               <div class="time-efficiency-toggles" role="tablist">
                 ${efficiencyButtons}
@@ -2721,13 +2740,14 @@ function viewCosts(model){
             <div class="time-efficiency-metric"><span class="label">Current target</span><span class="value" data-efficiency-target data-efficiency-tooltip="Target-to-date: weekly goal converted to daily goal and multiplied by elapsed days in this window." title="Target-to-date: weekly goal converted to daily goal and multiplied by elapsed days in this window.">—</span></div>
             <div class="time-efficiency-metric"><span class="label">Gap vs target</span><span class="value" data-efficiency-gap-target data-efficiency-tooltip="Actual hours minus target-to-date hours in this window." title="Actual hours minus target-to-date hours in this window.">—</span></div>
             <div class="time-efficiency-metric"><span class="label">End goal</span><span class="value" data-efficiency-goal data-efficiency-tooltip="End goal: full-window goal hours using your configured weekly goal." title="End goal: full-window goal hours using your configured weekly goal.">—</span></div>
-            <div class="time-efficiency-metric"><span class="label">Avg usage/day</span><span class="value" data-efficiency-average data-efficiency-tooltip="Average logged cutting hours per day across the selected window." title="Average logged cutting hours per day across the selected window.">—</span></div>
+            <div class="time-efficiency-metric"><span class="label">Avg usage/calendar day</span><span class="value" data-efficiency-average data-efficiency-tooltip="Cumulative meter hours per elapsed calendar day; see measured boundaries." title="Cumulative meter hours per elapsed calendar day; see measured boundaries.">—</span></div>
             <div class="time-efficiency-metric"><span class="label">Gap vs goal</span><span class="value" data-efficiency-gap-goal data-efficiency-tooltip="Actual hours minus full-window goal hours." title="Actual hours minus full-window goal hours.">—</span></div>
             <div class="time-efficiency-metric"><span class="label">Efficiency (to date)</span><span class="value" data-efficiency-percent data-efficiency-tooltip="Efficiency to date: actual hours divided by target-to-date hours." title="Efficiency to date: actual hours divided by target-to-date hours.">—</span></div>
           </div>
           <p class="small muted" data-efficiency-window-label>${defaultEfficiencyDescription}</p>
           <p class="small muted">How this works: <strong>Go off average</strong> uses your average cut hours/day. <strong>Go off maximum</strong> uses your dashboard daily-hours goal (default 8 hr/day) and respects the weekend include/exclude setting.</p>
-          <p class="small muted">Baseline adapts to your average logged hours per day.</p>
+          <p class="small muted" data-efficiency-average-note></p>
+          <p class="small muted">Average uses cumulative meter readings. Actual hours uses existing daily entries and can differ. Goal mode retains the Dashboard average or configured daily-hours goal.</p>
         </div>
         <div class="cost-efficiency-calculator" data-efficiency-calc>
           <div class="cost-efficiency-calculator-row">
@@ -2740,7 +2760,7 @@ function viewCosts(model){
               <input type="number" step="1" value="${esc((Number.isFinite(Number(calculatorDefaults.costRate)) ? Number(calculatorDefaults.costRate) : 0).toFixed(2))}" data-efficiency-calc-cost>
             </label>
             <label>
-              <span class="label">Time range</span>
+              <span class="label">Financial what-if range</span>
               <select data-efficiency-calc-range-select>
                 <option value="1m">Past 1 month</option>
                 <option value="2m">Past 2 months</option>
@@ -2755,7 +2775,7 @@ function viewCosts(model){
             <button type="button" class="btn secondary" data-go-jobs-history>Go to cutting jobs</button>
           </div>
           <p class="small muted" data-efficiency-calc-range-label>Range: selected financial period.</p>
-          <p class="small muted">Temporary what-if calculator within the selected financial period. Overrides do not change canonical job totals or table rows.</p>
+          <p class="small muted">Temporary what-if calculator within the selected financial period, independent of the utilization period above. Overrides do not change saved job rates, canonical job totals or table rows.</p>
           <p class="small muted" data-efficiency-calc-result>
             What-if net profit (calculator only): <strong data-efficiency-calc-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</strong>
             · Avg / row: <strong data-efficiency-calc-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</strong>
@@ -2766,16 +2786,15 @@ function viewCosts(model){
           <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
           <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"}`.trim())}"><span class="label">Total net gain</span><span data-efficiency-summary-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
           <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"}`.trim())}"><span class="label">Avg net gain / row</span><span data-efficiency-summary-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
-          <div><span class="label">Total run cost</span><span data-efficiency-summary-cost>${esc(efficiencySnapshot.totalCostLabel || "$0.00")}</span></div>
-          <div><span class="label">Avg run cost / row</span><span data-efficiency-summary-cost-average>${esc(efficiencySnapshot.averageCostLabel || "$0.00")}</span></div>
+          <div><span class="label">Modeled expense (runtime + material)</span><span data-efficiency-summary-cost>${esc(efficiencySnapshot.totalExpenseLabel || "$0.00")}</span></div>
+          <div><span class="label">Avg modeled expense / job</span><span data-efficiency-summary-cost-average>${esc(efficiencySnapshot.averageExpenseLabel || "$0.00")}</span></div>
+          <div><span class="label">Runtime expense</span><span data-efficiency-summary-runtime>${esc(efficiencySnapshot.runtimeExpenseLabel || "$0.00")}</span></div>
+          <div><span class="label">Material expense</span><span data-efficiency-summary-material>${esc(efficiencySnapshot.materialExpenseLabel || "$0.00")}</span></div>
         </div>
         <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
         <div class="cost-weekly-table-wrap">
           <table class="cost-table">
-            <thead><tr><th>Task</th>
-                  <th>Source</th><th>Date</th>
-                  <th>Original</th>
-                  <th>Note</th><th>Hours</th><th>Part cost</th><th>Labor cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net gain</th><th>Task link</th></tr></thead>
+            <thead><tr><th>Job</th><th>Completion date</th><th>Hours Taken</th><th>Material cost</th><th>Runtime cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net profit</th><th>Job link</th></tr></thead>
             <tbody>
               ${efficiencyRows.length ? efficiencyRows.map(row => `
                 <tr data-efficiency-row data-efficiency-id="${esc(row.id || "")}" data-efficiency-date="${esc(row.dateLabel || "")}" data-efficiency-hours="${esc(String(Number(row.hoursValue) || 0))}" data-efficiency-material="${esc(String(Number(row.materialValue || 0)))}">

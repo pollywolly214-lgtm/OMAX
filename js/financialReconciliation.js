@@ -146,13 +146,60 @@
     if (!Number.isFinite(purchases.total)) purchases.total = null;
     return {maintenance,purchases};
   }
-  function build({completedJobs,profit,range,today,maintenanceRows,purchaseWeeks,purchaseFinancials,forecast = {}}){
+  function rateEvidence(job, field){
+    const nonnegative = field === "chargeRate";
+    const source = valid(job[field],nonnegative) ? "Saved job rate"
+      : valid(job.efficiency?.[field],nonnegative) ? "Stored legacy efficiency rate" : "Canonical fallback";
+    const supplied = source === "Saved job rate" ? job[field] : source === "Stored legacy efficiency rate" ? job.efficiency[field] : null;
+    const original = job.importProvenance?.sourceRecord || job.importProvenance;
+    const key = field === "costRate" ? "cost_rate_per_hr" : "charge_rate_per_hr";
+    return {source,supplied,imported:!!(job.import_event_id || job.importProvenance),
+      importValue:original && Object.hasOwn(original,key) ? original[key] : null,
+      importBlank:!!original && Object.hasOwn(original,key) && !present(original[key])};
+  }
+  function rateAnalysis(rows, profit, totals){
+    const hours = finiteSum(rows,row=>row.profit.hours), groups = new Map();
+    const evidence = rows.map(row=>({...row,costEvidence:rateEvidence(row.job,"costRate"),chargeEvidence:rateEvidence(row.job,"chargeRate")}));
+    for (const row of evidence){
+      const key = `${row.profit.costRate}|${row.costEvidence.source}`;
+      const group = groups.get(key) || {rate:row.profit.costRate,source:row.costEvidence.source,count:0,hours:0,runtimeExpense:0,net:0};
+      group.count++; group.hours+=row.profit.hours; group.runtimeExpense+=row.profit.cuttingCost; group.net+=row.profit.totalProfit;
+      groups.set(key,group);
+    }
+    return {hours,weightedCostRate:hours>0 && totals.runtimeExpense!=null ? totals.runtimeExpense/hours : null,
+      weightedChargeRate:hours>0 && totals.grossRevenue!=null ? totals.grossRevenue/hours : null,
+      rows:evidence,groups:[...groups.values()].sort((a,b)=>b.runtimeExpense-a.runtimeExpense),
+      aboveCharge:rows.filter(row=>row.profit.costRate>row.profit.chargeRate*(1-row.profit.failurePercent/100)).length,
+      imported:evidence.filter(row=>row.costEvidence.imported).length,
+      comparison:{rate:45,runtimeExpense:hours==null ? null : hours*45,
+        net:finiteSum(rows,row=>profit({...row.job,costRate:45}).totalProfit)}};
+  }
+  function coverage(jobs,costs,currentRate){
+    const blockers = [];
+    const ratedJobs = jobs.rows.filter(row=>row.profit.costRate>0).length;
+    if (ratedJobs) blockers.push(`${ratedJobs} job(s) have nonzero runtime rates without saved component/allocation evidence. Runtime cost rates can already include maintenance and garnet; the current CCR formula cannot prove historical composition.`);
+    if (costs.purchases.count || costs.purchases.incomplete || costs.purchases.invalidDates)
+      blockers.push(`Purchase spending is not allocated to consumed garnet, maintenance parts, job material or inventory. Adding it may duplicate runtime/material costs; ${costs.purchases.incomplete} incomplete and ${costs.purchases.invalidDates} undated row(s) also need review.`);
+    if (costs.maintenance.count)
+      blockers.push(`Maintenance event costs may overlap saved runtime rates. Labor is modeled at $30/hr; ${costs.maintenance.estimated ? "some costs use configured defaults; " : ""}${costs.maintenance.incomplete} incomplete event(s) have no full cost.`);
+    blockers.push("Loaded job revenue is modeled, not a reconciled invoice/payment ledger. Coverage of electricity, water, disposal and other operating expenses is not established by the maintenance-plus-garnet CCR formula.");
+    return {interimNet:jobs.totals.net,blockers,
+      resolution:"Reconcile invoices and operating expenses for this period, document each saved rate's components and effective dates, and allocate consumed purchases/event costs against those components. Only verified additional expenses can then be added without duplication.",
+      currentCCR:currentRate ? {valid:currentRate.valid===true,startDate:currentRate.startDate,endDate:currentRate.endDate,
+        measurementStartDate:currentRate.measurementStartDate,measurementEndDate:currentRate.measurementEndDate,
+        hours:currentRate.actualCuttingHours,maintenance:currentRate.maintenanceCostPerHour,garnet:currentRate.garnetCostPerHour,
+        total:currentRate.cutCostPerHour,warnings:currentRate.warnings || []} : null};
+  }
+  function build({completedJobs,profit,range,today,maintenanceRows,purchaseWeeks,purchaseFinancials,currentRate,forecast = {}}){
     const jobs = selectJobs(completedJobs,{profit,range,today});
     const costs = expenses(jobs.window,maintenanceRows,purchaseWeeks,purchaseFinancials);
-    return {...jobs,...costs,forecast:{annual:Number.isFinite(forecast.annual)?forecast.annual:null,
+    const financialCoverage = coverage(jobs,costs,currentRate);
+    return {...jobs,...costs,rateAnalysis:rateAnalysis(jobs.rows,profit,jobs.totals),coverage:financialCoverage,
+      forecast:{annual:Number.isFinite(forecast.annual)?forecast.annual:null,
       remaining:Number.isFinite(forecast.remaining)?forecast.remaining:null,year:forecast.year,
       method:forecast.method,sourceWindow:forecast.sourceWindow},
-      netWaterjetImpact:null,coverageReason:"Runtime cost rates can already include maintenance and garnet. Saved job rates do not establish expense composition or complete revenue/cost coverage; purchases and event costs may overlap. A reliable combined result is unavailable."};
+      // No loaded record currently proves cost composition and complete ledger coverage.
+      netWaterjetImpact:null,coverageReason:financialCoverage.blockers.join(" ")};
   }
   return Object.freeze({ranges,dateKey,localToday,period,selectJobs,expenses,build});
 });

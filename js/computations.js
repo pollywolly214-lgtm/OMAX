@@ -38,6 +38,26 @@ function getTimeEfficiencyWindowMeta(days){
   return { key: `${normalized}d`, label, days: normalized, description };
 }
 
+// Read the same cumulative endpoints accepted by CCR. Never allocate a sparse
+// meter delta to one day, cap it at 24 hours, or require daily log entries.
+function computeSnapshotUsageAverage(startISO, endISO, todayISO){
+  const api = typeof window !== "undefined" && window.OMAXCutCostFeedback;
+  const effectiveEnd = endISO < todayISO ? endISO : todayISO;
+  if (!api || startISO > effectiveEnd) return {average:null,description:"Meter average unavailable: no elapsed measurement window."};
+  const reading = api.actualHours({totalHistory:typeof totalHistory === "undefined" ? [] : totalHistory},startISO,effectiveEnd);
+  const days = reading.measurementStartDate && reading.measurementEndDate
+    ? (Date.parse(reading.measurementEndDate+"T00:00:00Z")-Date.parse(reading.measurementStartDate+"T00:00:00Z"))/86400000 : 0;
+  // Zero meter movement is a valid usage average, though not a CCR rate divisor.
+  const usable = Number.isFinite(reading.hours) && days>0 && !reading.issues.some(issue=>!["invalid","zero_hours"].includes(issue.code));
+  const boundary = reading.measurementStartDate < startISO || reading.measurementEndDate < effectiveEnd
+    ? " Sparse readings expand the start to the prior baseline and/or end at the latest reading; this is the observed span, not an interpolated selected-period total." : "";
+  return {average:usable ? reading.hours/days : null,hours:reading.hours,days,
+    startISO:reading.measurementStartDate,endISO:reading.measurementEndDate,
+    description:usable
+      ? `${reading.hours} meter hours ÷ ${days} elapsed calendar days (${reading.measurementStartDate} baseline excluded, through ${reading.measurementEndDate} inclusive; weekends included).${boundary}${reading.issues.some(issue=>issue.code==="invalid") ? " Invalid readings ignored." : ""}`
+      : `Meter average unavailable. ${reading.warnings.join(" ")}`};
+}
+
 function computeTimeEfficiency(rangeDays, options = {}){
   const normalizedDays = Math.max(1, Math.round(Number(rangeDays) || 0));
   const meta = getTimeEfficiencyWindowMeta(normalizedDays);
@@ -90,11 +110,11 @@ function computeTimeEfficiency(rangeDays, options = {}){
   const configuredDailyHours = (Number.isFinite(configuredDailyHoursRaw) && configuredDailyHoursRaw > 0)
     ? configuredDailyHoursRaw
     : CUTTING_BASELINE_DAILY_HOURS;
-  const averageDailyHours = (typeof getAverageDailyCutHours === "function")
+  const dashboardAverageDailyHours = (typeof getAverageDailyCutHours === "function")
     ? getAverageDailyCutHours()
     : null;
-  const goalDailyHours = (goalMode === "average" && Number.isFinite(Number(averageDailyHours)) && Number(averageDailyHours) > 0)
-    ? Number(averageDailyHours)
+  const goalDailyHours = (goalMode === "average" && Number.isFinite(Number(dashboardAverageDailyHours)) && Number(dashboardAverageDailyHours) > 0)
+    ? Number(dashboardAverageDailyHours)
     : configuredDailyHours;
   const goalDailyHoursLabel = `${Math.abs(goalDailyHours - Math.round(goalDailyHours)) < 0.05 ? Math.round(goalDailyHours) : goalDailyHours.toFixed(1)} hr`;
   let actual = 0;
@@ -138,6 +158,9 @@ function computeTimeEfficiency(rangeDays, options = {}){
     ? (actual / targetHours) * 100
     : (baseline > 0 ? (actual / baseline) * 100 : null);
   const percentGoal = baseline > 0 ? (actual / baseline) * 100 : null;
+  // Avoid the shared Date parser's UTC conversion of local Date instances.
+  const localKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const usageAverage = computeSnapshotUsageAverage(localKey(startDate),localKey(endDate),localKey(todayLocal));
 
   return {
     windowDays: normalizedDays,
@@ -156,9 +179,10 @@ function computeTimeEfficiency(rangeDays, options = {}){
     goalSourceLabel: goalMode === "average"
       ? `Average cut hours/day (${goalDailyHoursLabel})`
       : `Dashboard goal hours/day (${goalDailyHoursLabel})`,
-    averageDailyHours,
-    startISO: ymd(startDate),
-    endISO: ymd(endDate),
+    averageDailyHours:usageAverage.average,
+    usageAverage,
+    startISO: localKey(startDate),
+    endISO: localKey(endDate),
     description: meta.description,
     label: meta.label,
     key: meta.key

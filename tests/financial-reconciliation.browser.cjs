@@ -13,6 +13,8 @@ test(`CJE: financial UI reconciles periods without writes using only a disposabl
   t.after(()=>browser.close());const context=await browser.newContext({timezoneId,viewport:{width:1440,height:1100},locale:"en-US"});
   await context.route("**/*",route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
   const page=await context.newPage(),errors=[];page.on("pageerror",error=>errors.push(error.message));page.setDefaultTimeout(8000);
+  const out=process.env.OMAX_CJE_SCREENSHOT_DIR;
+  if(out)await fs.mkdir(out,{recursive:true});
   await page.clock.setFixedTime(new Date(timezoneId==="America/Chicago"?"2026-10-20T17:00:00Z":"2026-10-19T22:00:00Z"));
   let loads=0;
   const load=async()=>{await page.goto(origin+"/?devsafe=1&cjeLoad="+(++loads)+"#/costs",{waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete&&window.OMAXDevSafe?.active);};
@@ -26,7 +28,7 @@ test(`CJE: financial UI reconciles periods without writes using only a disposabl
       base("3",{completedAtISO:"2026-10-19",estimateHours:1,costRate:-25,materialQty:5,failurePercent:100}),base("4"),base("5",{completedAtISO:"2025-01-01",estimateHours:1000}),
       base("6",{completedAtISO:"2026-09-01",estimateHours:null,chargeRate:null,costRate:null,failurePercent:undefined}),base("7",{completedAtISO:"2026-10-21"})];
     state.jobFolders=[{id:"jobs_root",name:"All Jobs",parent:null,order:1},{id:"project",name:"1254 Project",projectNumber:"1254",parent:"jobs_root",order:2}];
-    state.dailyCutHours=[];state.totalHistory=[{dateISO:"2026-01-01",hours:100},{dateISO:"2026-10-20",hours:361}];
+    state.dailyCutHours=[];state.totalHistory=[{dateISO:"2026-01-01",hours:100},{dateISO:"2026-07-23",hours:190},{dateISO:"2026-09-21",hours:279},{dateISO:"2026-10-20",hours:361}];
     state.tasksInterval=[{id:"filter",name:"Filter",mode:"interval",interval:100,price:100,downtimeHours:2,completedDates:["2026-10-19"],manualHistory:[{dateISO:"2026-10-19",status:"completed",partsCostSnapshot:40}],occurrenceHours:{"2026-10-19":.5}}];
     state.tasksAsReq=[];state.maintenanceTasksV2=[];state.maintenanceCalendarInstancesV2=[];state.maintenanceOccurrencesV2=[];
     state.receiptTrackerWeeks=[{key:"2026-W43",week:43,startISO:"2026-10-19",endISO:"2026-10-25",rows:[{date:"2026-10-20",purchased:"Recorded part",cost:15,qty:2,shipping:4,tax:2},
@@ -65,14 +67,41 @@ test(`CJE: financial UI reconciles periods without writes using only a disposabl
   await page.locator("[data-financial-breakdown] > summary").click();
   assert.equal(await page.locator("[data-financial-job-id]").count(),3); // two distinct identical cuts plus the loss
   assert.equal((await card("cuttingJobs").textContent()).replace(/^\+/,""),"$280.00");
-  assert.equal((await card("recordedPurchases").textContent()).replace(/^\+/,""),"$36.00");
+  assert.equal(await card("recordedPurchases").textContent(),"-$36.00");
+  assert.equal(await card("maintenanceExpenses").textContent(),"-$55.00");
+  assert.match(await card("maintenanceForecast").textContent(),/^-\$/);
+  assert.match(await card("cuttingJobs").getAttribute("class"),/financial-tone-positive/);
+  assert.match(await card("recordedPurchases").getAttribute("class"),/financial-tone-negative/);
+  const breakdown=await page.locator("[data-financial-breakdown]").textContent();
+  assert.match(breakdown,/Weighted runtime expense \/ job hour/);assert.match(breakdown,/Interim modeled Cutting Job Net Profit: \$280\.00/);
+  assert.match(breakdown,/Original import cells and current saved values can differ/);assert.match(breakdown,/Purchase spending is not allocated/);
+  const rate=await page.evaluate(()=>computeCostModel().cutCostFeedback);
+  assert.equal(rate.valid,true);assert.equal(rate.actualCuttingHours,171);assert.ok(Math.abs(rate.cutCostPerHour-rate.maintenanceCostPerHour-rate.garnetCostPerHour)<1e-9);
+  const bannerRate=await page.evaluate(()=>OMAXCutCostFeedbackUi.calculate());
+  assert.equal(bannerRate.endDate,rate.endDate);assert.equal(bannerRate.cutCostPerHour,rate.cutCostPerHour);assert.equal(bannerRate.actualCuttingHours,171);
+  assert.match(await page.locator('[data-financial-ccr]').textContent(),/modeled operating-cost estimate/);
   assert.equal(await page.evaluate(()=>computeCostModel().totalSpendPerCutValue),36/5);
   const beforeCalculator=await page.locator('[data-dc-panel="efficiency"]').textContent();
-  await page.locator("[data-open-efficiency-snapshot]").click();await page.locator("[data-efficiency-calc-charge]").fill("0");
+  await page.locator("[data-open-efficiency-snapshot]").click();
+  assert.equal(await page.locator('[data-efficiency-summary-cost]').textContent(),"-$320.00");
+  assert.equal(await page.locator('[data-efficiency-summary-runtime]').textContent(),"-$265.00");
+  assert.equal(await page.locator('[data-efficiency-summary-material]').textContent(),"-$55.00");
+  const table=page.locator('#efficiencySnapshotModal table');assert.equal(await table.locator('thead th').count(),8);
+  assert.equal(await table.locator('tbody tr').first().locator('td').count(),8);
+  const usage=page.locator('#costTimeEfficiency [data-efficiency-average]');
+  await page.locator('#costTimeEfficiency [data-efficiency-range="90"]').click();assert.equal(await usage.textContent(),"1.9 hr");
+  assert.match(await page.locator('#costTimeEfficiency [data-efficiency-average-note]').textContent(),/171 meter hours ÷ 89 elapsed calendar days/);
+  const calculatorRange=await page.locator('[data-efficiency-calc-range-select]').inputValue();
+  await page.locator('#costTimeEfficiency [data-efficiency-range="30"]').click();assert.equal(await usage.textContent(),"2.8 hr");
+  assert.match(await page.locator('#costTimeEfficiency [data-efficiency-average-note]').textContent(),/82 meter hours ÷ 29 elapsed calendar days/);
+  assert.equal(await page.locator('[data-efficiency-calc-range-select]').inputValue(),calculatorRange);
+  await page.locator('[data-efficiency-calc-range-select]').selectOption('1m');assert.equal(await usage.textContent(),"2.8 hr");
+  assert.match(await page.locator('#costTimeEfficiency [data-efficiency-window-label]').textContent(),/2026-09-21 to 2026-10-20/);
+  if(out)await page.screenshot({path:path.join(out,"utilization-snapshot.png")});
+  await page.locator("[data-efficiency-calc-charge]").fill("0");
   assert.equal(await page.locator('[data-dc-panel="efficiency"]').textContent(),beforeCalculator);
   assert.equal((await card("cuttingJobs").textContent()).replace(/^\+/,""),"$280.00");
   await page.keyboard.press("Escape");
-  const out=process.env.OMAX_CJE_SCREENSHOT_DIR;
   if(out){await fs.mkdir(out,{recursive:true});await page.screenshot({path:path.join(out,"financial-breakdown-desktop.png"),fullPage:true});}
   await page.evaluate(()=>{location.hash="#/jobs";});await page.waitForSelector("#jobsFinancialPeriod");
   assert.equal(await page.locator("#jobsFinancialPeriod").inputValue(),"7d");
@@ -107,6 +136,7 @@ test(`CJE: financial UI reconciles periods without writes using only a disposabl
         seriesDates:model.jobSeries.map(point=>[point.dateISO,completedCuttingJobs.find(job=>String(job.id)===point.jobId).completedAtISO.slice(0,10)])};
     });
     assert.equal(result.end,localDay);assert.deepEqual(result.dataCenterIds,result.ids);assert.deepEqual(result.seriesIds,result.ids);assert.equal(result.dataCenterNet,result.net);
+    assert.equal(await page.evaluate(()=>OMAXCutCostFeedbackUi.calculate().endDate),localDay);
     for(const [pointDay,completionDay] of result.seriesDates)assert.equal(pointDay,completionDay);
     const money=new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(result.net);
     assert.equal((await card("cuttingJobs").textContent()).replace(/^\+/,""),money);
