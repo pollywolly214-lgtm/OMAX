@@ -23,7 +23,10 @@ test("PROJ-01B browser: navigation, selection, coverage, exact job links, reload
     state.jobFolders=[{id:"jobs_root",name:"All Jobs",parent:null,order:1},{id:"blanco",name:"1254 Blanco",projectNumber:"1254",parent:"jobs_root",order:2},{id:"atm",name:"1251 ATM",projectNumber:"1251",parent:"jobs_root",order:3}];
     const job=(id,extra={})=>({id,name:"Same visible job name",cat:"blanco",projectNumber:"1254",estimateHours:2,chargeRate:150,costRate:-25,materialCost:5,materialQty:5,failurePercent:0,startISO:"2026-10-01",dueISO:"2026-10-01",files:[],manualLogs:[],notes:"",...extra});
     state.cuttingJobs=[job("active",{cutNumber:"C001"})];
-    state.completedCuttingJobs=[job("past",{cutNumber:"C002",failurePercent:50,completedAtISO:"2026-10-01"}),job("unknown",{cutNumber:"C003",failurePercent:null,completedAtISO:"2026-10-02"}),job("atm-job",{cat:"atm",projectNumber:"1251",cutNumber:"C004",estimateHours:1,completedAtISO:"2026-10-03"})];
+    const historical=(id,event,cutNumber)=>job(id,{cat:"atm",projectNumber:"1251",cutNumber,estimateHours:0,actualHours:1,failurePercent:null,completedAtISO:"2026-10-03",import_event_id:event,
+      importProvenance:{import_event_id:event,actual_cut_minutes:"60",source_file:"disposable workbook",sourceRowNumber:12},manualLogs:[{dateISO:"2026-10-03",completedHours:1,import_event_id:event}]});
+    state.completedCuttingJobs=[job("past",{cutNumber:"C002",failurePercent:50,completedAtISO:"2026-10-01"}),job("unknown",{cutNumber:"C003",failurePercent:null,completedAtISO:"2026-10-02"}),
+      historical("atm-job","616-CUT-P01-L001","C004"),historical("atm-other","CUTPDF-20261003-001","C005")];
     await ref.set(state);
   });
   await page.reload();await ready();const before=await cloud();
@@ -42,10 +45,19 @@ test("PROJ-01B browser: navigation, selection, coverage, exact job links, reload
   await page.reload();await ready();assert.equal(await page.locator('#projectSelector').inputValue(),"1254 — Blanco");assert.deepEqual(await values(),["3","6 hr","50.0%","$150.00","$75.00","$225.00"]);
   await details.locator('summary').click();await page.locator('[data-project-job="past"]').click();await page.waitForURL(url=>url.hash==="#/jobs");
   await page.locator('[data-history-row="past"]').waitFor({state:"visible"});assert.equal(await page.evaluate(()=>window.pendingJobRowHighlight?.id),"past");
-  await page.locator('#tab-projects').click();await page.locator('#projectSelector').fill("1251 — ATM");assert.deepEqual(await values(),["1","1 hr","100.0%","$25.00","$25.00","$50.00"]);
+  await page.locator('#tab-projects').click();await page.locator('#projectSelector').fill("1251 — ATM");assert.deepEqual(await values(),["2","2 hr","Unavailable","$50.00","$50.00","$100.00"]);
+  assert.match(await page.locator('.project-coverage-notice').textContent(),/may overlap across imports.*All distinct records are currently included/);
+  assert.match(await page.locator('.project-summary-grid').textContent(),/2 recorded/);
+  assert.deepEqual(await page.locator('.project-finance-grid .project-metric > strong').allTextContents(),["Unavailable","Unavailable","Unavailable","Unavailable"]);
+  await page.reload();await ready();assert.equal(await page.locator('#projectSelector').inputValue(),"1251 — ATM");assert.deepEqual(await values(),["2","2 hr","Unavailable","$50.00","$50.00","$100.00"]);
+  await details.locator('summary').click();assert.equal(await page.locator('[data-project-job="atm-job"]').count(),1);assert.equal(await page.locator('[data-project-job="atm-other"]').count(),1);
+  await page.locator('[data-project-job="atm-other"]').click();await page.waitForURL(url=>url.hash==="#/jobs");await page.locator('[data-history-row="atm-other"]').waitFor({state:"visible"});
+  assert.equal(await page.evaluate(()=>window.pendingJobRowHighlight?.id),"atm-other");
+  await page.locator('#tab-projects').click();
   await page.locator('#projectSelector').fill("1254 — Blanco");await details.locator('summary').click();await page.locator('[data-project-job="active"]').click();await page.waitForURL(url=>url.hash==="#/jobs");
   await page.locator('[data-job-row="active"]').waitFor({state:"visible"});assert.equal(await page.evaluate(()=>window.pendingJobRowHighlight?.id),"active");
   await page.goto(origin+"/?devsafe=1#/projects?project=blanco");await ready();
+  assert.doesNotMatch(await page.locator('.projects-page').textContent(),/may overlap across imports/);
   // Snapshot data updates naturally rerender the selected project without saving totals.
   await page.evaluate(async()=>{const ref=OMAXDevSafe.db.doc(FB.docRef.path),state=(await ref.get()).data();state.cuttingJobs.find(j=>j.id==="active").estimateHours=3;state.syncMeta.rev+=1;await ref.set(state);});
   await page.waitForFunction(()=>document.querySelectorAll('.project-summary-grid .project-metric > strong')[1]?.textContent==="7 hr");

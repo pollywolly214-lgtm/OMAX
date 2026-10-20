@@ -1,5 +1,7 @@
 # PROJ-01B — Project cutting performance
 
+Updated by **PROJ-01B-ACC02**: see [the accuracy correction](proj-01b-acc02.md) for the current duration policy, retained cross-ID records, coverage notices and final verification. The original implementation's assumption that every historical duration lived in `estimateHours` was incorrect.
+
 Base: `origin/main` at `14b467d6a8b017915a9f5f1c60aec6aa08b5918b` (fetched October 20, 2026).
 The initial checkout contained unrelated style/artifact changes. Implementation began in a clean isolated worktree on `codex/proj-01b-project-dashboard`; those original changes were preserved.
 
@@ -8,7 +10,7 @@ The initial checkout contained unrelated style/artifact changes. Implementation 
 Projects is a main-navigation page with a searchable native suggestion dropdown, six summary cards, four cutting financial metrics, and one initially collapsed Cutting Job table. The selected stable category ID lives in the URL, so reload and shareable links retain the selection. Existing workspace snapshot adoption rerenders the page after revisioned source updates. No calculated totals are saved.
 
 - `CuttingJobHistory.resolveCategoryProject` and `normalizeProjectKey` reuse CJPC/CJI ownership validation. A unique category ID determines membership; visible job/category names are not join keys. Supported leading-zero project numbers remain strings.
-- `computeCuttingJobProfit` supplies processing cost, material expense, modeled net and failure-related charge reduction. The existing duration storage key is `estimateHours` (Hours Taken), not `actualHours` or historical progress logs. Material expense is `materialCost × materialQty`. Either sign of the stored machine rate is an expense magnitude. Failed cuts retain the full machine/material expenses.
+- `computeCuttingJobProfit` supplies processing cost, material expense, modeled net and failure-related charge reduction. Projects resolves historical recorded duration separately and passes it as `estimateHours` on a calculation-only copy. Current jobs retain the shared Hours Taken behavior; stored records and the shared helper are unchanged. Material expense is `materialCost × materialQty`. Either sign of the stored machine rate is an expense magnitude. Failed cuts retain the full machine/material expenses.
 - A completeness check rejects missing, invalid or overflowing inputs before presenting reliable figures. Stored efficiency rates remain an allowed fallback; absent stored rates do not silently become global defaults. Explicit zero failure is known; absent failure is unknown. Each aggregate shows coverage; partial totals and averages use only applicable records. Net/hour is applicable total net / applicable total hours.
 - `CuttingJobChronology.readCutLabel` supplies Cut Numbers; `redirectToCuttingJobPage` reveals/highlights the exact existing active/history record by stable job ID.
 
