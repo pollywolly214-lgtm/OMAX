@@ -246,7 +246,7 @@ function viewDashboard(){
       <div class="dashboard-window" data-dashboard-window="waterQuality">
         <section class="block water-quality-block" aria-labelledby="waterQualityHeading">
           <h3 id="waterQualityHeading">Water Quality</h3>
-          <p class="water-quality-note" id="waterQualityHelp">Choose Water Softness Pass or Fail from your test. Saved checks stay in this browser only; they are not synced or included in OMAX backups.</p>
+          <p class="water-quality-note" id="waterQualityHelp">Choose Water Softness Pass or Fail from your test. Checks are confirmed against the shared workspace before saving is reported. Browser-only history is preserved in the shared log when you save.</p>
           <form id="waterQualityForm" class="mini-form water-quality-fields" aria-describedby="waterQualityHelp">
             ${viewWaterQualityFields("waterQuality")}
             <button type="submit">Submit</button>
@@ -281,7 +281,7 @@ function viewDashboard(){
     <div class="modal-card water-quality-modal-card" role="dialog" aria-modal="true" aria-labelledby="waterQualityLogHeading">
       <button type="button" class="modal-close" id="waterQualityCloseLog" aria-label="Close Water Quality Log">×</button>
       <h3 id="waterQualityLogHeading">Water Quality Log</h3>
-      <p class="water-quality-note">Saved in this browser only. Dates and times use your local timezone.</p>
+      <p class="water-quality-note">Shared workspace history, with any browser-only checks retained until saved to the shared log. Dates and times use your local timezone.</p>
       <p id="waterQualityLogStatus" class="water-quality-note" role="status"></p>
       <form id="waterQualityEditForm" hidden>
         <h4>Edit check</h4>

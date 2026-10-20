@@ -1,250 +1,75 @@
 "use strict";
-// Run with node --test tests/water-quality.browser.cjs.
-// OMAX_PLAYWRIGHT_PATH can point to an existing Playwright installation.
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const fs = require("node:fs/promises");
-const path = require("node:path");
-const http = require("node:http");
-const { chromium } = require(process.env.OMAX_PLAYWRIGHT_PATH || "playwright");
-
-test("water quality: dashboard layout, calendar projection, editing and local persistence", { timeout:60000 }, async t => {
-  const root = path.resolve(__dirname, "..");
-  const server = http.createServer(async (req, res) => {
-    const pathname = new URL(req.url, "http://localhost").pathname;
-    const file = path.resolve(root, "." + pathname + (pathname.endsWith("/") ? "index.html" : ""));
-    if (!file.startsWith(root + path.sep) || pathname.split("/").some(part => part.startsWith("."))){ res.writeHead(403).end(); return; }
-    try {
-      const content = await fs.readFile(file);
-      res.writeHead(200, { "Content-Type":({ ".html":"text/html", ".js":"text/javascript", ".css":"text/css", ".svg":"image/svg+xml" })[path.extname(file)] || "text/plain" }).end(content);
-    } catch { res.writeHead(404).end(); }
-  });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise(resolve => server.close(resolve)));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless:true, ...(process.platform === "win32" ? { channel:"msedge" } : {}) });
-  t.after(() => browser.close());
-  const context = await browser.newContext({ timezoneId:"America/Chicago", viewport:{ width:1280, height:900 } });
-  // Fresh browser profile; never allow real Firebase or other external services.
-  await context.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.fulfill({ status:200, contentType:"text/javascript", body:"" }));
-  const page = await context.newPage(), errors = [];
-  page.on("pageerror", error => errors.push(error.message));
-  page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
-  page.setDefaultTimeout(8000);
-  // UTC is October 20; Chicago's local calendar date is still October 19.
-  await page.clock.setFixedTime(new Date("2026-10-20T02:30:00Z"));
-  await page.goto(origin + "/?devsafe=1");
-  await page.waitForFunction(() => window.OMAXDevSafe?.active && window.__initialAdoptComplete);
-  assert.equal(await page.evaluate(() => typeof firebase), "undefined");
-  const key = "omax.waterQualityChecks.v1";
-  const form = page.locator("#waterQualityForm"), modal = page.locator("#waterQualityModal");
-  const editor = page.locator("#waterQualityEditForm"), rows = page.locator("#waterQualityRows tr");
-  const entry = name => form.locator(`[name="${name}"]`);
-  const field = name => editor.locator(`[name="${name}"]`);
-  const stored = () => page.evaluate(key => JSON.parse(localStorage.getItem(key)), key);
-  const open = () => page.getByRole("button", { name:"View Water Quality Log", exact:true }).click();
-  const close = () => page.getByRole("button", { name:"Close Water Quality Log", exact:true }).click();
-  const fill = async (values = {}, target = form) => {
-    const defaults = { date:"2026-10-19", time:"21:30", ppm:"125.5", softness:"Pass", initials:"RY", note:"" };
-    for (const [name, value] of Object.entries({ ...defaults, ...values })){
-      const input = target.locator(`[name="${name}"]`);
-      if (name === "softness") await input.selectOption(value);
-      else await input.fill(value);
-    }
-  };
-  const submit = () => form.getByRole("button", { name:"Submit", exact:true }).click();
-  assert.equal(await form.isVisible(), true);
-  assert.equal(await entry("date").inputValue(), "2026-10-19");
-  assert.equal(await entry("time").inputValue(), "21:30");
-  assert.equal(await form.getByLabel("Water Softness").count(), 1);
-  assert.equal(await modal.isHidden(), true);
-  assert.equal(await page.locator(".water-quality-block table").count(), 0);
-  const cloud = () => page.evaluate(() => readCurrentCloudStateReadOnly());
-  const snapshot = () => page.evaluate(() => compactStateForStorage(snapshotState({ skipLocalFileCacheSync:true })));
-  const beforeCloud = await cloud(), beforeState = await snapshot();
-  const otherEvents = () => page.locator("#months .event:not([data-cal-water-quality]), #months .job-bar").evaluateAll(elements => elements.map(element => element.outerHTML));
-  const beforeEvents = await otherEvents();
-  const calendarChecks = page.locator("#months [data-cal-water-quality]");
-  const dayChecks = date => page.locator(`#months .day[data-date-iso="${date}"] [data-cal-water-quality]`);
-  assert.equal(await page.locator('#dashboardLayout > [data-dashboard-window="waterQuality"] #waterQualityForm').count(), 1);
-  assert.equal(await page.locator("#dashboardLayout .calendar-block").count(), 0);
-  await page.evaluate(() => {
-    window.__waterQualityWrites = [];
-    for (const name of ["saveCloudNow", "saveCloudDebounced"]){
-      const original = window[name];
-      window[name] = function(...args){ __waterQualityWrites.push([name]); return original.apply(this, args); };
-    }
-    for (const [prototype, names] of [[Storage.prototype, ["setItem", "removeItem", "clear"]], [IDBObjectStore.prototype, ["put", "add", "delete", "clear"]]]){
-      for (const name of names){
-        const original = prototype[name];
-        prototype[name] = function(...args){ __waterQualityWrites.push([name, args[0]]); return original.apply(this, args); };
-      }
-    }
-  });
-  for (const invalid of [{ date:"" }, { time:"" }, { ppm:"" }, { softness:"" }, { initials:"" }, { initials:"   " }]){
-    await fill(invalid); await submit();
-    assert.equal(await form.evaluate(element => element.checkValidity()), false);
-    assert.equal(await rows.count(), 0);
-  }
-  for (const [name, value] of [["date", "2026-02-30"], ["time", "25:00"], ["ppm", "NaN"], ["ppm", "Infinity"]]){
-    await fill();
-    await entry(name).evaluate((input, value) => { input.value = value; }, value);
-    await submit(); assert.equal(await rows.count(), 0, `reject ${value}`);
-  }
-  assert.deepEqual(await page.evaluate(() => __waterQualityWrites), []);
-  await fill({ date:"2026-10-18", time:"08:15", initials:" RY " }); await submit();
-  assert.equal(await entry("ppm").inputValue(), "");
-  assert.equal(await entry("softness").inputValue(), "");
-  assert.equal(await entry("time").inputValue(), "21:30");
-  await fill({ ppm:"0", softness:"Fail", initials:"AB", note:"Softener needs checking" }); await submit();
-  await fill({ ppm:"999999", softness:"Pass", initials:"<b>RY</b>", note:"<b>Test note</b>" }); await submit();
-  const initial = await stored();
-  assert.equal(initial.length, 3);
-  assert.equal(new Set(initial.map(check => check.id)).size, 3);
-  assert.equal(initial[2].note, "");
-  assert.equal(await dayChecks("2026-10-18").count(), 1);
-  assert.equal(await dayChecks("2026-10-19").count(), 2);
-  assert.equal(await calendarChecks.count(), 3);
-  assert.match(await dayChecks("2026-10-18").textContent(), /Water Quality.*08:15.*125.5 PPM.*Water Softness Pass.*RY/);
-  assert.deepEqual(await otherEvents(), beforeEvents);
-  await dayChecks("2026-10-18").click();
-  assert.equal(await modal.isVisible(), true);
-  assert.equal(await rows.nth(2).getByRole("button", { name:"Edit", exact:true }).evaluate(button => button === document.activeElement), true);
-  await close();
-  await dayChecks("2026-10-18").focus(); await page.keyboard.press("Enter");
-  assert.equal(await modal.isVisible(), true); await close();
-  await open();
-  assert.equal(await modal.isVisible(), true);
-  assert.deepEqual(await modal.locator("th").allTextContents(), ["Date", "Time", "PPM", "Water Softness", "Initials", "Note", "Edit"]);
-  assert.deepEqual(await rows.nth(2).locator("td").allTextContents(), ["2026-10-18", "08:15", "125.5", "Pass", "RY", "", "Edit"]);
-  assert.equal(await rows.first().locator("td").nth(5).textContent(), "<b>Test note</b>");
-  assert.equal(await rows.locator("b").count(), 0);
-  for (const [label, className] of [["Pass", "status-approved"], ["Fail", "status-denied"]]){
-    const badge = rows.locator("." + className).first();
-    assert.equal(await badge.isVisible(), true);
-    assert.equal(await badge.textContent(), label);
-    const contrast = await badge.evaluate(element => {
-      const luminance = color => {
-        const rgb = color.match(/[\d.]+/g).slice(0, 3).map(value => {
-          const channel = Number(value) / 255;
-          return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4;
-        });
-        return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
-      };
-      const style = getComputedStyle(element), a = luminance(style.color), b = luminance(style.backgroundColor);
-      return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
-    });
-    assert.ok(contrast >= 4.5, `${label} contrast ${contrast}`);
-  }
-  await rows.nth(1).getByRole("button", { name:"Edit", exact:true }).click();
-  assert.equal(await field("date").inputValue(), initial[1].date);
-  assert.equal(await field("time").inputValue(), initial[1].time);
-  await fill({ note:"Discard this draft" }, editor);
-  await editor.getByRole("button", { name:"Cancel", exact:true }).click();
-  assert.deepEqual(await stored(), initial);
-  await rows.nth(1).getByRole("button", { name:"Edit", exact:true }).click();
-  await fill({ date:"2026-10-17", time:"07:05", ppm:"42.25", softness:"Pass", initials:"CD", note:"Rechecked water" }, editor);
-  await editor.getByRole("button", { name:"Save", exact:true }).click();
-  const edited = await stored();
-  assert.deepEqual(edited[0], initial[0]); assert.deepEqual(edited[2], initial[2]);
-  assert.deepEqual(edited[1], { id:initial[1].id, date:"2026-10-17", time:"07:05", ppm:42.25, softness:"Pass", initials:"CD", note:"Rechecked water" });
-  assert.deepEqual(await rows.nth(1).locator("td").allTextContents(), ["2026-10-17", "07:05", "42.25", "Pass", "CD", "Rechecked water", "Edit"]);
-  assert.equal(await calendarChecks.count(), 3);
-  assert.equal(await dayChecks("2026-10-19").count(), 1);
-  assert.equal(await dayChecks("2026-10-17").count(), 1);
-  assert.equal(await dayChecks("2026-10-17").getAttribute("data-cal-water-quality"), initial[1].id);
-  assert.match(await dayChecks("2026-10-17").textContent(), /07:05.*42.25 PPM.*Water Softness Pass.*CD/);
-  assert.deepEqual(await otherEvents(), beforeEvents);
-  const writes = await page.evaluate(() => __waterQualityWrites);
-  assert.equal(writes.length, 4);
-  assert.ok(writes.every(([operation, storageKey]) => operation === "setItem" && storageKey === key));
-  assert.deepEqual(await cloud(), beforeCloud); assert.deepEqual(await snapshot(), beforeState);
-  // Failed edit/save and submit must leave storage and displayed saved rows intact.
-  await page.evaluate(key => {
-    window.__wqSetItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function(name, value){
-      if (name === key) throw new DOMException("Storage full", "QuotaExceededError");
-      return __wqSetItem.call(this, name, value);
-    };
-  }, key);
-  await rows.nth(1).getByRole("button", { name:"Edit", exact:true }).click();
-  await field("note").fill("Unsaved edit");
-  await editor.getByRole("button", { name:"Save", exact:true }).click();
-  assert.equal(await editor.isVisible(), true);
-  assert.match(await page.locator("#waterQualityLogStatus").textContent(), /Could not save/);
-  assert.deepEqual(await stored(), edited);
-  await editor.getByRole("button", { name:"Cancel", exact:true }).click();
-  await close(); await fill({ note:"Unsaved new check" }); await submit();
-  assert.match(await page.locator("#waterQualityStatus").textContent(), /Could not save/);
-  assert.equal(await entry("note").inputValue(), "Unsaved new check");
-  assert.deepEqual(await stored(), edited);
-  await page.evaluate(() => { Storage.prototype.setItem = __wqSetItem; });
-  const range = await page.locator("#calendarRangeLabel").textContent();
-  await page.locator("#calendarNextMonthBtn").click();
-  assert.notEqual(await page.locator("#calendarRangeLabel").textContent(), range);
-  await page.locator("#calendarPrevMonthBtn").click();
-  assert.equal(await page.locator("#calendarRangeLabel").textContent(), range);
-  assert.equal(await calendarChecks.count(), 3);
-  assert.deepEqual(await otherEvents(), beforeEvents);
-  await page.locator("#calendarAddBtn").click();
-  assert.equal(await page.locator("#dashboardAddModal").isVisible(), true);
-  await page.locator("#dashboardModalClose").click();
-  await page.locator("#tab-tolerance").click();
-  await page.waitForFunction(() => !document.getElementById("waterQualityForm"));
-  await page.locator("#tab-dashboard").click(); await form.waitFor();
-  await open(); assert.equal(await rows.count(), 3);
-  // Existing modal conventions: close button, Escape, backdrop, focus trap/return.
-  await page.keyboard.press("Shift+Tab");
-  assert.equal(await modal.locator(":focus").count(), 1);
-  await page.keyboard.press("Escape"); assert.equal(await modal.isHidden(), true);
-  assert.equal(await page.locator("#waterQualityViewLog").evaluate(element => element === document.activeElement), true);
-  await open(); await modal.click({ position:{ x:2, y:2 } }); assert.equal(await modal.isHidden(), true);
-  await page.setViewportSize({ width:390, height:844 });
-  assert.equal(await form.evaluate(element => element.getBoundingClientRect().right <= innerWidth), true);
-  await open();
-  const layout = await modal.locator(".water-quality-table-wrap").evaluate(element => ({
-    scrolls:element.scrollWidth > element.clientWidth,
-    inside:element.getBoundingClientRect().right <= innerWidth,
-    documentFits:document.documentElement.scrollWidth <= innerWidth
-  }));
-  assert.deepEqual(layout, { scrolls:true, inside:true, documentFits:true });
-  await rows.nth(1).getByRole("button", { name:"Edit", exact:true }).click();
-  assert.equal(await editor.isVisible(), true);
-  assert.equal(await editor.evaluate(element => element.getBoundingClientRect().right <= innerWidth), true);
-  assert.equal(await field("time").inputValue(), "07:05");
-  if (process.env.OMAX_WQ_SCREENSHOT) await modal.screenshot({ path:process.env.OMAX_WQ_SCREENSHOT });
-  await editor.getByRole("button", { name:"Cancel", exact:true }).click();
-  await close(); await page.reload(); await form.waitFor(); await open();
-  assert.equal(await rows.count(), 3); assert.deepEqual(await stored(), edited);
-  assert.equal(await calendarChecks.count(), 3);
-  assert.equal(await dayChecks("2026-10-17").count(), 1);
-  assert.deepEqual(await rows.nth(1).locator("td").allTextContents(), ["2026-10-17", "07:05", "42.25", "Pass", "CD", "Rechecked water", "Edit"]);
-  assert.deepEqual(await cloud(), beforeCloud);
-  await close();
-  // Malformed data is never overwritten by rendering or by a new submission.
-  for (const corrupt of ["not-json", '{"unexpected":true}', '[{"id":"invalid"}]']){
-    await page.evaluate(({ key, corrupt }) => localStorage.setItem(key, corrupt), { key, corrupt });
-    await page.reload(); await form.waitFor();
-    assert.match(await page.locator("#waterQualityStatus").textContent(), /Could not read/);
-    await fill(); await submit();
-    assert.match(await page.locator("#waterQualityStatus").textContent(), /Could not save/);
-    assert.equal(await page.evaluate(key => localStorage.getItem(key), key), corrupt);
-  }
-  // Browser security settings can make even getItem throw; other storage stays usable.
-  await page.evaluate(({ key, edited }) => localStorage.setItem(key, JSON.stringify(edited)), { key, edited });
-  await page.addInitScript(key => {
-    const getItem = Storage.prototype.getItem;
-    Storage.prototype.getItem = function(name){
-      if (String(name).endsWith(key)) throw new DOMException("Unavailable", "SecurityError");
-      return getItem.call(this, name);
-    };
-  }, key);
-  await page.reload(); await form.waitFor();
-  assert.match(await page.locator("#waterQualityStatus").textContent(), /Could not read/);
-  await fill(); await submit();
-  assert.match(await page.locator("#waterQualityStatus").textContent(), /Could not save/);
-  assert.equal(await entry("ppm").inputValue(), "125.5");
-  assert.deepEqual(await cloud(), beforeCloud);
+// OMAX_PLAYWRIGHT_PATH may point to the bundled Playwright installation.
+const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs/promises"),path=require("node:path"),http=require("node:http");
+const {chromium}=require(process.env.OMAX_PLAYWRIGHT_PATH||"playwright");
+test("water quality: guarded backend persistence, verified UI, legacy storage failure and retry",{timeout:60000},async t=>{
+ const root=path.resolve(__dirname,".."),server=http.createServer(async(req,res)=>{
+  const pathname=new URL(req.url,"http://localhost").pathname,file=path.resolve(root,"."+pathname+(pathname.endsWith("/")?"index.html":""));
+  if(!file.startsWith(root+path.sep)||pathname.split("/").some(part=>part.startsWith("."))){res.writeHead(403).end();return;}
+  try{const content=await fs.readFile(file);res.writeHead(200,{"Content-Type":({".html":"text/html",".js":"text/javascript",".css":"text/css",".svg":"image/svg+xml"})[path.extname(file)]||"text/plain"}).end(content);}catch{res.writeHead(404).end();}
+ });
+ await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const origin=`http://127.0.0.1:${server.address().port}`,browser=await chromium.launch({headless:true,...(process.platform==="win32"?{channel:"msedge"}:{})});t.after(()=>browser.close());
+ const context=await browser.newContext({timezoneId:"America/Chicago",viewport:{width:1280,height:900}});
+ // Disposable profile and local fixture backend only; all external requests blocked.
+ await context.route("**/*",route=>new URL(route.request().url()).origin===origin?route.continue():route.fulfill({status:200,contentType:"text/javascript",body:""}));
+ const page=await context.newPage(),errors=[];page.on("pageerror",error=>errors.push(error.message));page.setDefaultTimeout(8000);
+ await page.clock.setFixedTime(new Date("2026-10-20T14:15:00Z"));
+ const ready=async()=>{await page.waitForFunction(()=>window.OMAXDevSafe?.active&&window.__initialAdoptComplete);assert.equal(await page.evaluate(()=>typeof firebase),"undefined");};
+ await page.goto(origin+"/?devsafe=1");await ready();
+ // The disposable seed has no revision; establish the same committed baseline as production.
+ assert.equal((await page.evaluate(()=>saveCloudNow())).saved,true);await page.reload();await ready();
+ assert.equal((await page.evaluate(()=>saveCloudNow())).saved,true);
+ const form=page.locator("#waterQualityForm"),modal=page.locator("#waterQualityModal"),editor=page.locator("#waterQualityEditForm"),status=page.locator("#waterQualityStatus");
+ const fill=async(values={},target=form)=>{for(const [name,value]of Object.entries({date:"2026-10-20",time:"09:15",ppm:"125.5",softness:"Pass",initials:"RY",note:"Retain this note",...values})){const input=target.locator(`[name="${name}"]`);if(name==="softness")await input.selectOption(value);else await input.fill(value);}};
+ const submit=()=>form.getByRole("button",{name:"Submit",exact:true}).click();
+ const cloud=()=>page.evaluate(()=>readCurrentCloudStateReadOnly());
+ const before=await cloud(),legacy=[{id:"old-local",date:"2026-10-19",time:"08:15",ppm:50,softness:"Pass",initials:"AB",note:"Existing browser history"}];
+ await page.evaluate(legacy=>{
+  localStorage.setItem("omax.waterQualityChecks.v1",JSON.stringify(legacy));
+  window.__legacyWrites=0;const set=Storage.prototype.setItem;
+  Storage.prototype.setItem=function(key,value){if(key==="omax.waterQualityChecks.v1"){window.__legacyWrites++;throw new DOMException("Legacy key write blocked","QuotaExceededError");}return set.call(this,key,value);};
+ },legacy);
+ // The legacy failure is real: writes throw. The new path must never write it.
+ assert.equal(await page.evaluate(()=>{try{localStorage.setItem("omax.waterQualityChecks.v1","[]");return false;}catch{return true;}}),true);
+ await page.evaluate(()=>window.__legacyWrites=0);
+ for(const invalid of [{date:""},{time:""},{ppm:""},{softness:""},{initials:"   "}]){await fill(invalid);await submit();assert.equal(await form.evaluate(node=>node.checkValidity()),false);}
+ assert.deepEqual(await cloud(),before);
+ // Hold the backend readback: neither the success message nor input reset may happen early.
+ await page.evaluate(()=>{const read=readInventoryMaterialAuthoritativeState;let reads=0;window.readInventoryMaterialAuthoritativeState=async()=>{if(++reads===2)await new Promise(resolve=>{window.__releaseWaterReadback=resolve;});const value=await read();window.__waterEnvelope=value;return value;};});
+ await fill();await submit();await page.waitForFunction(()=>typeof window.__releaseWaterReadback==="function").catch(async error=>{throw Error(error.message+" "+JSON.stringify(await page.evaluate(()=>({status:document.getElementById("waterQualityStatus").textContent,recovery:window.__recoveryReason,block:window.__lastCloudSaveBlock,pending:window.__waterQualityMutationPending,dirty:hasPendingLocalChanges,envelope:window.__waterEnvelope&&{revision:window.__waterEnvelope.revision,path:window.__waterEnvelope.path,source:window.__waterEnvelope.readSource,sync:window.__waterEnvelope.state?.syncMeta},target:captureCuttingJobSaveTarget().path,loadedRev:window.__loadedCloudRevisionForSaveGuard,differences:Object.keys(window.__waterEnvelope?.state||{}).filter(name=>!["syncMeta","saveMeta","syncProcessLog"].includes(name)&&OMAXWaterQuality.key(window.__waterEnvelope.state[name])!==OMAXWaterQuality.key(getInventoryIdentityRepairLocalState()[name])),issues:checkAuthoritativeIdentityIntegrity(window.__waterEnvelope?.state).blockers}))));});
+ assert.equal(await form.locator('[name="ppm"]').inputValue(),"125.5");assert.equal(await form.locator('[name="ppm"]').isDisabled(),true);assert.doesNotMatch(await status.textContent(),/Check saved and verified/);
+ await page.evaluate(()=>window.__releaseWaterReadback());await page.waitForFunction(()=>document.getElementById("waterQualityStatus").textContent.includes("saved and verified"));
+ assert.equal(await form.locator('[name="ppm"]').inputValue(),"");assert.equal(await page.evaluate(()=>window.__legacyWrites),0);
+ const saved=await cloud();assert.equal(saved.waterQualityChecks.length,2);assert.deepEqual(saved.waterQualityChecks.find(row=>row.id==="old-local").legacySource,legacy[0]);
+ for(const key of Object.keys(before).filter(key=>!["waterQualityChecks","syncMeta"].includes(key)))assert.deepEqual(saved[key],before[key],key);
+ assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem("omax.waterQualityChecks.v1"))),legacy);
+ await page.reload();await ready();
+ assert.equal((await page.evaluate(()=>saveCloudNow())).saved,true);assert.deepEqual((await cloud()).waterQualityChecks,saved.waterQualityChecks);
+ await page.getByRole("button",{name:"View Water Quality Log",exact:true}).click();assert.equal(await page.locator("#waterQualityRows tr").count(),2);
+ await page.locator("#waterQualityRows tr").first().getByRole("button",{name:"Edit",exact:true}).click();
+ await fill({ppm:"60",softness:"Fail",initials:"CD",note:"Corrected after retest"},editor);await editor.getByRole("button",{name:"Save",exact:true}).click();await editor.waitFor({state:"hidden"});
+ const edited=(await cloud()).waterQualityChecks[0];assert.equal(edited.ppm,60);assert.equal(edited.softness,"Fail");assert.equal(edited.initials,"CD");assert.equal(edited.editHistory[0].before.ppm,125.5);assert.equal(edited.editHistory[0].actorUid,await page.evaluate(()=>FB.user.uid));
+ await page.getByRole("button",{name:"Close Water Quality Log",exact:true}).click();assert.equal(await modal.isHidden(),true);
+ // A genuine backend denial must preserve all six fields and produce a backend error.
+ await page.evaluate(()=>{
+  const run=FB.db.runTransaction.bind(FB.db);window.__denyWaterWrite=true;
+  FB.db.runTransaction=callback=>run(transaction=>callback({...transaction,set(...args){if(window.__denyWaterWrite)throw Object.assign(Error("Firebase test permission denied"),{code:"permission-denied"});return transaction.set(...args);}}));
+ });
+ const beforeFailure=await cloud();await fill({ppm:"222",initials:"EF",note:"Keep entered values"});await submit();await page.waitForFunction(()=>document.getElementById("waterQualityStatus").textContent.includes("Firebase test permission denied"));
+ for(const [name,value]of Object.entries({date:"2026-10-20",time:"09:15",ppm:"222",softness:"Pass",initials:"EF",note:"Keep entered values"}))assert.equal(await form.locator(`[name="${name}"]`).inputValue(),value);
+ assert.deepEqual(await cloud(),beforeFailure);const retryId=await page.evaluate(()=>window.__waterQualityDrafts.get("new"));
+ await page.evaluate(()=>window.__denyWaterWrite=false);await submit();await page.waitForFunction(()=>document.getElementById("waterQualityStatus").textContent.includes("saved and verified"));
+ assert.equal((await cloud()).waterQualityChecks.filter(row=>row.id===retryId).length,1);
+ // A legacy read failure is a distinct warning; it cannot redirect saves to local storage.
+ await page.evaluate(()=>{const get=Storage.prototype.getItem;Storage.prototype.getItem=function(key){if(key==="omax.waterQualityChecks.v1")throw new DOMException("Legacy read blocked","SecurityError");return get.call(this,key);};});
+ await fill({ppm:"333",note:"No legacy dependency"});await submit();await page.waitForFunction(()=>document.getElementById("waterQualityStatus").textContent.includes("Browser-only water-quality history could not be read"));
+ assert.match(await status.textContent(),/saved and verified/);assert.equal((await cloud()).waterQualityChecks.length,4);
+ // A post-commit render exception must never turn verified success into a retryable failure.
+ await page.evaluate(()=>{window.renderWaterQualityCalendarEvents=()=>{throw Error("fixture display failure");};});
+ await fill({ppm:"444"});await submit();await page.waitForFunction(()=>document.getElementById("waterQualityStatus").textContent.includes("Reload to refresh the display"));
+ assert.match(await status.textContent(),/saved and verified/);assert.equal(await form.locator('[name="ppm"]').inputValue(),"");assert.equal((await cloud()).waterQualityChecks.length,5);
+ {
   // Seed a previously saved layout without Water Quality in this disposable profile.
   const layoutPage = await context.newPage();
   layoutPage.on("pageerror", error => errors.push(error.message));
@@ -320,23 +145,27 @@ test("water quality: dashboard layout, calendar projection, editing and local pe
   assert.deepEqual(await layoutState(), savedLayout);
   assert.deepEqual(await viewStyle(), resized);
   assert.equal(await windowBox.locator("#waterQualityForm").isVisible(), true);
-  assert.equal(await layoutPage.locator("#months [data-cal-water-quality]").count(), 3);
+  const initialCalendarChecks = await layoutPage.locator("#months [data-cal-water-quality]").count();
   const movedForm = windowBox.locator("#waterQualityForm");
   await movedForm.locator('[name="ppm"]').fill("55");
   await movedForm.locator('[name="softness"]').selectOption("Fail");
   await movedForm.locator('[name="initials"]').fill("EF");
   await movedForm.getByRole("button", { name:"Submit", exact:true }).click();
-  assert.equal(await layoutPage.locator("#months [data-cal-water-quality]").count(), 4);
+  await layoutPage.waitForFunction(count => document.querySelectorAll("#months [data-cal-water-quality]").length === count, initialCalendarChecks + 1);
   await windowBox.locator("#waterQualityViewLog").click();
   await layoutPage.locator("#waterQualityRows tr").first().getByRole("button", { name:"Edit", exact:true }).click();
   await layoutPage.locator('#waterQualityEditForm [name="note"]').fill("After layout refresh");
   await layoutPage.locator("#waterQualityEditForm").getByRole("button", { name:"Save", exact:true }).click();
+  await layoutPage.locator("#waterQualityEditForm").waitFor({ state:"hidden" });
   await layoutPage.locator("#waterQualityCloseLog").click();
   await loadLayout();
   assert.deepEqual(await layoutState(), savedLayout);
-  assert.equal(await layoutPage.locator("#months [data-cal-water-quality]").count(), 4);
-  assert.equal(await layoutPage.evaluate(key => JSON.parse(localStorage.getItem(key))[0].note, key), "After layout refresh");
-  assert.deepEqual(await protectedCloud(), layoutBefore);
+  await layoutPage.waitForFunction(count => document.querySelectorAll("#months [data-cal-water-quality]").length === count, initialCalendarChecks + 1);
+  assert.equal(await layoutPage.evaluate(async () => (await readCurrentCloudStateReadOnly()).waterQualityChecks[0].note), "After layout refresh");
+  const afterWaterCheck = await protectedCloud();
+  delete afterWaterCheck.waterQualityChecks; delete layoutBefore.waterQualityChecks;
+  assert.deepEqual(afterWaterCheck, layoutBefore);
   await layoutPage.close();
-  assert.deepEqual(errors, []);
+ }
+ assert.deepEqual(errors,[]);
 });

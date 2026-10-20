@@ -6117,24 +6117,13 @@ function syncNewCuttingJobSaveControls(){
   });
 }
 
-// Water Quality uses only this dedicated browser-local key, never OMAX snapshots.
+// The old browser key is read-only evidence. Commits use the shared workspace.
 const renderWaterQualityTracker = (() => {
   const storageKey = "omax.waterQualityChecks.v1";
   const fields = ["date", "time", "ppm", "softness", "initials", "note"];
+  const legacy=()=>window.OMAXWaterQuality.readLegacy(()=>localStorage.getItem(storageKey));
   function readChecks(){
-    const raw = localStorage.getItem(storageKey);
-    const checks = raw === null ? [] : JSON.parse(raw);
-    const ids = new Set();
-    if (!Array.isArray(checks) || !checks.every(check => {
-      if (!check || typeof check.id !== "string" || !check.id || ids.has(check.id)) return false;
-      ids.add(check.id);
-      return typeof check.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(check.date)
-        && typeof check.time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(check.time)
-        && Number.isFinite(check.ppm) && ["Pass", "Fail"].includes(check.softness)
-        && typeof check.initials === "string" && check.initials.trim()
-        && typeof check.note === "string";
-    })) throw Error("Unreadable Water Quality records");
-    return checks;
+    return window.OMAXWaterQuality.mergeLegacy(window.waterQualityChecks||[],legacy().records);
   }
   function localTime(){
     const now = new Date();
@@ -6149,7 +6138,8 @@ const renderWaterQualityTracker = (() => {
     const openButton = root.querySelector("#waterQualityViewLog");
     const closeButton = modal.querySelector("#waterQualityCloseLog");
     const statuses = [root.querySelector("#waterQualityStatus"), modal.querySelector("#waterQualityLogStatus")];
-    let checks = [], editingId = null;
+    let checks = [], editingId = null, editingRecord = null, saving = false;
+    const drafts=window.__waterQualityDrafts||(window.__waterQualityDrafts=new Map());
     const today = new Date();
     form.elements.date.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
     form.elements.time.value = localTime();
@@ -6181,6 +6171,7 @@ const renderWaterQualityTracker = (() => {
         button.disabled = editingId !== null;
         button.addEventListener("click", () => {
           editingId = check.id;
+          editingRecord = check;
           fields.forEach(field => { editor.elements[field].value = check[field]; });
           editor.elements.initials.setCustomValidity("");
           editor.hidden = false;
@@ -6196,60 +6187,73 @@ const renderWaterQualityTracker = (() => {
       try {
         checks = readChecks();
         renderRows();
-        status(`${checks.length} saved check${checks.length === 1 ? "" : "s"} in this browser.`);
-      } catch (_error){
-        status("Could not read Water Quality storage. Existing data is kept; saving is blocked until storage can be read.", true);
+        const warning=legacy().warning;
+        status(warning||`${checks.length} check${checks.length === 1 ? "" : "s"} in the shared and browser-only history.`,Boolean(warning));
+      } catch (error){
+        status(`Could not read water-quality history: ${error.message} Existing data was left untouched.`, true);
       }
     }
     function cancelEdit(){
+      if(saving)return;
       const id = editingId;
       editingId = null;
+      editingRecord = null;
       editor.hidden = true;
       editor.reset();
       editor.elements.initials.setCustomValidity("");
       renderRows();
       Array.from(rows.children).find(row => row.dataset.checkId === id)?.querySelector("button")?.focus();
     }
-    function save(source, id = null){
+    async function save(source, id = null){
+      if(saving)return false;
       source.elements.initials.setCustomValidity(source.elements.initials.value.trim() ? "" : "Enter operator initials.");
       if (!source.reportValidity() || !Number.isFinite(source.elements.ppm.valueAsNumber)) return false;
+      let result,local;
+      const draftKey=id||"new";
       try {
-        // Re-read before changing one entry so other stored entries are retained.
-        const next = readChecks();
-        const check = { id:id || crypto.randomUUID() };
+        local=legacy();
+        const check = { id:id || "pending" };
         fields.forEach(field => { check[field] = source.elements[field].value.trim(); });
         check.ppm = source.elements.ppm.valueAsNumber;
         if (!["Pass", "Fail"].includes(check.softness)) return false;
-        if (id){
-          const index = next.findIndex(entry => entry.id === id);
-          if (index === -1) throw Error("Water Quality record missing");
-          next[index] = check;
-        } else next.unshift(check);
-        localStorage.setItem(storageKey, JSON.stringify(next));
-        checks = next;
-        renderRows();
-        status(id ? "Check updated in this browser." : "Check saved in this browser.");
-        renderWaterQualityCalendarEvents();
-        return true;
-      } catch (_error){
-        status("Could not save Water Quality check. No changes were saved. Check browser storage and try again; your entered values are kept.", true);
+        if(!id)check.id=window.OMAXWaterQuality.submissionId(check);
+        drafts.set(draftKey,check.id);
+        window.OMAXWaterQuality.validate([check]);
+        saving=true;
+        source.querySelectorAll("input, select, button").forEach(control=>{control.disabled=true;});
+        result=await window.saveWaterQualityCheck({record:check,expected:id?editingRecord:null,legacy:local.records});
+      } catch (error){
+        result={saved:false,error:String(error?.message||error)};
+      } finally {
+        saving=false;
+        source.querySelectorAll("input, select, button").forEach(control=>{control.disabled=false;});
+      }
+      if(!result?.saved||result.verified!==true){
+        status(`${result?.indeterminate?"Could not verify":"Could not save"} water quality check. ${result?.error||"Backend persistence was not confirmed."} Your entered values are kept.`,true);
         return false;
       }
+      drafts.delete(draftKey);
+      // Presentation errors cannot relabel a verified commit as a failed save.
+      try{checks=readChecks();renderRows();renderWaterQualityCalendarEvents();}
+      catch(error){status(`Check saved and verified in the shared workspace. Reload to refresh the display: ${error.message}`,true);return true;}
+      status(`Check ${id?"updated":"saved"} and verified in the shared workspace.${local.warning?" "+local.warning:""}`);
+      return true;
     }
     [form, editor].forEach(source => source.elements.initials.addEventListener("input", () => source.elements.initials.setCustomValidity("")));
-    form.addEventListener("submit", event => {
+    form.addEventListener("submit", async event => {
       event.preventDefault();
-      if (!save(form)) return;
+      if (!await save(form)) return;
       ["ppm", "softness", "note"].forEach(field => { form.elements[field].value = ""; });
       form.elements.time.value = localTime();
       form.elements.ppm.focus();
     });
-    editor.addEventListener("submit", event => {
+    editor.addEventListener("submit", async event => {
       event.preventDefault();
-      if (save(editor, editingId)) cancelEdit();
+      if (await save(editor, editingId)) cancelEdit();
     });
     modal.querySelector("#waterQualityCancelEdit").addEventListener("click", cancelEdit);
     function close(){
+      if(saving)return;
       cancelEdit();
       modal.classList.remove("is-visible");
       modal.hidden = true;
