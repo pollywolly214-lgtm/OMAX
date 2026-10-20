@@ -13699,6 +13699,16 @@ function getPurchaseOrderApi(){
   return window.purchaseOrderApi;
 }
 
+function bindFinancialPeriodControls(root, rerender){
+  root.querySelectorAll("[data-financial-period]").forEach(control => {
+    control.addEventListener("change", () => {
+      // View preference only: no configuration save, localStorage or mutation marker.
+      window.__cuttingFinancialRange = window.OMAXFinancialReconciliation.period(control.value).key;
+      rerender();
+    });
+  });
+}
+
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -13738,6 +13748,7 @@ function renderCosts(){
     ? model.jobSeries.slice()
     : [];
   content.innerHTML = viewCosts(model);
+  bindFinancialPeriodControls(content, renderCosts);
   window.OMAXCutCostFeedbackUi?.mountCosts(content, model);
   const pendingWeeklyScrollState = (typeof window !== "undefined" && window.__costWeeklyScrollState && typeof window.__costWeeklyScrollState === "object")
     ? { ...window.__costWeeklyScrollState }
@@ -16225,7 +16236,7 @@ const appendEmptyRow = (focusFirst = false)=>{
     const defaultCost = Math.abs(asNumber(draft?.costRate, asNumber(defaults.costRate, asNumber(costInput.value, 0))));
     chargeInput.value = defaultCharge.toFixed(2);
     costInput.value = defaultCost.toFixed(2);
-    let activeRange = "1m";
+    let activeRange = "all";
     let overrideRates = Boolean(draft);
     const rowRates = (row, chargeRate, costRate) => ({
       chargeRate: overrideRates ? chargeRate : asNumber(row?.chargeRateValue, chargeRate),
@@ -16269,7 +16280,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         "6m": "Range: past 6 months from central data table rows.",
         "1y": "Range: past 1 year from central data table rows.",
         ytd: "Range: year to date from central data table rows.",
-        all: "Range: all time from central data table rows."
+        all: "Range: selected financial period; canonical rates unless overridden here."
       };
       if (rangeLabelEl instanceof HTMLElement){
         rangeLabelEl.textContent = labels[activeRange] || labels["1m"];
@@ -16296,35 +16307,7 @@ const appendEmptyRow = (focusFirst = false)=>{
       }, { rows: 0, net: 0, cost: 0 });
       if (totalEl) totalEl.textContent = formatUsd(totals.net);
       if (avgEl) avgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
-      const summaryTotalEl = document.querySelector("[data-efficiency-summary-total]");
-      const summaryAvgEl = document.querySelector("[data-efficiency-summary-average]");
-      const summaryCostEl = document.querySelector("[data-efficiency-summary-cost]");
-      const summaryCostAvgEl = document.querySelector("[data-efficiency-summary-cost-average]");
-      if (summaryTotalEl) summaryTotalEl.textContent = formatUsd(totals.net);
-      if (summaryAvgEl) summaryAvgEl.textContent = formatUsd(totals.rows ? (totals.net / totals.rows) : 0);
-      if (summaryCostEl) summaryCostEl.textContent = formatUsd(totals.cost);
-      if (summaryCostAvgEl) summaryCostAvgEl.textContent = formatUsd(totals.rows ? (totals.cost / totals.rows) : 0);
-      const tableRows = Array.from(document.querySelectorAll("[data-efficiency-row]"));
-      tableRows.forEach(tr => {
-        const rowId = String(tr.getAttribute("data-efficiency-id") || "");
-        const rowObj = rows.find(row => String(row?.id || "") === rowId) || null;
-        const show = rowObj ? withinRange(rowObj, activeRange) : false;
-        tr.hidden = !show;
-        if (!show) return;
-        const hours = Math.max(0, asNumber(tr.getAttribute("data-efficiency-hours"), asNumber(rowObj?.hoursValue, 0)));
-        const material = Math.max(0, asNumber(tr.getAttribute("data-efficiency-material"), asNumber(rowObj?.materialValue ?? rowObj?.materialCostValue, 0)));
-        const rates = rowRates(rowObj, chargeRate, costRate);
-        const profit = computeCuttingJobProfit({estimateHours:hours, ...rates, materialCost:material, materialQty:1, failurePercent:rowObj?.failurePercentValue});
-        const labor = profit.cuttingCost;
-        const totalCost = labor + profit.materialExpense;
-        const net = profit.totalProfit;
-        const laborCell = tr.querySelector("[data-efficiency-labor-cell]");
-        const totalCostCell = tr.querySelector("[data-efficiency-total-cost-cell]");
-        const profitCell = tr.querySelector("[data-efficiency-profit-cell]");
-        if (laborCell) laborCell.textContent = formatUsd(labor);
-        if (totalCostCell) totalCostCell.textContent = formatUsd(totalCost);
-        if (profitCell) profitCell.textContent = formatUsd(net);
-      });
+      // What-if results stay in this calculator; canonical table rows and summaries remain unchanged.
     };
 
     const recalcWithOverride = ()=>{ overrideRates = true; recalc(); };
@@ -16334,7 +16317,7 @@ const appendEmptyRow = (focusFirst = false)=>{
     costInput.addEventListener("blur", ()=>{ normalizeToTwo(costInput, defaultCost); recalcWithOverride(); });
     if (rangeSelect instanceof HTMLSelectElement){
       rangeSelect.addEventListener("change", ()=>{
-        activeRange = String(rangeSelect.value || "1m");
+        activeRange = String(rangeSelect.value || "all");
         updateRangeButtons();
         recalc();
       });
@@ -16345,7 +16328,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         costInput.value = defaultCost.toFixed(2);
         overrideRates = false;
         delete window.__efficiencyCalculatorDraft;
-        activeRange = "1m";
+        activeRange = "all";
         recalc();
         updateRangeButtons();
       });
@@ -17643,6 +17626,9 @@ function buildCalendarMaintenanceHistory({ intervalTasks = [], asReqTasks = [] }
 }
 
 function computeCostModel(){
+  const financialJobSelection = window.OMAXFinancialReconciliation?.selectJobs(completedCuttingJobs, {
+    profit:computeCuttingJobProfit, range:window.__cuttingFinancialRange, today:ymd(new Date())
+  });
   const MAINTENANCE_LABOR_RATE_PER_HOUR = 30;
   const roundMaintenanceCurrency = (value)=> {
     const num = Number(value);
@@ -18470,7 +18456,8 @@ function computeCostModel(){
   let totalGainLoss = 0;
   let completedCount = 0;
 
-  const completedJobsList = Array.isArray(completedCuttingJobs) ? completedCuttingJobs : [];
+  const completedJobsList = financialJobSelection ? financialJobSelection.rows.map(row => row.job)
+    : (Array.isArray(completedCuttingJobs) ? completedCuttingJobs : []);
   if (completedJobsList.length){
     for (const job of completedJobsList){
       if (!job) continue;
@@ -19349,31 +19336,7 @@ function computeCostModel(){
   // These recalculated reports belong to the display model. Rendering must
   // preserve the authoritative weeklyCostReports collection used by saves.
 
-  const summaryCards = [
-    {
-      key: "maintenanceForecast",
-      icon: "🛠️",
-      title: "Maintenance forecast (interval + as-required)",
-      value: formatterCurrency(-predictedAnnual, { decimals: 0, showPlus: true }),
-      hint: maintenanceHint
-    },
-    {
-      key: "cuttingJobs",
-      icon: "✂️",
-      title: "Cutting jobs efficiency",
-      value: formatterCurrency(totalGainLoss, { decimals: 0, showPlus: true }),
-      hint: jobCount
-        ? `Average gain/loss ${formatterCurrency(averageGainLoss, { decimals: 0, showPlus: true })} across ${jobCount} completed job${jobCount===1?"":"s"}.`
-        : "No cutting jobs logged yet."
-    },
-    {
-      key: "combinedImpact",
-      icon: "📊",
-      title: "Combined estimated impact",
-      value: formatterCurrency(totalGainLoss - predictedAnnual, { decimals: 0, showPlus: true }),
-      hint: "Maintenance forecast plus cutting job efficiency impact."
-    }
-  ];
+  const summaryCards = []; // Populated once from reconciled records below.
 
   const jobSummary = {
     countLabel: jobCount ? `${jobCount} completed` : "0",
@@ -19602,12 +19565,8 @@ function computeCostModel(){
         return metrics;
       };
 
-      if (Array.isArray(cuttingJobs)){
-        cuttingJobs.forEach(job => analyzeJob(job, "active"));
-      }
-      if (Array.isArray(completedCuttingJobs)){
-        completedCuttingJobs.forEach(job => analyzeJob(job, "completed"));
-      }
+      // Category financial totals use the same completed-job population as the cards.
+      completedJobsList.forEach(job => analyzeJob(job, "completed"));
 
       const computeStatsForJobs = (list)=>{
         const jobs = Array.isArray(list) ? list : [];
@@ -19812,8 +19771,8 @@ function computeCostModel(){
     : "No usage history yet. Log machine hours to estimate maintenance spend.";
   const jobEmpty = "Add cutting jobs with Hours Taken to build the efficiency tracker.";
 
-  const chartNote = "Maintenance line shows negative loss values (blue), and cutting jobs line shows per-job net gain/loss (green when profitable, negative if jobs become unprofitable). Hover or click any point for details, then click to jump to matching Data Center rows.";
-  const chartInfo = "Maintenance trend is plotted as negative cost impact, while cutting jobs are plotted as each completed job’s net result so profitability changes are visible immediately. Point hover/click reveals context and can jump to linked Data Center rows.";
+  const chartNote = "Series use the financial period; chart controls can narrow it further. Maintenance shows modeled event expense, purchases show recorded spending, and completed jobs show canonical net profit. These overlapping components are not added together. Weekly reports retain their own labeled week.";
+  const chartInfo = "Maintenance event expenses are drawn negative for comparison with job net profit. They may already be included in runtime cost rates. The chart does not establish a combined realized profit or loss.";
 
   const orderSorted = orderHistory.slice().sort((a,b)=>{
     const aTime = new Date(a.resolvedAt || a.createdAt || 0).getTime();
@@ -19854,6 +19813,10 @@ function computeCostModel(){
   };
 
   const completedJobsForDataCenter = window.CuttingJobDateEditing?.historyJobs(completedCuttingJobs) || completedCuttingJobs.slice();
+  const financialRowSelection = window.OMAXFinancialReconciliation?.selectJobs(completedCuttingJobs, {
+    profit:computeCuttingJobProfit, range:window.__cuttingFinancialRange, today:ymd(new Date())
+  });
+  const financialRowJobs = financialRowSelection ? new Set(financialRowSelection.rows.map(row => row.job)) : null;
   const cuttingCategoryNumbers = window.CuttingJobDateEditing?.categoryNumbers(cuttingJobs,completedCuttingJobs) || new Map();
   const cuttingJobsDataTable = completedJobsForDataCenter.map((job, index) => {
     const categoryId = job?.cat != null ? String(job.cat) : "";
@@ -19906,12 +19869,17 @@ function computeCostModel(){
       laborCostValue,
       totalCostValue,
       totalProfitValue,
+      totalProfitLabel: formatterCurrency(totalProfitValue, {decimals:2, showPlus:true}),
+      financialIncluded: financialRowJobs ? financialRowJobs.has(job) : null,
       settingsLink: job?.id != null ? `#/settings?jobId=${encodeURIComponent(String(job.id))}` : ""
     };
   });
 
   const efficiencyRows = cuttingJobsDataTable
     .filter(row => {
+      if (window.OMAXFinancialReconciliation){
+        return row.financialIncluded;
+      }
       const hasDate = typeof row?.completedDateISO === "string" && row.completedDateISO.trim().length > 0;
       const hasTaskName = typeof row?.name === "string" && row.name.trim().length > 0;
       const hasSettingsLink = typeof row?.settingsLink === "string" && /^#\/settings\?jobId=/.test(row.settingsLink);
@@ -19976,24 +19944,6 @@ function computeCostModel(){
     chargeRate: Number.isFinite(defaultChargeRateForCalc) ? defaultChargeRateForCalc : JOB_RATE_PER_HOUR,
     costRate: Number.isFinite(defaultCostRateForCalc) ? defaultCostRateForCalc : JOB_BASE_COST_PER_HOUR
   };
-  const efficiencyDisplayProfit = efficiencyTotals.profit;
-  const efficiencyDisplayAverage = efficiencyCount ? (efficiencyDisplayProfit / efficiencyCount) : 0;
-  const cuttingCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "cuttingJobs") : null;
-  if (cuttingCard){
-    cuttingCard.value = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
-    cuttingCard.hint = efficiencyCount
-      ? `Average net gain ${formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true })} across ${efficiencyCount} completed job${efficiencyCount===1?"":"s"} (source: central data table).`
-      : "No cutting jobs logged yet.";
-    cuttingCard.tooltip = `Source: central data table completed rows. ${efficiencyMathDetails}`;
-  }
-  const combinedCard = Array.isArray(summaryCards) ? summaryCards.find(card => card && card.key === "combinedImpact") : null;
-  if (combinedCard){
-    combinedCard.value = formatterCurrency(efficiencyDisplayProfit - predictedAnnual, { decimals: 0, showPlus: true });
-  }
-  jobSummary.countLabel = efficiencyCount ? `${efficiencyCount} completed` : "0";
-  jobSummary.totalLabel = formatterCurrency(efficiencyDisplayProfit, { decimals: 0, showPlus: true });
-  jobSummary.averageLabel = formatterCurrency(efficiencyDisplayAverage, { decimals: 0, showPlus: true });
-
   const taskById = new Map();
   [Array.isArray(intervalTasksAll) ? intervalTasksAll : [], Array.isArray(asReqTasksAll) ? asReqTasksAll : []].forEach(list => {
     list.forEach(task => {
@@ -20227,8 +20177,8 @@ function computeCostModel(){
   const annualActualFromCentral = recentYearRows.reduce((sum, row) => sum + row.totalCost, 0);
   const ytdRows = centralMaintenanceRows.filter(row => row.occurredAt >= yearStart && row.occurredAt <= today);
   const ytdActual = ytdRows.reduce((sum, row) => sum + row.totalCost, 0);
-  const elapsedDays = Math.max(1, Math.floor((today.getTime() - yearStart.getTime()) / JOB_DAY_MS) + 1);
-  const totalYearDays = Math.max(1, Math.floor((nextYearStart.getTime() - yearStart.getTime()) / JOB_DAY_MS));
+  const elapsedDays = Math.max(1, daysBetweenUTC(yearStart, today) + 1);
+  const totalYearDays = Math.max(1, daysBetweenUTC(yearStart, nextYearStart));
   const daysRemaining = Math.max(0, totalYearDays - elapsedDays);
   const projectionMethodOptions = [
     { key: "annualized_average", label: "Annualized average" },
@@ -20287,7 +20237,7 @@ function computeCostModel(){
   const projectionWindowRows = centralMaintenanceRows.filter(isInProjectionWindow);
   const projectionWindowTotal = projectionWindowRows.reduce((sum, row) => sum + row.totalCost, 0);
   const projectionWindowDays = projectionWindowStart
-    ? Math.max(1, Math.floor((projectionWindowEnd.getTime() - projectionWindowStart.getTime()) / JOB_DAY_MS) + 1)
+    ? Math.max(1, daysBetweenUTC(projectionWindowStart, projectionWindowEnd) + 1)
     : 1;
   const projectionDailyAverage = projectionWindowDays > 0 ? projectionWindowTotal / projectionWindowDays : 0;
   const annualForecastFromCentral = projectionMethod === "run_rate"
@@ -20509,15 +20459,6 @@ function computeCostModel(){
       detail: `Completed maintenance task ${row.taskName || "task"} recorded on ${formatDateLabelShort(row.occurredAt)} from the central data table.`
     }));
 
-  if (Array.isArray(summaryCards) && summaryCards.length){
-    summaryCards[0].value = formatterCurrency(-annualForecastFromCentral, { decimals: 0, showPlus: true });
-    summaryCards[0].hint = `Projected ${currentYear} total: ${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })}. Actual YTD: ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })}. Remaining-year projection: ${formatterCurrency(remainderProjection, { decimals: remainderProjection < 1000 ? 2 : 0 })}.`;
-    const combinedCard = summaryCards.find(card => card && card.key === "combinedImpact");
-    if (combinedCard){
-      combinedCard.value = formatterCurrency(totalGainLoss - annualForecastFromCentral, { decimals: 0, showPlus: true });
-      combinedCard.hint = "Maintenance forecast (central table) plus cutting job efficiency impact.";
-    }
-  }
   const maintenanceDataTable = centralMaintenanceRows.map((row, idx) => ({
     id: `${row.taskId}_${row.dateISO}_${idx}`,
     taskId: row.taskId,
@@ -20706,8 +20647,16 @@ function computeCostModel(){
       };
     });
   maintenanceSeries = maintenanceSeriesFromDataTable;
-  const maintenanceAverageValue = maintenanceSeries.length
-    ? (maintenanceSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / maintenanceSeries.length)
+  const financialPeriod = financialJobSelection?.window;
+  const inFinancialPeriod = point => {
+    if (!financialPeriod) return true;
+    const date = window.OMAXFinancialReconciliation.dateKey(point.dateISO || (point.date instanceof Date ? ymd(point.date) : ""));
+    return date && date <= financialPeriod.endISO && (!financialPeriod.startISO || date >= financialPeriod.startISO);
+  };
+  const selectedMaintenanceSeries = maintenanceSeriesFromDataTable.filter(inFinancialPeriod);
+  const selectedSpendSeries = totalSpendSeries.filter(inFinancialPeriod);
+  const maintenanceAverageValue = selectedMaintenanceSeries.length
+    ? (selectedMaintenanceSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / selectedMaintenanceSeries.length)
     : 0;
   const cuttingAverageValue = jobSeries.length
     ? (jobSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / jobSeries.length)
@@ -20718,11 +20667,39 @@ function computeCostModel(){
   }, 0);
   const cutCostFeedback = window.OMAXCutCostFeedback?.calculate({state:window,rows:maintenanceDataTableRows,config:window.appConfig?.cutCostFeedback,today:ymd(new Date())});
   const maintenanceCostPerCutValue = cutCostFeedback?.maintenanceCostPerHour ?? null;
-  const totalSpendAll = totalSpendSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
+  const totalSpendAll = selectedSpendSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
   const totalSpendPerCutValue = totalCutHoursAll > 0 ? (totalSpendAll / totalCutHoursAll) : 0;
+
+  // Read the loaded source records, not formatted Data Center cells. No writes or saved reports.
+  const financialReconciliation = window.OMAXFinancialReconciliation.build({
+    completedJobs: completedCuttingJobs, profit: computeCuttingJobProfit,
+    range: window.__cuttingFinancialRange, today: ymd(new Date()),
+    maintenanceRows: maintenanceDataTableRows, purchaseWeeks: window.receiptTrackerWeeks || [],
+    purchaseFinancials: getPurchaseFinancials,
+    forecast: { annual: annualForecastFromCentral, remaining: remainderProjection, year: currentYear,
+      method: projectionMethod, sourceWindow: projectionWindowConfig.label }
+  });
+  const financialMoney = value => value == null ? "Unavailable" : formatterCurrency(value, {decimals:2, showPlus:true});
+  const financialWindow = financialReconciliation.window.description;
+  summaryCards.splice(0, summaryCards.length,
+    {key:"cuttingJobs",icon:"✂",title:"Cutting Job Net Profit",value:financialMoney(financialReconciliation.totals.net),
+      hint:`${financialReconciliation.totals.count} completed jobs · ${financialWindow}. Modeled using canonical job rates; see Financial Breakdown.`},
+    {key:"recordedPurchases",icon:"$",title:"Recorded purchases",value:financialMoney(financialReconciliation.purchases.total),
+      hint:`${financialWindow}. Purchase History spending; not all purchases are maintenance or verified payments. Shown separately.`},
+    {key:"maintenanceExpenses",icon:"⚙",title:"Maintenance event costs",value:financialMoney(financialReconciliation.maintenance.knownSubtotal),
+      hint:`${financialWindow}. Known subtotal with modeled labor; estimated/defaulted and incomplete events are identified below. Not subtracted again.`},
+    {key:"maintenanceForecast",icon:"↗",title:`Projected maintenance (${currentYear})`,value:financialMoney(annualForecastFromCentral),
+      hint:`Annual estimate, not historical loss. Source: ${projectionWindowConfig.label}. Remaining-year estimate ${financialMoney(remainderProjection)}.`},
+    {key:"combinedImpact",icon:"Σ",title:"Net Waterjet Financial Impact",value:"Unavailable",
+      hint:financialReconciliation.coverageReason}
+  );
+  jobSummary.countLabel = `${financialReconciliation.totals.count} completed · ${financialWindow}`;
+  jobSummary.totalLabel = financialMoney(financialReconciliation.totals.net);
+  jobSummary.averageLabel = financialMoney(financialReconciliation.totals.average);
 
   return {
     summaryCards,
+    financialReconciliation,
     timeframeRows: timeframeRowsCentral,
     timeframeDetails: timeframeDetailsCentral,
     forecastBreakdown: forecastBreakdownCentral,
@@ -20752,8 +20729,8 @@ function computeCostModel(){
     cuttingJobsDataTable,
     efficiencySnapshot,
     chartColors: COST_CHART_COLORS,
-    maintenanceSeries: maintenanceSeriesFromDataTable,
-    totalSpendSeries,
+    maintenanceSeries: selectedMaintenanceSeries,
+    totalSpendSeries: selectedSpendSeries,
     jobSeries,
     weeklyReports
   };
@@ -21438,6 +21415,7 @@ function renderJobs(){
 
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
+  bindFinancialPeriodControls(content, renderJobs);
   window.OMAXCutCostFeedbackUi?.mountJob(content, "jobCostRate");
   wireCuttingJobNetBreakdowns(content);
   setupJobLayout();
@@ -24262,7 +24240,8 @@ function renderJobs(){
     }
   });
 
-  const historyBody = content.querySelector(".past-jobs-table tbody");
+  // Delegate to both the reconciled history and the separate review table.
+  const historyBody = content.querySelector("#pastJobs");
 
   historyBody?.addEventListener("change", (e)=>{
     const previewSelect = e.target instanceof Element

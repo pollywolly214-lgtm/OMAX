@@ -71,20 +71,20 @@ test("priority and required-duration summaries use Hours Taken instead of legacy
   assert.equal(c.computePrioritySchedule([first,second]).backlog.get("second"),2.8);
   assert.equal(c.computeRequiredDaily(first).jobRemainingHours,2.8);
 });
-test("temporary cost calculator uses the same profit including material expense",()=>{
+test("temporary calculator uses canonical profit without changing canonical table cells",()=>{
   for(const costRate of [-45,45]){
     const{c}=harness();costRows(c,[{...job(costRate),completedAtISO:"2026-10-02"}]);
     class Element{} class Input extends Element{constructor(value){super();this.value=String(value);}} class Select extends Element{}
-    const total={textContent:""},avg={textContent:""},profitCell={textContent:""};
+    const total={textContent:""},avg={textContent:""},profitCell={textContent:"canonical value"};
     Object.assign(c,{HTMLElement:Element,HTMLInputElement:Input,HTMLSelectElement:Select,chargeInput:new Input(200),costInput:new Input(costRate),
       rows:c.financialRows,defaults:{chargeRate:200,costRate:45},rangeSelect:null,rangeLabelEl:null,totalEl:total,avgEl:avg,
       document:{querySelector:()=>null,querySelectorAll:()=>[{getAttribute:name=>name==="data-efficiency-id"?"job":name==="data-efficiency-hours"?"2.8":"10",querySelector:selector=>selector==="[data-efficiency-profit-cell]"?profitCell:null}]}});
     vm.runInContext(section(renderers.slice(renderers.indexOf("  function setupEfficiencyCalculator(")),"    const formatUsd =","    const recalcWithOverride =")+
       ';activeRange="all";recalc();',c);
-    assert.equal(total.textContent,"$424.00");assert.equal(avg.textContent,"$424.00");assert.equal(profitCell.textContent,"$424.00");
-    c.rows[0].failurePercentValue=50;vm.runInContext("recalc();",c);assert.equal(total.textContent,"$144.00");assert.equal(profitCell.textContent,"$144.00");c.rows[0].failurePercentValue=0;
+    assert.equal(total.textContent,"$424.00");assert.equal(avg.textContent,"$424.00");assert.equal(profitCell.textContent,"canonical value");
+    c.rows[0].failurePercentValue=50;vm.runInContext("recalc();",c);assert.equal(total.textContent,"$144.00");assert.equal(profitCell.textContent,"canonical value");c.rows[0].failurePercentValue=0;
     c.rows.push({...c.rows[0],id:"second",hoursValue:1,chargeRateValue:300,costRateValue:75});
-    vm.runInContext("recalc();",c);assert.equal(total.textContent,"$639.00");assert.equal(profitCell.textContent,"$424.00");
+    vm.runInContext("recalc();",c);assert.equal(total.textContent,"$639.00");assert.equal(profitCell.textContent,"canonical value");
     vm.runInContext('overrideRates=true;costInput.value="-45";recalc();',c);assert.equal(total.textContent,"$569.00");
   }
 });

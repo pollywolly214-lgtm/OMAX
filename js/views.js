@@ -1342,6 +1342,58 @@ function ensureTaskCategories(){
 
 
 
+function renderFinancialPeriodControl(windowRange, id){
+  const api = window.OMAXFinancialReconciliation;
+  const selected = windowRange || api.period(window.__cuttingFinancialRange);
+  return `<div class="financial-period"><label for="${id}">Financial period</label>
+    <select id="${id}" data-financial-period>${api.ranges.map(option=>`<option value="${option.key}" ${selected.key===option.key?"selected":""}>${option.label}</option>`).join("")}</select>
+    <span>${selected.description}</span></div>`;
+}
+
+function renderFinancialBreakdown(report){
+  const esc = value => String(value ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const money = value => Number.isFinite(value) ? new Intl.NumberFormat(undefined,{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(value) : "Unavailable";
+  const t = report.totals, m = report.maintenance, p = report.purchases;
+  const metric = (label,value) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`;
+  const jobName = row => `${esc(row.name)} <span class="muted">(${esc(row.id ?? "ID missing")})</span>`;
+  return `<details class="financial-breakdown" data-financial-breakdown>
+    <summary>Financial Breakdown <span>${t.count} completed jobs · ${esc(report.window.description)}</span></summary>
+    <p>Live calculation from loaded completed-job records. Net Total uses the same canonical calculation as Cutting Jobs. Amounts are modeled from job inputs, not verified invoice receipts.</p>
+    ${window.__cuttingJobDisplayUnconfirmed ? '<p role="alert">The latest job save is unverified; these loaded values may include pending edits.</p>' : ""}
+    <dl class="financial-metrics">
+      ${metric("Completed jobs included",t.count)}${metric("Positive / negative / zero",`${t.positive} / ${t.negative} / ${t.zero}`)}
+      ${metric("Gross cutting-job revenue",money(t.grossRevenue))}${metric("Failed-cut revenue adjustment",money(t.failureReduction == null ? null : -t.failureReduction))}
+      ${metric("Adjusted cutting-job revenue",money(t.revenue))}${metric("Runtime expense",money(t.runtimeExpense == null ? null : -t.runtimeExpense))}
+      ${metric("Material expense",money(t.materialExpense == null ? null : -t.materialExpense))}${metric("Canonical Cutting Job Net Profit",money(t.net))}
+      ${metric("Average Net Profit / completed job",money(t.average))}
+    </dl>
+    <p class="small">Net profit = Hours Taken × charge rate × (1 − failed-cut % / 100) − runtime expense − material unit cost × quantity. Legitimate separate cuts remain separate, including matching names, projects and dates.</p>
+    <details><summary>Included completed jobs (${t.count})</summary><div class="financial-table-scroll"><table class="cost-table">
+      <thead><tr><th>Job / ID</th><th>Completion date</th><th>Hours Taken</th><th>Gross revenue</th><th>Failed-cut adjustment</th><th>Runtime expense</th><th>Material expense</th><th>Net Total</th></tr></thead>
+      <tbody>${report.rows.map(row=>`<tr data-financial-job-id="${esc(row.id ?? "")}"><td>${jobName(row)}</td><td>${esc(row.completionDate)}</td><td>${esc(row.profit.hours)}</td><td>${money(row.profit.revenue)}</td><td>${money(-row.profit.revenueLost)}</td><td>${money(-row.profit.cuttingCost)}</td><td>${money(-row.profit.materialExpense)}</td><td>${money(row.profit.totalProfit)}</td></tr>`).join("") || '<tr><td colspan="8">No completed jobs in this period.</td></tr>'}</tbody></table></div></details>
+    <h4>Largest negative job contributors</h4>
+    ${report.largestLosses.length ? `<ul>${report.largestLosses.map(row=>`<li>${jobName(row)} · ${esc(row.completionDate)} · <strong>${money(row.profit.totalProfit)}</strong></li>`).join("")}</ul>` : '<p>No negative-profit jobs in this period.</p>'}
+    <h4>Missing or defaulted financial fields</h4>
+    ${report.warnings.length ? `<ul>${report.warnings.map(issue=>`<li>${issue.count} job(s): ${esc(issue.message)}</li>`).join("")}</ul><details><summary>Jobs with financial warnings</summary><ul>${report.rows.filter(row=>row.issues.length).map(row=>`<li>${jobName(row)}: ${row.issues.map(issue=>esc(issue.message)).join(" ")}</li>`).join("")}</ul></details>` : '<p>No missing/defaulted inputs detected.</p>'}
+    <p class="small">Canonical defaults are preserved for reconciliation and disclosed above. Missing failed-cut information is unknown even when the calculation uses 0%. No source records are edited.</p>
+    <h4>Expenses and projections — shown separately</h4>
+    <dl class="financial-metrics">
+      ${metric("Recorded purchases (all purchased items)",money(p.total))}${metric("Purchase rows included / incomplete",`${p.count} / ${p.incomplete}`)}
+      ${metric("Maintenance event costs with recorded inputs",money(m.recordedInputs))}${metric("Maintenance event costs with estimated/default inputs",money(m.estimated))}
+      ${metric("Modeled maintenance labor within event subtotals",money(m.modeledLabor))}${metric("Incomplete maintenance events (excluded from subtotals)",m.incomplete)}
+      ${metric(`Annual maintenance forecast (${report.forecast.year})`,money(report.forecast.annual))}${metric("Remaining-year maintenance estimate",money(report.forecast.remaining))}
+    </dl>
+    <p class="small">Purchases and maintenance event subtotals use ${esc(report.window.description)}. Purchase History totals are recorded spending, not proof of payment or maintenance-only expense; ${p.invalidDates} purchase row(s) have invalid/missing dates. Maintenance event costs include modeled labor at $30/hr; recorded inputs do not establish actual cash paid. Incomplete events have no complete expense total. Forecast source: ${esc(report.forecast.sourceWindow)}; ${esc(report.forecast.method)}. Forecasts describe the current year, separately from the selected historical period.</p>
+    <p><strong>Net Waterjet Financial Impact: Unavailable.</strong> ${esc(report.coverageReason)} No maintenance, purchase subtotal or annual forecast is subtracted again from canonical job profit. Unused machine capacity is not an expense in this report.</p>
+    <details><summary>Excluded jobs and changes from the previous all-time card</summary>
+      <p>Previous card eligibility applied to these same loaded records: ${report.previousAllTime.count} jobs, ${money(report.previousAllTime.net)}. Current selection: ${t.count} jobs, ${money(t.net)}. Differences below identify period, date or settings-link eligibility changes; this is not a reproduction of an earlier production screenshot.</p>
+      <div class="financial-table-scroll"><table class="cost-table"><thead><tr><th>Job / ID</th><th>Completion date supplied</th><th>Canonical net</th><th>Population change</th></tr></thead><tbody>
+      ${report.populationChanges.map(row=>`<tr><td>${jobName(row)}</td><td>${esc(row.job.completedAtISO || "Missing")}</td><td>${money(row.profit.totalProfit)}</td><td>${esc(row.change)}</td></tr>`).join("") || '<tr><td colspan="4">No changes to the previous card population.</td></tr>'}</tbody></table></div>
+      <p>${report.excluded.length} total excluded row(s).</p><ul>${report.excluded.map(row=>`<li>${jobName(row)}: ${esc(row.reason)}</li>`).join("")}</ul>
+    </details>
+  </details>`;
+}
+
 function viewCosts(model){
   const data = model || {};
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -1402,7 +1454,7 @@ function viewCosts(model){
     const [id, label] = entry.split("|||");
     return { id, label };
   }).sort((a, b) => a.label.localeCompare(b.label));
-  const overviewInsight = data.overviewInsight || "Totals blend the latest maintenance allocations, consumable burn rates, downtime burdens, and job margin data so you always see current cost exposure.";
+  const overviewInsight = data.overviewInsight || "Completed-job Net Profit uses the selected financial period and canonical job inputs. Recorded purchases, modeled maintenance event costs and annual forecasts are shown separately; expense overlap prevents a reliable combined total.";
   const ordersInsight = data.ordersInsight || "Tracks every waterjet part request from submission through approval so finance can confirm spend and spot stalled orders.";
   const timeframeInsight = data.timeframeInsight || "Usage windows combine logged machine hours with interval pricing to estimate what each upcoming maintenance window will cost.";
   const historyInsight = data.historyInsight || "Shows the latest completed maintenance, combining hours logged and reconciled spend to highlight cost spikes.";
@@ -1536,31 +1588,31 @@ function viewCosts(model){
   const summaryRowsByView = {
     general: [
       { label: "Jobs", value: formatCountValue(selectedCategoryStats.jobCount) },
-      { label: "Total cost", value: formatCurrencyValue(selectedCategoryStats.totalCost) },
-      { label: "Avg cost", value: formatCurrencyValue(selectedCategoryStats.averageCost) },
+      { label: "Total net profit", value: formatCurrencyValue(selectedCategoryStats.totalCost) },
+      { label: "Avg net profit", value: formatCurrencyValue(selectedCategoryStats.averageCost) },
       { label: "Total duration", value: formatHoursValue(selectedCategoryStats.totalDurationHours) },
       { label: "Avg duration", value: formatHoursValue(selectedCategoryStats.averageDurationHours) },
       { label: "Throughput", value: formatThroughputValue(selectedCategoryStats.throughputPerHour) },
-      { label: "Cost range", value: (selectedCategoryStats.minCost != null && selectedCategoryStats.maxCost != null)
+      { label: "Net profit range", value: (selectedCategoryStats.minCost != null && selectedCategoryStats.maxCost != null)
           ? `${formatCurrencyValue(selectedCategoryStats.minCost)} – ${formatCurrencyValue(selectedCategoryStats.maxCost)}`
           : "—" },
-      { label: "Median cost", value: selectedCategoryStats.percentile50 != null
+      { label: "Median net profit", value: selectedCategoryStats.percentile50 != null
           ? formatCurrencyValue(selectedCategoryStats.percentile50)
           : "—" },
-      { label: "P90 cost", value: selectedCategoryStats.percentile90 != null
+      { label: "P90 net profit", value: selectedCategoryStats.percentile90 != null
           ? formatCurrencyValue(selectedCategoryStats.percentile90)
           : "—" }
     ],
     totals: [
       { label: "Material", value: formatCurrencyValue(selectedCategoryStats.totalMaterialCost) },
-      { label: "Labor", value: formatCurrencyValue(selectedCategoryStats.totalLaborCost) },
+      { label: "Runtime expense", value: formatCurrencyValue(selectedCategoryStats.totalLaborCost) },
       { label: "Machine", value: formatCurrencyValue(selectedCategoryStats.totalMachineCost) },
       { label: "Overhead", value: formatCurrencyValue(selectedCategoryStats.totalOverheadCost) },
-      { label: "All-in total", value: formatCurrencyValue(selectedCategoryStats.totalCost) }
+      { label: "Canonical net profit", value: formatCurrencyValue(selectedCategoryStats.totalCost) }
     ],
     averages: [
       { label: "Material", value: formatCurrencyValue(selectedCategoryStats.averageMaterialCost) },
-      { label: "Labor", value: formatCurrencyValue(selectedCategoryStats.averageLaborCost) },
+      { label: "Runtime expense", value: formatCurrencyValue(selectedCategoryStats.averageLaborCost) },
       { label: "Machine", value: formatCurrencyValue(selectedCategoryStats.averageMachineCost) },
       { label: "Overhead", value: formatCurrencyValue(selectedCategoryStats.averageOverheadCost) },
       { label: "Per-job total", value: formatCurrencyValue(selectedCategoryStats.averageCost) }
@@ -1675,7 +1727,7 @@ function viewCosts(model){
         <div class="cost-category-overview">
           <h4 class="cost-category-subheading">Category overview</h4>
           <table class="cost-table cost-category-overview-table">
-            <thead><tr><th scope="col">Category</th><th scope="col">Jobs</th><th scope="col">Total cost</th><th scope="col">Avg cost</th><th scope="col">Avg duration</th></tr></thead>
+            <thead><tr><th scope="col">Category</th><th scope="col">Jobs</th><th scope="col">Net profit</th><th scope="col">Avg net profit</th><th scope="col">Avg duration</th></tr></thead>
             ${categoryOverviewRows}
           </table>
         </div>
@@ -2098,9 +2150,11 @@ function viewCosts(model){
       <div class="dashboard-window" data-cost-window="overview">
         <div class="block cost-overview-block">
           <h3>Cost Overview</h3>
+          ${data.financialReconciliation ? renderFinancialPeriodControl(data.financialReconciliation.window,"costFinancialPeriod") : ""}
           <div class="cost-summary-grid">
             ${summaryCardsHTML}
           </div>
+          ${data.financialReconciliation ? renderFinancialBreakdown(data.financialReconciliation) : ""}
           <div class="cost-window-insight">
             <div class="chart-info">
               <button type="button" class="chart-info-button" aria-describedby="costOverviewInsight" aria-label="Explain Cost Overview metrics">
@@ -2556,6 +2610,7 @@ function viewCosts(model){
       <div class="dashboard-window" data-cost-window="jobCategories">
         <div class="block" data-cost-job-categories>
           <h3>Job Categories</h3>
+          ${data.financialReconciliation ? `<p class="small muted">Completed jobs · ${esc(data.financialReconciliation.window.description)}</p>` : ""}
           <div class="cost-category-controls">
             <label class="cost-category-select-label">
               <span class="cost-category-select-label-text">Focus category</span>
@@ -2699,10 +2754,10 @@ function viewCosts(model){
             <button type="button" class="btn secondary" data-efficiency-calc-reset>Reset</button>
             <button type="button" class="btn secondary" data-go-jobs-history>Go to cutting jobs</button>
           </div>
-          <p class="small muted" data-efficiency-calc-range-label>Range: past 1 month from central data table rows.</p>
-          <p class="small muted">Temporary calculator only. Refresh resets values to central data table defaults.</p>
+          <p class="small muted" data-efficiency-calc-range-label>Range: selected financial period.</p>
+          <p class="small muted">Temporary what-if calculator within the selected financial period. Overrides do not change canonical job totals or table rows.</p>
           <p class="small muted" data-efficiency-calc-result>
-            Net total gain (calculator): <strong data-efficiency-calc-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</strong>
+            What-if net profit (calculator only): <strong data-efficiency-calc-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</strong>
             · Avg / row: <strong data-efficiency-calc-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</strong>
           </p>
         </div>
@@ -3665,7 +3720,14 @@ function viewJobs(){
     return historyAllowedCategories.has(normalized);
   });
 
-  const completedFiltered = completedForCategory.filter(matchesHistorySearch);
+  const completedCandidates = completedForCategory.filter(matchesHistorySearch);
+  const completedFinancial = window.OMAXFinancialReconciliation?.selectJobs(completedCandidates, {
+    profit:computeCuttingJobProfit, range:window.__cuttingFinancialRange
+  });
+  const completedFiltered = completedFinancial ? completedFinancial.rows.map(row=>row.job) : completedCandidates;
+  // Keep problem records accessible to the existing editor, outside financial totals.
+  const unreconciledCompleted = completedFinancial ? completedFinancial.excluded
+    .filter(row=>row.reason !== "Outside selected period").map(row=>row.job) : [];
   const totalCompletedJobs = Array.isArray(completedSorted) ? completedSorted.length : 0;
   const hiddenCompletedByCategory = Math.max(0, totalCompletedJobs - completedForCategory.length);
   const completedStats = completedFiltered.reduce((acc, job)=>{
@@ -3699,6 +3761,7 @@ function viewJobs(){
     netRate: 0
   });
   const completedCount = completedFiltered.length;
+  if (typeof completedFinancial !== "undefined" && completedFinancial) completedStats.total = completedFinancial.totals.net;
   const completedAverage = completedCount ? (completedStats.total / completedCount) : 0;
   const completedAverageMetrics = completedCount ? {
     estimate: completedStats.estimate / completedCount,
@@ -3861,7 +3924,7 @@ function viewJobs(){
     return `<span class="small muted">Status: ${esc(status)}</span>`;
   };
 
-  const completedRows = completedFiltered.map(job => {
+  const completedRows = completedFiltered.concat(unreconciledCompleted).map(job => {
     const eff = computeJobEfficiency(job);
     const netTotal = computeJobNetTotal(job);
     const estHours = Number(job.estimateHours);
@@ -4101,7 +4164,9 @@ function viewJobs(){
         </td>
       </tr>
     `;
-  }).join("");
+  });
+  const reconciledRows = completedRows.slice(0,completedFiltered.length).join("");
+  const unreconciledRows = completedRows.slice(completedFiltered.length).join("");
   const historySearchActive = historyQuery.length > 0;
   const totalCompletedCount = completedForCategory.length;
   const historyEmptyMessage = historySearchActive
@@ -4131,7 +4196,7 @@ function viewJobs(){
             <td><strong>${netRateDisplay}</strong></td>
             ${emptyCell}
             ${emptyCell}
-            <td><strong>${netTotalDisplay}</strong></td>
+            <td><strong>${completedStats.total == null ? "Unavailable" : netTotalDisplay}</strong></td>
             ${emptyCell}
             ${emptyCell}
           </tr>
@@ -4143,8 +4208,8 @@ function viewJobs(){
       <div class="past-jobs-summary-wrap">
         <div class="past-jobs-summary">
           <div><span class="label">Jobs logged</span><span>${completedFiltered.length}</span></div>
-          <div><span class="label">Total impact</span><span>${formatCurrency(completedStats.total)}</span></div>
-          <div><span class="label">Avg per job</span><span>${formatCurrency(completedAverage)}</span></div>
+          <div><span class="label">Net Profit</span><span>${completedStats.total == null ? "Unavailable" : formatCurrency(completedStats.total)}</span></div>
+          <div><span class="label">Avg per job</span><span>${completedStats.total == null ? "Unavailable" : formatCurrency(completedAverage)}</span></div>
         </div>
       </div>
       <table class="past-jobs-table job-table">
@@ -4166,7 +4231,7 @@ function viewJobs(){
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody>${completedAverageRow}${completedRows}</tbody>
+        <tbody>${completedAverageRow}${reconciledRows}</tbody>
       </table>
     `
     : `<p class="small muted">${historyEmptyMessage}</p>`;
@@ -4861,6 +4926,8 @@ function viewJobs(){
     <div class="block past-jobs-block job-main-block" id="pastJobs">
       <p data-cutting-job-verification-notice role="alert" class="small" style="padding:10px;border:1px solid #b45309;background:#fff7ed;color:#7c2d12" ${window.__cuttingJobDisplayUnconfirmed ? "" : "hidden"}>Unverified cutting-job display: values below may be previously loaded data or unsaved edits. The latest save has not been verified; do not treat the information below as confirmed.</p>
       <h3>Past Cutting Jobs</h3>
+      ${completedFinancial ? renderFinancialPeriodControl(completedFinancial.window,"jobsFinancialPeriod") : ""}
+      ${completedFinancial ? '<p class="small muted">Shared financial period with Cost Analysis. Category and search filters also apply here; select All Jobs and clear search to compare totals.</p>' : ""}
       <div class="past-jobs-toolbar">
         <div class="past-jobs-category">
           <label class="sr-only" for="jobHistoryCategoryFilter">Viewing past jobs category</label>
@@ -4885,6 +4952,9 @@ function viewJobs(){
       ${historyCategoryNotice}
       ${historyFilterStatus}
       ${completedTable}
+      ${unreconciledCompleted.length ? `<details class="financial-breakdown"${unreconciledCompleted.some(job=>editingCompletedJobsSet.has(String(job.id))) ? " open" : ""}><summary>${unreconciledCompleted.length} completed records need review — excluded from financial totals</summary>
+        <p>Missing/invalid or future completion dates, or non-finite financial results. Existing editing actions remain available; no values have been changed.</p>
+        <div class="financial-table-scroll"><table class="past-jobs-table job-table"><thead><tr><th>Job</th><th>Hours Taken</th><th>Material</th><th>Cost / unit</th><th>Quantity</th><th>Material total</th><th>Charge rate</th><th>Cost rate</th><th>Net profit/hr</th><th>Status</th><th>Files</th><th>Net total</th><th>Notes</th><th>Actions</th></tr></thead><tbody>${unreconciledRows}</tbody></table></div></details>` : ""}
     </div>
   </div>
     <div class="cost-receipt-modal" id="orderLinkRepairModal" role="dialog" aria-modal="true" aria-hidden="true" hidden>

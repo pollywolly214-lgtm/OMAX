@@ -304,6 +304,20 @@ body.pump-notes-open,body.pump-baseline-open { overflow:hidden; }
 .chip.gray{ background:#f1f3f6; color:#6b7280; border-color:#e4e7ec; }
 
 .cost-summary-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+.financial-period{ display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:10px 0 14px; }
+.financial-period label{ font-weight:600; }
+.financial-period select{ color:#13294a; background:#fff; border:1px solid #8da8c6; border-radius:6px; padding:6px 10px; }
+.financial-period span{ font-size:12px; color:#334b65; }
+.financial-breakdown{ margin-top:16px; padding:12px; border:1px solid #a9bfd7; border-radius:8px; background:#f5f9ff; color:#13294a; }
+.financial-breakdown summary{ cursor:pointer; font-weight:600; }
+.financial-breakdown summary span{ display:inline-block; margin-left:8px; font-size:12px; font-weight:400; }
+.financial-breakdown details{ margin:12px 0; }
+.financial-breakdown p{ line-height:1.5; }
+.financial-metrics{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin:16px 0; }
+.financial-metrics dt{ font-size:12px; color:#334b65; }
+.financial-metrics dd{ margin:4px 0 0; font-weight:600; font-variant-numeric:tabular-nums; }
+.financial-table-scroll{ overflow:auto; max-height:32rem; margin-top:10px; }
+.financial-breakdown .cost-table{ min-width:700px; }
 .cost-card{
   display:flex;
   gap:12px;
