@@ -6715,3 +6715,26 @@ body.job-category-modal-open{overflow:hidden}
 .water-quality-table-wrap button:disabled { opacity: .6; cursor: default; }
 
 .cal-water-quality { overflow-wrap: anywhere; }
+.projects-page { width: 100%; min-width: 0; max-width: 1440px; margin: 0 auto; padding: 20px; background: #f6f8fb; border-radius: 14px; }
+.projects-page h1 { margin-bottom: 6px; }
+.project-selector { display: grid; gap: 6px; max-width: 560px; font-weight: 600; margin-top: 24px; }
+.project-selector input { width: 100%; min-width: 0; box-sizing: border-box; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; background: #fff; color: #172b43; }
+.project-summary-grid, .project-finance-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 20px 0; }
+.project-finance-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.project-metric { padding: 18px; border: 1px solid #dce3eb; border-radius: 12px; background: #fff; min-width: 0; }
+.project-metric h3 { font-size: .9rem; font-weight: 600; margin: 0 0 12px; color: #42546b; }
+.project-metric strong { display: block; font-size: clamp(1.2rem, 2.2vw, 1.8rem); overflow-wrap: anywhere; }
+.project-metric p { margin-bottom: 0; }
+.project-performance { margin-top: 28px; }
+.project-performance h2 { font-size: 1.2rem; }
+.project-coverage-notice { padding: 14px; border: 1px solid #dfc989; border-radius: 8px; background: #fff9e9; color: #594519; }
+.project-coverage-notice ul { max-height: 150px; overflow: auto; padding-left: 20px; }
+.project-jobs { margin-top: 24px; border: 1px solid #dce3eb; border-radius: 10px; padding: 16px; background: #fff; }
+.project-jobs summary { cursor: pointer; font-weight: 600; }
+.project-table-scroll { overflow-x: auto; margin-top: 14px; }
+.project-jobs table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+.project-jobs th, .project-jobs td { padding: 10px; text-align: left; border-bottom: 1px solid #e5eaf0; }
+.project-jobs th { font-size: .85rem; color: #42546b; }
+.project-jobs button { text-align: left; font: inherit; color: #0959a6; background: transparent; border: 0; padding: 0; text-decoration: underline; cursor: pointer; }
+@media (max-width: 1000px) { .project-finance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 650px) { .projects-page { padding: 12px; } .project-summary-grid, .project-finance-grid { grid-template-columns: 1fr; } }
