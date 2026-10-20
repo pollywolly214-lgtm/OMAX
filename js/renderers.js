@@ -17626,8 +17626,11 @@ function buildCalendarMaintenanceHistory({ intervalTasks = [], asReqTasks = [] }
 }
 
 function computeCostModel(){
+  // Capture one LOCAL financial date for cards, Data Center and report, even if
+  // this render crosses midnight. Do not change the shared ymd/snapshot utilities.
+  const financialAnalysisDate = window.OMAXFinancialReconciliation?.localToday();
   const financialJobSelection = window.OMAXFinancialReconciliation?.selectJobs(completedCuttingJobs, {
-    profit:computeCuttingJobProfit, range:window.__cuttingFinancialRange, today:ymd(new Date())
+    profit:computeCuttingJobProfit, range:window.__cuttingFinancialRange, today:financialAnalysisDate
   });
   const MAINTENANCE_LABOR_RATE_PER_HOUR = 30;
   const roundMaintenanceCurrency = (value)=> {
@@ -18464,6 +18467,7 @@ function computeCostModel(){
       const eff = job.efficiency || (typeof computeJobEfficiency === "function" ? computeJobEfficiency(job) : null);
       const gainLoss = resolveCuttingJobNetTotal(job, eff).total;
       const cutHours = resolveCuttingJobHours(job, eff);
+      const completionDateKey = window.OMAXFinancialReconciliation?.dateKey(job.completedAtISO);
       const deltaHours = eff && Number.isFinite(eff.deltaHours) ? Number(eff.deltaHours) : 0;
       let date = null;
       if (job.completedAtISO){
@@ -18513,7 +18517,7 @@ function computeCostModel(){
           cutHours: Number.isFinite(cutHours) && cutHours > 0 ? cutHours : 0,
           label: job.name || "Job",
           jobId: job.id != null ? String(job.id) : null,
-          dateISO: ymd(date)
+          dateISO: completionDateKey || ymd(date)
         });
       }
 
@@ -19814,7 +19818,7 @@ function computeCostModel(){
 
   const completedJobsForDataCenter = window.CuttingJobDateEditing?.historyJobs(completedCuttingJobs) || completedCuttingJobs.slice();
   const financialRowSelection = window.OMAXFinancialReconciliation?.selectJobs(completedCuttingJobs, {
-    profit:computeCuttingJobProfit, range:window.__cuttingFinancialRange, today:ymd(new Date())
+    profit:computeCuttingJobProfit, range:window.__cuttingFinancialRange, today:financialAnalysisDate
   });
   const financialRowJobs = financialRowSelection ? new Set(financialRowSelection.rows.map(row => row.job)) : null;
   const cuttingCategoryNumbers = window.CuttingJobDateEditing?.categoryNumbers(cuttingJobs,completedCuttingJobs) || new Map();
@@ -20655,25 +20659,26 @@ function computeCostModel(){
   };
   const selectedMaintenanceSeries = maintenanceSeriesFromDataTable.filter(inFinancialPeriod);
   const selectedSpendSeries = totalSpendSeries.filter(inFinancialPeriod);
+  const selectedJobSeries = jobSeries.filter(inFinancialPeriod);
   const maintenanceAverageValue = selectedMaintenanceSeries.length
     ? (selectedMaintenanceSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / selectedMaintenanceSeries.length)
     : 0;
-  const cuttingAverageValue = jobSeries.length
-    ? (jobSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / jobSeries.length)
+  const cuttingAverageValue = selectedJobSeries.length
+    ? (selectedJobSeries.reduce((sum, item) => sum + (Number(item?.value) || 0), 0) / selectedJobSeries.length)
     : 0;
-  const totalCutHoursAll = jobSeries.reduce((sum, item) => {
+  const totalCutHoursInFinancialPeriod = selectedJobSeries.reduce((sum, item) => {
     const hours = Number(item?.cutHours) || 0;
     return sum + (Number.isFinite(hours) && hours > 0 ? hours : 0);
   }, 0);
   const cutCostFeedback = window.OMAXCutCostFeedback?.calculate({state:window,rows:maintenanceDataTableRows,config:window.appConfig?.cutCostFeedback,today:ymd(new Date())});
   const maintenanceCostPerCutValue = cutCostFeedback?.maintenanceCostPerHour ?? null;
-  const totalSpendAll = selectedSpendSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
-  const totalSpendPerCutValue = totalCutHoursAll > 0 ? (totalSpendAll / totalCutHoursAll) : 0;
+  const totalSpendInFinancialPeriod = selectedSpendSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
+  const totalSpendPerCutValue = totalCutHoursInFinancialPeriod > 0 ? (totalSpendInFinancialPeriod / totalCutHoursInFinancialPeriod) : 0;
 
   // Read the loaded source records, not formatted Data Center cells. No writes or saved reports.
   const financialReconciliation = window.OMAXFinancialReconciliation.build({
     completedJobs: completedCuttingJobs, profit: computeCuttingJobProfit,
-    range: window.__cuttingFinancialRange, today: ymd(new Date()),
+    range: window.__cuttingFinancialRange, today: financialAnalysisDate,
     maintenanceRows: maintenanceDataTableRows, purchaseWeeks: window.receiptTrackerWeeks || [],
     purchaseFinancials: getPurchaseFinancials,
     forecast: { annual: annualForecastFromCentral, remaining: remainderProjection, year: currentYear,
@@ -20731,7 +20736,7 @@ function computeCostModel(){
     chartColors: COST_CHART_COLORS,
     maintenanceSeries: selectedMaintenanceSeries,
     totalSpendSeries: selectedSpendSeries,
-    jobSeries,
+    jobSeries: selectedJobSeries,
     weeklyReports
   };
 }

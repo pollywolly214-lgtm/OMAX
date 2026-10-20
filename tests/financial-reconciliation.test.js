@@ -82,7 +82,7 @@ test("frozen source records and protections are unchanged by repeated reports",(
 
 test("current Cost Data Center rows and financial selector use exactly the same canonical job results",()=>{
   const jobs=[...fixture(),base({id:null}),base({id:"bad",completedAtISO:"not-a-date"})];
-  const c=vm.createContext({window:{OMAXFinancialReconciliation:api},completedCuttingJobs:jobs,cuttingJobs:[],computeCuttingJobProfit:profit,
+  const c=vm.createContext({window:{OMAXFinancialReconciliation:api},financialAnalysisDate:"2026-10-20",completedCuttingJobs:jobs,cuttingJobs:[],computeCuttingJobProfit:profit,
     computeJobEfficiency:()=>({}),resolveCategoryName:()=>"Category",formatterCurrency:n=>String(n),formatHoursValue:String,JOB_RATE_PER_HOUR:250,JOB_BASE_COST_PER_HOUR:30,ymd:()=>"2026-10-20"});
   vm.runInContext(section(renderers,"  const resolveCuttingJobHours =","  let maintenanceSeries =")+
     section(renderers,"  const completedJobsForDataCenter =","  const efficiencySnapshot =")+";this.data=cuttingJobsDataTable;this.summary=efficiencyTotals;",c);
@@ -93,7 +93,7 @@ test("current Cost Data Center rows and financial selector use exactly the same 
 test("actual final Cost cards use shared report and withhold combined result; native breakdown safely renders all components",()=>{
   const c=vm.createContext({window:{OMAXFinancialReconciliation:api,receiptTrackerWeeks:[]},completedCuttingJobs:fixture(),computeCuttingJobProfit:profit,
     getPurchaseFinancials:purchases.getPurchaseFinancials,maintenanceDataTableRows:[],annualForecastFromCentral:9000,remainderProjection:2000,currentYear:2026,
-    projectionMethod:"annualized_average",projectionWindowConfig:{label:"YTD"},summaryCards:[],jobSummary:{},ymd:()=>"2026-10-20",formatterCurrency:n=>String(n),renderAverageHoursBanner:()=>""});
+    projectionMethod:"annualized_average",projectionWindowConfig:{label:"YTD"},financialAnalysisDate:"2026-10-20",summaryCards:[],jobSummary:{},ymd:()=>"2026-10-20",formatterCurrency:n=>String(n),renderAverageHoursBanner:()=>""});
   vm.runInContext(section(renderers,"  const financialReconciliation =","  return {\n    summaryCards,")+";this.report=financialReconciliation;",c);
   near(Number(c.summaryCards.find(card=>card.key==="cuttingJobs").value),539);assert.equal(c.summaryCards.find(card=>card.key==="combinedImpact").value,"Unavailable");
   vm.runInContext(section(views,"function renderFinancialPeriodControl(","function cuttingJobFinancialTone("),c);
@@ -123,5 +123,66 @@ test("maintenance forecast uses calendar days across Chicago DST rather than cou
       ";this.result={elapsedDays,daysRemaining,projectionWindowDays,annualForecastFromCentral};",c);
     assert.equal(c.result.elapsedDays,293);assert.equal(c.result.daysRemaining,72);assert.equal(c.result.projectionWindowDays,293);
     near(c.result.annualForecastFromCentral,300/293*365);
+  }finally{if(previous==null)delete process.env.TZ;else process.env.TZ=previous;}
+});
+
+test("previous card comparison matches the original mapper and date/name/settings-link filter",()=>{
+  const jobs=[
+    base(),base({id:"whitespace",name:" \t "}),base({id:"non-text",name:42}),
+    base({id:"blank-name",name:""}),base({id:"missing-name",name:null}),base({id:"zero-name",name:0}),
+    base({id:null}),base({id:""}),base({id:" "}),base({id:0}),
+    base({id:"no-date",completedAtISO:" \t "}),base({id:"invalid-date",completedAtISO:"invalid text"}),
+    base({id:"future",completedAtISO:"2027-01-01"}),
+    base({id:"overflow",estimateHours:1e308,chargeRate:1e308}),
+    // In the legacy reducer, a finite zero net still counts even when revenueLost overflows.
+    base({id:"zero-net",estimateHours:1,chargeRate:1e308,costRate:0,materialCost:0,failurePercent:100})
+  ];
+  const before=JSON.stringify(jobs);
+  // Disable the new API to execute the retained ORIGINAL mapper/filter/reducer.
+  const c=vm.createContext({window:{},completedCuttingJobs:jobs,cuttingJobs:[],computeCuttingJobProfit:profit,computeJobEfficiency:()=>({}),
+    resolveCategoryName:()=>"Category",formatterCurrency:String,formatHoursValue:String,JOB_RATE_PER_HOUR:250,JOB_BASE_COST_PER_HOUR:30});
+  vm.runInContext(section(renderers,"  const resolveCuttingJobHours =","  let maintenanceSeries =")+
+    section(renderers,"  const completedJobsForDataCenter =","  const efficiencySnapshot =")+
+    ";this.legacy={rows:efficiencyRows,net:efficiencyTotals.profit};",c);
+  const current=select(jobs);
+  assert.equal(current.previousAllTime.count,c.legacy.rows.length);near(current.previousAllTime.net,c.legacy.net);
+  assert.ok(!c.legacy.rows.some(row=>row.id==="whitespace"||row.id==="non-text"));
+  for(const id of ["blank-name","missing-name","zero-name",""," ","0","invalid-date","future","overflow","zero-net"])
+    assert.ok(c.legacy.rows.some(row=>row.id===id),id);
+  assert.match(current.populationChanges.find(row=>row.id==="whitespace").change,/nonempty text name/);
+  assert.match(current.populationChanges.find(row=>row.id===null).change,/settings-link/);
+  assert.equal(JSON.stringify(jobs),before);
+});
+
+test("previous card preserves the original descending-date summation order",()=>{
+  const jobs=[base({id:"old",completedAtISO:"2026-01-01",estimateHours:1,chargeRate:1e16,costRate:0,materialCost:0}),
+    base({id:"new",completedAtISO:"2026-10-20",estimateHours:1,chargeRate:0,costRate:1e16,materialCost:0}),
+    base({id:"middle",completedAtISO:"2026-09-01",estimateHours:1,chargeRate:1,costRate:0,materialCost:0})];
+  assert.equal(select(jobs).previousAllTime.net,[-1e16,1,1e16].reduce((sum,value)=>sum+value,0));
+});
+
+test("expense/hour numerator and denominator both use financial-period series, preserving separate cuts",()=>{
+  const c=vm.createContext({window:{OMAXFinancialReconciliation:api},financialJobSelection:{window:api.period("7d","2026-10-20")},
+    maintenanceSeriesFromDataTable:[],maintenanceSeries:[],totalSpendSeries:[{dateISO:"2026-10-20",value:-36},{dateISO:"2025-01-01",value:-10000}],
+    jobSeries:[{dateISO:"2026-10-20",jobId:"one",cutHours:2,value:165},{dateISO:"2026-10-20",jobId:"two",cutHours:2,value:165},
+      {dateISO:"2025-01-01",jobId:"old",cutHours:1000,value:1}],ymd:()=>"2026-10-20"});
+  vm.runInContext(section(renderers,"  const financialPeriod =","  // Read the loaded source records,")+
+    ";this.result={totalCutHoursInFinancialPeriod,totalSpendInFinancialPeriod,totalSpendPerCutValue,selectedJobSeries};",c);
+  assert.equal(c.result.totalCutHoursInFinancialPeriod,4);assert.equal(c.result.totalSpendInFinancialPeriod,36);
+  assert.equal(c.result.totalSpendPerCutValue,9);assert.equal(c.result.selectedJobSeries.length,2);
+});
+
+for(const [timezone,instant,day] of [
+  ["America/Chicago","2026-10-21T04:59:59Z","2026-10-20"],
+  ["America/Chicago","2026-10-21T05:00:00Z","2026-10-21"],
+  ["Pacific/Kiritimati","2026-10-20T10:00:00Z","2026-10-21"]
+]) test(`financial local day at ${instant} in ${timezone}`,()=>{
+  const previous=process.env.TZ;process.env.TZ=timezone;
+  try{
+    class FixedDate extends Date{constructor(...args){super(...(args.length?args:[instant]));}}
+    const c=vm.createContext({window:{},Date:FixedDate});vm.runInContext(read("js/financialReconciliation.js"),c);
+    assert.equal(c.window.OMAXFinancialReconciliation.localToday(),day);
+    const selected=c.window.OMAXFinancialReconciliation.selectJobs([base({completedAtISO:day})],{profit,range:"7d"});
+    assert.equal(selected.window.endISO,day);assert.equal(selected.totals.count,1);
   }finally{if(previous==null)delete process.env.TZ;else process.env.TZ=previous;}
 });

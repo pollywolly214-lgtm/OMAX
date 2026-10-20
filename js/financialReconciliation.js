@@ -61,6 +61,19 @@
       flag("stale_legacy", "Stored legacy gain/loss differs; canonical net is used.");
     return issues;
   }
+  function previousCardEligibility(job, index){
+    // Reproduce the old Data Center mapping BEFORE applying its three checks.
+    // Blank names received a fallback; truthy whitespace/non-string names did not.
+    const completedISO = typeof job.completedAtISO === "string" && job.completedAtISO ? job.completedAtISO : "";
+    const completedDateISO = completedISO ? String(completedISO).slice(0,10) : "";
+    const name = job.name || `Completed job ${index + 1}`;
+    const settingsLink = job.id != null ? `#/settings?jobId=${encodeURIComponent(String(job.id))}` : "";
+    const reasons = [];
+    if (!(typeof completedDateISO === "string" && completedDateISO.trim().length > 0)) reasons.push("old card required completion-date text");
+    if (!(typeof name === "string" && name.trim().length > 0)) reasons.push("old card required a nonempty text name");
+    if (!(typeof settingsLink === "string" && /^#\/settings\?jobId=/.test(settingsLink))) reasons.push("no settings-link requirement");
+    return {included:reasons.length === 0,reason:reasons.join("; "),completedDateISO};
+  }
   function selectJobs(jobs, {profit, range = "all", today} = {}){
     if (typeof profit !== "function") throw new Error("The canonical Cutting Job profit helper is required.");
     const window = period(range,today), entries = [], identities = new Map();
@@ -92,11 +105,14 @@
       const group = warnings.get(issue.code) || {code:issue.code,message:issue.message,count:0};
       group.count++; warnings.set(issue.code,group);
     }
-    const oldRows = entries.filter(row=>typeof row.job.completedAtISO === "string" && row.job.completedAtISO.slice(0,10).trim() && row.id != null);
-    const oldNet = oldRows.every(row=>row.finite) ? finiteSum(oldRows,row=>row.profit.totalProfit) : null;
+    const oldEligibility = new Map(entries.map(row=>[row,previousCardEligibility(row.job,row.index)]));
+    const oldRows = entries.filter(row=>oldEligibility.get(row).included)
+      .sort((a,b)=>oldEligibility.get(b).completedDateISO.localeCompare(oldEligibility.get(a).completedDateISO));
+    // The old card counted eligible non-finite rows but skipped their net in its sum.
+    const oldNet = finiteSum(oldRows,row=>Number.isFinite(row.profit.totalProfit) ? row.profit.totalProfit : 0);
     const oldSet = new Set(oldRows);
     const populationChanges = entries.filter(row=>oldSet.has(row)!==row.included).map(row=>({...row,
-      change:row.included ? "Added: no settings-link requirement" : row.reason}));
+      change:row.included ? `Added: ${oldEligibility.get(row).reason}` : row.reason}));
     return {window,rows,excluded,entries,totals,warnings:[...warnings.values()],
       largestLosses:rows.filter(row=>row.profit.totalProfit<0).slice().sort((a,b)=>a.profit.totalProfit-b.profit.totalProfit).slice(0,10),
       previousAllTime:{count:oldRows.length,net:oldNet},populationChanges};
@@ -138,5 +154,5 @@
       method:forecast.method,sourceWindow:forecast.sourceWindow},
       netWaterjetImpact:null,coverageReason:"Runtime cost rates can already include maintenance and garnet. Saved job rates do not establish expense composition or complete revenue/cost coverage; purchases and event costs may overlap. A reliable combined result is unavailable."};
   }
-  return Object.freeze({ranges,dateKey,period,selectJobs,expenses,build});
+  return Object.freeze({ranges,dateKey,localToday,period,selectJobs,expenses,build});
 });
