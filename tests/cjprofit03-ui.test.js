@@ -38,7 +38,7 @@ test("inline expansion is independent, survives rerenders, and triggers no write
 test("Failed Cut percentage appears once inside Actions and both table types render the inline breakdown",()=>{
   const history=views.slice(views.indexOf("  const completedRows ="),views.indexOf("    const estimateVal =",views.indexOf("  const completedRows =")));
   assert.match(history,/data-history-actions-menu="\$\{job.id\}" hidden>\s*<button[^>]*data-history-failed-cut=/);
-  assert.match(history,/Failed Cut — \$\{Math\.round\(computeCuttingJobProfit\(job\)\.failurePercent\)\}%/);
+  assert.match(history,/Failed Cut — \$\{cuttingJobFailureLabel\(job\)\}/);
   assert.match(history,/<div class="job-actions">\s*<button type="button" class="job-actions-trigger"/);
   assert.equal((views.match(/data-history-failed-cut=/g)||[]).length,1);assert.match(views,/renderCuttingJobNetBreakdown\(job\)/);assert.match(views,/renderCuttingJobNetBreakdown\(j\)/);
 });

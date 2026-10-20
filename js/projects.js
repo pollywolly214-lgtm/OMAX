@@ -145,6 +145,11 @@
       const applicable = rows.filter(row=>row.unadjustedNet !== null);
       const applicableNet = sum("unadjustedNet"), applicableHours = applicable.reduce((value,row)=>value + row.hours,0);
       project.metrics = Object.fromEntries(["hours","processing","material","totalCost","unadjustedNet","net","reduction"].map(key=>[key,sum(key)]));
+      const deducted = applicable.filter(row=>row.reduction !== null);
+      const deduction = deducted.reduce((value,row)=>value + row.reduction,0);
+      const provisionalValue = applicableNet.value !== null ? applicableNet.value - deduction : null;
+      project.provisional = {value:applicable.length && Number.isFinite(provisionalValue) ? provisionalValue : null,
+        deduction:{value:Number.isFinite(deduction) ? deduction : null,known:deducted.length,total:applicable.length}};
       const knownFailures = rows.filter(row=>row.failurePercent !== null);
       const observedSuccess = knownFailures.length ? 100 * knownFailures.filter(row=>row.failurePercent === 0).length / knownFailures.length : null;
       project.success = {value:knownFailures.length === rows.length ? observedSuccess : null,observedValue:observedSuccess,
@@ -167,6 +172,7 @@
     const metric = (label,key,format=money) => card(label,m[key].known || (!count && key !== "reduction") ? format(m[key].value) : "Unavailable",coverage(m[key]));
     const netTone = value => value === null || value === 0 ? "" : value > 0 ? "job-finance-positive" : "job-finance-negative";
     const known = m.unadjustedNet.known;
+    const deduction = project.provisional.deduction;
     const notices = [];
     if (project.potentialOverlap) notices.push("Some historical Cutting Jobs may overlap across imports. All distinct records are currently included in these totals; matching details do not prove the same physical cut.");
     if (m.hours.known < count) notices.push("Some cutting durations are missing or unreliable. Hours and processing costs have incomplete coverage.");
@@ -190,8 +196,10 @@
         ${card("Total Unadjusted Modeled Cut Net",known || !count ? money(m.unadjustedNet.value) : "Unavailable",coverage(m.unadjustedNet),netTone(known ? m.unadjustedNet.value : null))}
         ${card("Average Unadjusted Net per Job",money(project.averageJob),`${known}/${count} jobs eligible for unadjusted net`,netTone(project.averageJob))}
         ${card("Average Unadjusted Net per Hour",money(project.averageHour),`${hours(project.applicableHours)} across ${known}/${count} eligible jobs`,netTone(project.averageHour))}
-        ${metric("Known Failure-Related Reduction","reduction")}
-      </div><p class="small muted">Known failure-adjusted modeled net: ${esc(m.net.known ? money(m.net.value) : "Unavailable")} (${esc(coverage(m.net))}).${m.net.known < count ? " This is a tracked subset, not the whole project's adjusted result." : ""} It is separate from the unadjusted figures above.</p></section>
+        ${card("Known Failure-Related Reduction",deduction.known && deduction.value !== null ? money(-deduction.value || 0) : "Unavailable",`${coverage(deduction)} among unadjusted-net-eligible jobs; shown as a deduction`,deduction.value > 0 ? "job-finance-negative" : "")}
+      </div><p data-project-provisional-net>Provisional Modeled Cut Net After Recorded Failure Deductions: <strong class="${netTone(project.provisional.value)}">${esc(money(project.provisional.value))}</strong></p>
+      <p class="small muted">${known}/${count} jobs eligible for this provisional result. Failure information recorded for ${project.success.known}/${count} jobs (including recorded 0%; this is coverage, not a failed-job count). Only known deductions from the same ${known} financially eligible jobs are subtracted. Unknown failures remain unadjusted, not assumed successful.${!deduction.known ? " No verified failure deduction is available for these eligible jobs." : ""} This is a provisional modeled result, not verified company profit or a fully failure-adjusted project net.</p>
+      <p class="small muted">Known failure-adjusted modeled net: ${esc(m.net.known ? money(m.net.value) : "Unavailable")} (${esc(coverage(m.net))}).${m.net.known < count ? " This is a tracked subset, not the whole project's adjusted result." : ""} It is separate from the unadjusted figures above.</p></section>
       <p class="small muted">Reporting duration uses recorded historical hours where supported; current jobs retain stored Hours Taken. Historical estimate fallbacks are labeled. Material cost is material cost × quantity. Total Cutting Cost includes processing plus estimated material for jobs with both expenses known; it excludes Purchase History and other project expenditure. Missing failure data is not treated as success. Different IDs are never excluded for matching import details.</p>
       <details class="project-jobs"><summary>View Project Cutting Jobs (${count})</summary><div class="project-table-scroll" tabindex="0" role="region" aria-label="Project Cutting Jobs"><table>
         <thead><tr>${["Cut Number","Cutting Job Name","Date (completed / start)","Hours Taken","Processing Cost","Estimated Material Cost","Failure %","Unadjusted Modeled Cut Net"].map(label=>`<th scope="col">${label}</th>`).join("")}</tr></thead>

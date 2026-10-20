@@ -1,5 +1,7 @@
 # PROJ-01B-ACC03 — Restore historical financial reporting
 
+[ACC04](proj-01b-acc04.md) adds provisional net after known deductions, aligns the displayed deduction with the unadjusted eligible population, and fixes individual-job missing-failure labels. The ACC03 unadjusted financial basis and limited success coverage remain intact.
+
 PR #517 was open at implementation, with ACC02 commit `e7fbf6896e220a520efafc7482a60664821f74b6` as its head. Current main remains `d1489aa3ebc4299e53687b2e11d859298269382b` and is already incorporated. This correction changes only Projects reporting, tests and documentation.
 
 ## Cause and independent financial bases

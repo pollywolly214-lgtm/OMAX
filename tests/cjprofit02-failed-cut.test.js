@@ -66,7 +66,7 @@ function popup(saveResult={saved:true,verified:true},failurePercent=0){
 }
 test("popup previews 0/50/100 live, highlights actual negative profit, validates range and Cancel never saves",()=>{
   const p=popup(),before=structuredClone(p.source);assert.equal(p.value("totalProfit").textContent,"$100.00");
-  p.change(50);assert.equal(p.value("totalProfit").textContent,"$25.00");assert.equal(p.value("revenueLost").textContent,"$75.00");
+  p.change(50);assert.equal(p.value("totalProfit").textContent,"$25.00");assert.equal(p.value("revenueLost").textContent,"-$75.00");
   p.change(100);assert.equal(p.value("totalProfit").textContent,"-$50.00");assert.equal(p.value("totalProfit").classes.has("is-negative"),true);
   assert.equal(p.value("cuttingCost").textContent,"-$25.00");assert.equal(p.value("materialExpense").textContent,"-$25.00");
   for(const value of ["",-1,101,"bad"]){p.change(value);assert.equal(p.elements.save.disabled,true);}
