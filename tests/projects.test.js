@@ -29,9 +29,9 @@ test("weighted average net/hour uses applicable total hours and net/job uses app
   const p=project(state([job("short",{estimateHours:1,chargeRate:100}),job("long",{estimateHours:3,chargeRate:200})]));
   assert.equal(p.metrics.net.value,550);assert.equal(p.averageJob,275);assert.equal(p.averageHour,137.5);assert.notEqual(p.averageHour,(50+500/3)/2);
 });
-test("missing failure data never becomes success or a reliable net; processing remains available",()=>{
+test("missing failure data never becomes success or adjusted net; unadjusted financials remain available",()=>{
   const unknown=job("unknown");delete unknown.failurePercent;
-  const p=project(state([unknown,job("known")]));assert.equal(p.success.known,1);assert.equal(p.success.value,100);assert.equal(p.metrics.net.known,1);assert.equal(p.averageJob,225);assert.equal(p.averageHour,112.5);assert.equal(p.metrics.processing.known,2);
+  const p=project(state([unknown,job("known")]));assert.equal(p.success.known,1);assert.equal(p.success.value,null);assert.equal(p.success.observedValue,100);assert.equal(p.metrics.net.known,1);assert.equal(p.metrics.unadjustedNet.known,2);assert.equal(p.averageJob,225);assert.equal(p.averageHour,112.5);assert.equal(p.metrics.processing.known,2);
   const html=api.summary(p);assert.match(html,/1\/2 jobs with reliable data; partial coverage/);assert.match(html,/Missing failure data is not treated as success/);
 });
 test("absent and invalid costs do not fall back to false zero totals or global default rates",()=>{

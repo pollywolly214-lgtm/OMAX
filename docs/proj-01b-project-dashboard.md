@@ -1,6 +1,6 @@
 # PROJ-01B — Project cutting performance
 
-Updated by **PROJ-01B-ACC02**: see [the accuracy correction](proj-01b-acc02.md) for the current duration policy, retained cross-ID records, coverage notices and final verification. The original implementation's assumption that every historical duration lived in `estimateHours` was incorrect.
+Updated by **PROJ-01B-ACC03**: see [historical financial reporting](proj-01b-acc03.md) for the current unadjusted/adjusted financial basis and success coverage. [ACC02](proj-01b-acc02.md) documents the unchanged duration policy and retained cross-ID records. The original implementation's assumption that every historical duration lived in `estimateHours` was incorrect.
 
 Base: `origin/main` at `14b467d6a8b017915a9f5f1c60aec6aa08b5918b` (fetched October 20, 2026).
 The initial checkout contained unrelated style/artifact changes. Implementation began in a clean isolated worktree on `codex/proj-01b-project-dashboard`; those original changes were preserved.

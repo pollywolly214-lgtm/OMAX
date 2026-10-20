@@ -1,5 +1,7 @@
 # PROJ-01B-ACC02 — Projects financial accuracy correction
 
+**Financial reporting update:** [ACC03](proj-01b-acc03.md) supersedes this document's failure-gated primary-net eligibility. Primary cards now use unadjusted net independently of failure data; known adjusted values remain separate. ACC02 duration and different-ID retention policies are unchanged.
+
 This supersedes the stopped ACC01 specification. PR #517 was open, so this correction updates its existing branch. Current main (`d1489aa3ebc4299e53687b2e11d859298269382b`, including CCR #514) was merged into that branch before implementation. No production data was read or written by this correction.
 
 ## Root cause
