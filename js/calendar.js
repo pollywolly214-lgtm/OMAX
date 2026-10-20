@@ -108,12 +108,13 @@ function getCalendarPendingHours(dateISO){
 }
 
 function setCalendarPendingHours(dateISO, hours){
+  if (window.__cutCostHourSavePending) return false;
   const key = normalizeDateKey(dateISO);
   if (!key) return false;
   const value = clampDailyCutHours(hours);
   if (!(calendarHoursPending instanceof Map)) calendarHoursPending = new Map();
   const entry = typeof getDailyCutHoursEntry === "function" ? getDailyCutHoursEntry(key) : null;
-  const matchesExisting = entry && Math.abs(Number(entry.hours) - value) < 0.001;
+  const matchesExisting = entry && entry.source === "manual" && Math.abs(Number(entry.hours) - value) < 0.001;
   if (matchesExisting){
     if (calendarHoursPending.has(key)){
       calendarHoursPending.delete(key);
@@ -137,6 +138,8 @@ function startCalendarHoursEditing(){
 }
 
 function cancelCalendarHoursEditing(){
+  if (window.__cutCostHourSavePending) return false;
+  window.__cutCostHourRepair = false;
   if (!calendarHoursEditing) return false;
   calendarHoursEditing = false;
   calendarHoursPending = new Map();
@@ -146,6 +149,20 @@ function cancelCalendarHoursEditing(){
 }
 
 function commitCalendarHoursEditing(){
+  if (window.__cutCostHourRepair && calendarHoursEditing && window.OMAXCutCostFeedbackUi){
+    if (window.__cutCostHourSavePending) return false;
+    const entries = Array.from(calendarHoursPending);
+    if (!entries.length){ toast("Enter explicit cutting hours before saving."); return false; }
+    window.__cutCostHourSavePending = true;
+    const button = document.getElementById("calendarHoursEditBtn"); if (button) button.disabled = true;
+    return window.OMAXCutCostFeedbackUi.saveHours(entries).then(result=>{
+      if (!result.saved || !result.verificationCompleted){ toast(result.error || "Daily hours were not verified."); return false; }
+      calendarHoursPending = new Map(); calendarHoursEditing = false; window.__cutCostHourRepair = false;
+      if (typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
+      toast("Daily hours saved and server-verified."); location.hash = "#/costs";
+      return true;
+    }).finally(()=>{ window.__cutCostHourSavePending = false; if (button) button.disabled = false; updateCalendarHoursControls(); });
+  }
   if (!calendarHoursEditing){
     toast("Not editing hours");
     return false;
@@ -194,7 +211,8 @@ function promptCalendarDayHours(dateISO){
   const input = window.prompt(`Enter cutting hours for ${displayDate} (0-24):`, current != null ? String(current) : "");
   if (input === null) return false;
   const trimmed = input.trim();
-  const next = trimmed === "" ? 0 : Number(trimmed);
+  if (trimmed === ""){ toast("Enter explicit cutting hours, including 0 for a zero-hour day."); return false; }
+  const next = Number(trimmed);
   if (!Number.isFinite(next) || next < 0 || next > 24){
     toast("Enter a value between 0 and 24 hours.");
     return false;
@@ -1256,12 +1274,10 @@ function normalizeOccurrenceHours(task){
       const key = normalizeDateKey(maybeDate);
       if (!key) return;
       const num = Number(maybeHours);
-      if (!Number.isFinite(num) || num <= 0) return;
-      const normalized = Math.max(0.25, Math.round(num * 100) / 100);
-      result[key] = normalized;
+      if (maybeHours == null || String(maybeHours).trim() === "" || !Number.isFinite(num) || num < 0) return;
+      result[key] = num;
     });
   }
-  task.occurrenceHours = result;
   return result;
 }
 
@@ -1315,7 +1331,7 @@ function getOccurrenceHoursForTask(task, dateISO){
   if (!key) return null;
   const map = normalizeOccurrenceHours(task);
   const val = map[key];
-  return Number.isFinite(val) && val > 0 ? val : null;
+  return Number.isFinite(val) && val >= 0 ? val : null;
 }
 
 function setOccurrenceNoteForTask(task, dateISO, noteText){
@@ -1349,8 +1365,8 @@ function setOccurrenceHoursForTask(task, dateISO, hours){
   const current = map[key];
   let changed = false;
   const num = Number(hours);
-  if (Number.isFinite(num) && num > 0){
-    const normalized = Math.max(0.25, Math.round(num * 100) / 100);
+  if (hours != null && String(hours).trim() !== "" && Number.isFinite(num) && num >= 0){
+    const normalized = num;
     if (current !== normalized){
       map[key] = normalized;
       changed = true;

@@ -372,6 +372,7 @@ function normalizeAppConfig(config){
     if (typeof config.mondayStartLookback === "boolean") normalized.mondayStartLookback = config.mondayStartLookback;
     normalized.maintenanceCalendarNewRecordsSystem = "v2";
   }
+  if (typeof window !== "undefined" && window.OMAXCutCostFeedback && Object.hasOwn(config || {}, "cutCostFeedback")) normalized.cutCostFeedback = window.OMAXCutCostFeedback.settings(config.cutCostFeedback);
   return normalized;
 }
 
@@ -4712,7 +4713,9 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
           && stableStringifyForIntegrity(pending[field])===stableStringifyForIntegrity(remote[field])
           ? pending[field] : merge(pending[field],remote[field],baseline);
         pending.totalHistory = mergeUnlessIdentical("totalHistory",mergeTotalHistoryForSave,totalHistoryBaseline);
-        pending.dailyCutHours = mergeUnlessIdentical("dailyCutHours",mergeDailyCutHoursForSave);
+        // An isolated day repair already proves its exact source and prepared state.
+        // Preserve other daily records/provenance instead of normalizing the array.
+        if (!(options.preserveExactDailyCutHours && options.validateSourceState && options.validatePreparedState)) pending.dailyCutHours = mergeUnlessIdentical("dailyCutHours",mergeDailyCutHoursForSave);
         if (options.pumpLogMutation){
           // Date-keyed merging would resurrect the original day after a correction.
           // Only the exact single-record operation can retain its prepared pump field.
@@ -5524,6 +5527,7 @@ function createMaintenanceCompatibilityRow(base){
     categoryId: base.categoryId || base.categoryRef || null,
     inventoryRef: base.inventoryRef || null,
     costRef: base.costRef ?? null,
+    partsCostSnapshot: base.partsCostSnapshot ?? null,
     calendarOnly: base.calendarOnly === true,
     settingsTaskId: base.settingsTaskId || null,
     linkRef: base.linkRef || null,
@@ -5704,7 +5708,7 @@ function buildMaintenanceCompatibilityStream(){
       if (aValid && bValid && aTime !== bTime) return aTime - bTime;
       if (aValid && !bValid) return -1;
       if (!aValid && bValid) return 1;
-      return a.idx - b.idx;
+      return b.idx - a.idx;
     });
     const firstEvent = sorted[0]?.event || null;
     if (!firstEvent) return;
@@ -5753,9 +5757,9 @@ function buildMaintenanceCompatibilityStream(){
       else if (event.note != null) note = String(event.note);
 
       const payloadHours = event.payload && event.payload.hours;
-      if (eventType === "hours_set" && Number.isFinite(Number(payloadHours))) loggedHours = Number(payloadHours);
-      else if (Number.isFinite(Number(event.loggedHours))) loggedHours = Number(event.loggedHours);
-      else if (Number.isFinite(Number(event.hours))) loggedHours = Number(event.hours);
+      if ((eventType === "hours_set" || eventType === "completed") && Object.hasOwn(event.payload || {}, "hours")) loggedHours = payloadHours == null || payloadHours === "" ? null : (Number.isFinite(Number(payloadHours)) ? Number(payloadHours) : loggedHours);
+      else if (event.loggedHours != null && Number.isFinite(Number(event.loggedHours))) loggedHours = Number(event.loggedHours);
+      else if (event.hours != null && Number.isFinite(Number(event.hours))) loggedHours = Number(event.hours);
 
       if (eventType === "completed") lifecycleStatus = "completed";
       if (eventType === "uncompleted") lifecycleStatus = "scheduled";
@@ -5766,6 +5770,7 @@ function buildMaintenanceCompatibilityStream(){
       if (event.lifecycleStatus === "scheduled") lifecycleStatus = "scheduled";
       if (event.lifecycleStatus === "removed") lifecycleStatus = "removed";
       if (event.lifecycleStatus === "skipped") lifecycleStatus = "skipped";
+      if (["canceled", "cancelled"].includes(eventType) || ["canceled", "cancelled"].includes(event.lifecycleStatus)) lifecycleStatus = "removed";
     });
 
     if (!displayDateISO) displayDateISO = normalizeDateISO(effectiveDateISO || originalDateISO || "");
@@ -5820,6 +5825,7 @@ function buildMaintenanceCompatibilityStream(){
       categoryRef: task && (task.categoryRef ?? task.folderId) != null ? String(task.categoryRef ?? task.folderId) : null,
       categoryId: task && (task.categoryId ?? task.cat) != null ? String(task.categoryId ?? task.cat) : null,
       inventoryRef: task && task.inventoryRef != null ? String(task.inventoryRef) : (task && task.inventoryId != null ? String(task.inventoryId) : null),
+      partsCostSnapshot,
       costRef: partsCostSnapshot ?? (task && (task.cost ?? task.price ?? task.costProfileId) != null ? (task.cost ?? task.price ?? task.costProfileId) : null),
       calendarOnly: recoveryProvenance?.route === "calendar_only",
       settingsTaskId: task?.legacyTaskId || null,
