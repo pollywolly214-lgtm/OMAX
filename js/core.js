@@ -106,6 +106,7 @@ function canWriteCloud(reason = "cloud save"){
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
   if (window.__pumpBaselineMutationPending && reason !== "pump baseline commit") return blockCloudSave(`${reason}; a pump baseline is being verified.`);
   if (window.__pumpLogMutationPending && reason !== "pump log commit") return blockCloudSave(`${reason}; a pump log is being verified.`);
+  if (window.__waterQualityMutationPending && reason !== "water quality commit") return blockCloudSave(`${reason}; a water-quality check is being verified.`);
   if (!window.__cloudLoadAttemptComplete || !window.__initialAdoptComplete){
     return blockCloudSave(`${reason}; cloud load/adoption is not complete.`);
   }
@@ -671,6 +672,7 @@ const FIRESTORE_BLOCK_BYTES = 975000;
 const SAVE_LOG_THROTTLE_MS = 30000;
 let lastSaveLogWriteAt = 0;
 const REQUIRED_PROTECTED_DATA_PATHS = [
+  "waterQualityChecks",
   "cuttingJobs",
   "completedCuttingJobs",
   "cuttingJobDatabase",
@@ -712,6 +714,7 @@ const REQUIRED_PROTECTED_DATA_PATHS = [
   "tasksAsReq.removedOccurrences"
 ];
 const PROTECTED_FIELD_REGISTRY = [
+  { path:"waterQualityChecks", label:"Water-quality check history", category:"machine history", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
   { path:"cuttingJobs", label:"Active cutting jobs", category:"jobs", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
   { path:"completedCuttingJobs", label:"Completed cutting jobs", category:"jobs", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
   { path:"cuttingJobDatabase", label:"Cutting job database", category:"jobs", expectedShape:"arrayOrObject", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
@@ -755,6 +758,7 @@ const PROTECTED_FIELD_REGISTRY = [
 // Legacy diagnostics still iterate this compatibility list, but SAFE-03
 // hard save blocking is registry-driven via PROTECTED_FIELD_REGISTRY.
 const PROTECTED_STATE_FIELDS = [
+  "waterQualityChecks",
   "cuttingJobs",
   "completedCuttingJobs",
   "tasksInterval",
@@ -902,6 +906,7 @@ function buildEmergencyBackup(snapshot){
   const src = snapshot && typeof snapshot === "object" ? snapshot : {};
   return {
     schema: src.schema || APP_SCHEMA,
+    waterQualityChecks: Array.isArray(src.waterQualityChecks) ? src.waterQualityChecks : [],
     totalHistory: Array.isArray(src.totalHistory) ? src.totalHistory : [],
     tasksInterval: Array.isArray(src.tasksInterval) ? src.tasksInterval : [],
     tasksAsReq: Array.isArray(src.tasksAsReq) ? src.tasksAsReq : [],
@@ -934,6 +939,7 @@ function buildEmergencyBackup(snapshot){
 function buildTinyCriticalBackup(snapshot, { quiet = false } = {}){
   const src = snapshot && typeof snapshot === "object" ? snapshot : {};
   const base = {
+    waterQualityChecks: src.waterQualityChecks || [],
     schema: src.schema || APP_SCHEMA,
     tasksInterval: src.tasksInterval || [],
     tasksAsReq: src.tasksAsReq || [],
@@ -1653,7 +1659,7 @@ function buildProtectedFieldSummary(state){
   return {
     firestorePath: FB?.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
     workspaceId: WORKSPACE_ID,
-    clientId: (typeof window !== "undefined" && window.localStorage) ? String(window.localStorage.getItem(CLOUD_SYNC_CLIENT_KEY) || "") : "unknown_client",
+    clientId: (()=>{ try { return String(window.localStorage?.getItem(CLOUD_SYNC_CLIENT_KEY)||"unknown_client"); } catch (_) { return "unavailable_client"; } })(),
     syncMeta: {
       rev: Number(src.syncMeta?.rev || 0),
       updatedAtISO: src.syncMeta?.updatedAtISO || "",
@@ -2299,7 +2305,7 @@ async function buildDiagnosticSummary(){
     browserStorage:inspectBrowserStorageReadOnly(),
     firestorePath: FB?.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
     workspaceId: WORKSPACE_ID,
-    clientId: (typeof window !== "undefined" && window.localStorage) ? String(window.localStorage.getItem(CLOUD_SYNC_CLIENT_KEY) || "") : "unknown_client",
+    clientId: (()=>{ try { return String(window.localStorage?.getItem(CLOUD_SYNC_CLIENT_KEY)||"unknown_client"); } catch (_) { return "unavailable_client"; } })(),
     cloudLoadAttemptComplete: Boolean(window.__cloudLoadAttemptComplete),
     initialAdoptComplete: Boolean(window.__initialAdoptComplete),
     loadedCloudRevisionForSaveGuard: Number(window.__loadedCloudRevisionForSaveGuard || 0),
@@ -2467,8 +2473,8 @@ function persistLocalStateBackup(snapshot){
 }
 
 function readLocalStateBackup(){
-  if (typeof window === "undefined" || !window.localStorage) return null;
   try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
     const raw = window.localStorage.getItem(LOCAL_STATE_BACKUP_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
@@ -2479,12 +2485,16 @@ function readLocalStateBackup(){
   }
 }
 function getCloudSyncClientId(){
-  if (typeof window === "undefined" || !window.localStorage) return "unknown_client";
-  let id = String(window.localStorage.getItem(CLOUD_SYNC_CLIENT_KEY) || "").trim();
-  if (id) return id;
+  if (typeof window === "undefined") return "unknown_client";
+  let storage;
+  try {
+    storage=window.localStorage;
+    const existing=String(storage?.getItem(CLOUD_SYNC_CLIENT_KEY)||"").trim();
+    if(existing)return existing;
+  } catch (_err){ }
   if (isRecoveryMode()) return "unknown_client";
-  id = `client_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  try { window.localStorage.setItem(CLOUD_SYNC_CLIENT_KEY, id); } catch (_err){ }
+  const id = `client_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  try { storage?.setItem(CLOUD_SYNC_CLIENT_KEY, id); } catch (_err){ }
   return id;
 }
 
@@ -2765,7 +2775,7 @@ function startWorkspaceStateListener(){
     if (!snap || !snap.exists){ enterMissingStateRecovery(); return; }
     if (isRecoveryMode()) return;
     // The isolated material writer owns adoption until SERVER verification.
-    if (window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending || window.__pumpLogMutationPending) return;
+    if (window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending || window.__pumpLogMutationPending || window.__waterQualityMutationPending) return;
     if (snap.metadata && snap.metadata.hasPendingWrites) return;
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
@@ -3993,6 +4003,7 @@ function stateHasMeaningfulData(data){
   if (keys.length === 0) return false;
   if (keys.length === 1 && keys[0] === "schema") return false;
   const meaningfulKeys = new Set([
+    "waterQualityChecks",
     "tasksInterval",
     "tasksAsReq",
     "inventory",
@@ -4134,6 +4145,7 @@ function snapshotState(options = {}){
       ? window.__lastLoadedCloudState.inventoryTransactions
       : []);
   const result = {
+    waterQualityChecks: Array.isArray(window.waterQualityChecks) ? cloneStructured(window.waterQualityChecks) : [],
     schema: window.APP_SCHEMA || APP_SCHEMA,
     totalHistory,
     tasksInterval,
@@ -4622,7 +4634,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
   const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
     &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
-  if (!identityAuthorized && !canWriteCloud(options.pumpLogMutation ? "pump log commit" : options.pumpBaselineMutation ? "pump baseline commit" : "authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
+  if (!identityAuthorized && !canWriteCloud(options.waterQualityMutation ? "water quality commit" : options.pumpLogMutation ? "pump log commit" : options.pumpBaselineMutation ? "pump baseline commit" : "authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
   const deletionProof = options.cuttingJobDeletionProof;
   if (deletionProof){
     if (!cuttingJobDeletionProofs.has(deletionProof) || cuttingJobDeletionTransactions.has(deletionProof)) return cuttingJobDeletionFailure("Cutting-job deletion transaction authorization is invalid or already used.");
@@ -6535,10 +6547,11 @@ function adoptAuthoritativeRecoveryState(doc){
   // Recovery adoption is a display of cloned evidence, not normalization or
   // provisioning. Never seed links, purge history or write browser caches here.
   const data=cloneStructured(doc)||{};
-  const displayFields=["schema","syncMeta","saveMeta","syncProcessLog","totalHistory","tasksInterval","tasksAsReq","inventory","inventoryFolders","inventoryMaterials","inventoryTransactions","inventorySection","cuttingJobDatabase","cuttingJobs","completedCuttingJobs","orderRequests","garnetCleanings","dailyCutHours","opportunityRollups","weeklyCostReports","receiptTrackerWeeks","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","deletedItems","appConfig","jobFolders","orderRequestTab","settingsFolders","folders","dashboardLayout","costLayout","jobLayout","pumpEff","oneDriveJobConfig"];
+  const displayFields=["schema","syncMeta","saveMeta","syncProcessLog","totalHistory","tasksInterval","tasksAsReq","inventory","inventoryFolders","inventoryMaterials","inventoryTransactions","inventorySection","cuttingJobDatabase","cuttingJobs","completedCuttingJobs","orderRequests","garnetCleanings","dailyCutHours","opportunityRollups","weeklyCostReports","receiptTrackerWeeks","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","deletedItems","appConfig","jobFolders","orderRequestTab","settingsFolders","folders","dashboardLayout","costLayout","jobLayout","pumpEff","oneDriveJobConfig","waterQualityChecks"];
   // Unknown source fields remain evidence, never overwrite runtime write gates
   // or browser globals. Live known fields and this evidence are checked at apply.
   window.__inventoryIdentityLocalEvidence=data;window.__inventoryIdentityDisplayFields=displayFields;
+  window.waterQualityChecks = cloneStructured(data.waterQualityChecks || []);
   displayFields.forEach(name=>{if(Object.prototype.hasOwnProperty.call(data,name))window[name]=data[name];});
   totalHistory=Array.isArray(data.totalHistory)?data.totalHistory:[];
   tasksInterval=Array.isArray(data.tasksInterval)?data.tasksInterval:[];
@@ -6597,6 +6610,7 @@ function adoptState(doc, options = {}){
     window.__opportunityStateReady = false;
   }
   const data = doc || {};
+  window.waterQualityChecks = cloneStructured(data.waterQualityChecks || []);
 
   // Core lists (fallback to defaults if empty/missing)
   totalHistory = Array.isArray(data.totalHistory) ? data.totalHistory : [];
@@ -7011,6 +7025,7 @@ function cloudSaveNoWriteFailure(errorCode, error){
 }
 
 async function performCloudSave(saveOptions = {}){
+  if (window.__waterQualityMutationPending) return cloudSaveNoWriteFailure("water_quality_verification_pending", "A water-quality check is being verified; other edits remain pending.");
   if (window.__pumpBaselineMutationPending || window.__pumpLogMutationPending) return cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump change is being verified; other edits remain pending.");
   if (window.__inventoryMaterialMutationPending) return cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending.");
   let authoritativeStateWriteAttempted = false;
@@ -7603,6 +7618,10 @@ function getTrackedStateSignature(snapshot){
   return stableStringify(normalized);
 }
 function saveCloudDebounced(){
+  if (window.__waterQualityMutationPending){
+    hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
+    return cloudSaveNoWriteFailure("water_quality_verification_pending", "A water-quality check is being verified; other edits remain pending.");
+  }
   if (window.__pumpBaselineMutationPending || window.__pumpLogMutationPending){
     hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
     return cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump change is being verified; other edits remain pending.");
@@ -7632,6 +7651,10 @@ function saveCloudDebounced(){
   saveCloudInternal();
 }
 function saveCloudNow(saveOptions = {}){
+  if (window.__waterQualityMutationPending){
+    hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
+    return Promise.resolve(cloudSaveNoWriteFailure("water_quality_verification_pending", "A water-quality check is being verified; other edits remain pending."));
+  }
   if (window.__pumpBaselineMutationPending || window.__pumpLogMutationPending){
     hasPendingLocalChanges=true;lastLocalMutationAt=Math.max(Date.now(),lastLocalMutationAt+1);
     return Promise.resolve(cloudSaveNoWriteFailure("pump_baseline_verification_pending", "A pump change is being verified; other edits remain pending."));
@@ -7677,6 +7700,79 @@ function saveCloudNow(saveOptions = {}){
     return saveCloudInternal(saveOptions);
   }
 }
+
+/* Water quality: isolated history mutation through the shared guarded writer. */
+async function saveWaterQualityCheck(request){
+  const failure=error=>({saved:false,verified:false,error:String(error?.message||error)});
+  const available=()=>FB.ready&&FB.user&&!isVercelPreviewRuntime()&&!window.__categoryMutationPending
+    &&!window.__inventoryMaterialMutationPending&&canWriteCloud("water quality commit");
+  if(window.__waterQualityMutationPending||!available())return failure("Water-quality saving is unavailable during another save or recovery review.");
+  const captured=cloneStructured(request),target=captureCuttingJobSaveTarget(),actor=FB.user.uid;
+  const key=stableStringifyForIntegrity;
+  const business=value=>Object.fromEntries(Object.entries(value||{}).filter(([name])=>!["syncMeta","saveMeta","syncProcessLog"].includes(name)));
+  const loaded=value=>Object.fromEntries(Object.entries(value||{}).filter(([name])=>name!=="syncProcessLog"));
+  let ownsLock=false,invoked=false,acknowledged=false;
+  const suspend=error=>{
+    const result={...failure(error),indeterminate:true,requiresReload:true};
+    window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastIndeterminateSave=result;
+    window.__lastWaterQualitySaveEvidence={request:captured,result};
+    try{renderRecoveryDiagnosticsPanel();}catch(_){}
+    return result;
+  };
+  const read=async()=>{
+    const envelope=await readInventoryMaterialAuthoritativeState();
+    if(!cuttingJobSaveTargetIsCurrent(target)||envelope?.readSource!=="backend_transaction"||envelope.path!==target.path
+      ||!envelope.state||!Number.isSafeInteger(envelope.revision)||envelope.revision!==envelope.state.syncMeta?.rev)
+      throw Error("Water-quality verification requires an independent read of the current backend document.");
+    return cloneStructured(envelope.state);
+  };
+  try{
+    await cloudSaveQueue;
+    if(window.__waterQualityMutationPending||!available()||hasPendingLocalChanges)throw Error("Other changes must finish saving before submitting a water-quality check.");
+    window.__waterQualityMutationPending=true;ownsLock=true;
+    const source=await read(),revision=source.syncMeta.rev,version=lastLocalMutationAt,sourceKey=key(source);
+    const localMatches=()=>available()&&cuttingJobSaveTargetIsCurrent(target)&&FB.user.uid===actor
+      &&!hasPendingLocalChanges&&lastLocalMutationAt===version&&window.__loadedCloudRevisionForSaveGuard===revision
+      &&key(loaded(window.__lastLoadedCloudState))===key(loaded(source))
+      &&key(business(getInventoryIdentityRepairLocalState()))===key(business(source));
+    if(!localMatches()||!checkAuthoritativeIdentityIntegrity(source).valid)throw Error("Water-quality baseline changed. Reload and review before saving.");
+    const intended=window.OMAXWaterQuality.plan(source,captured,actor,new Date().toISOString());
+    const expected=key(business(intended));
+    // A retry of the same already-committed ID is an independently read no-op.
+    if(expected===key(business(source)))return {saved:true,verified:true,noOp:true};
+    const queued=cloudSaveQueue.then(()=>{
+      if(!localMatches())return cloudSaveNoWriteFailure("water_quality_source_changed","Water-quality baseline changed before saving.");
+      invoked=true;
+      return writeAuthoritativeStateSnapshot(intended,{mergeFields:["waterQualityChecks","syncMeta"]},{
+        expectedRevision:revision,authoritativeTarget:target,waterQualityMutation:true,
+        validateSourceState:remote=>key(remote)===sourceKey&&localMatches(),
+        validatePreparedState:pending=>key(business(pending))===expected&&localMatches()
+      });
+    });
+    cloudSaveQueue=queued.catch(()=>{});
+    const written=await queued;
+    acknowledged=written?.saved===true&&written.stateWriteCompleted===true;
+    if(!acknowledged){
+      if(written?.indeterminate||written?.stateWriteAttempted&&!written.definiteFailure)return suspend(written?.error||"Water-quality write outcome is unknown. Reload before retrying.");
+      invoked=false;return failure(written?.error||"Firebase rejected the water-quality write.");
+    }
+    const committed=written.committedState;
+    if(!Number.isSafeInteger(committed?.syncMeta?.rev)||committed.syncMeta.rev<=revision
+      ||typeof committed.syncMeta.updatedBy!=="string"||!committed.syncMeta.updatedBy
+      ||key(business(committed))!==expected) return suspend("Water-quality transaction acknowledgement does not match the submitted check. Reload before retrying.");
+    const verified=await read();
+    if(key(verified)!==key(committed)||!localMatches()||!checkAuthoritativeIdentityIntegrity(verified).valid)
+      return suspend("Water-quality backend readback did not match the committed check. The write may have completed; reload before retrying.");
+    if(adoptIdentityCheckedAuthoritativeState(verified)?.recovery!==false)return suspend("Verified water-quality history could not be adopted. Reload before retrying.");
+    // Backups are best effort after authoritative verification, never the commit.
+    try{persistLocalStateBackup(verified);}catch(error){console.warn("Water-quality backend saved; local backup unavailable",error);}
+    return {saved:true,verified:true,revision:verified.syncMeta.rev};
+  }catch(error){return invoked||acknowledged?suspend(error):failure(error);}
+  finally{if(ownsLock)window.__waterQualityMutationPending=false;}
+}
+window.saveWaterQualityCheck=saveWaterQualityCheck;
+window.addEventListener?.("beforeunload",event=>{if(window.__waterQualityMutationPending){event.preventDefault();event.returnValue="";}});
+/* End water quality verified mutation. */
 
 /* CJCAT: one verified backend transaction updates folder metadata and linked job Project Numbers. */
 async function saveCuttingJobCategoryChange(request){
