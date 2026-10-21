@@ -137,6 +137,7 @@
       const consistentEvent = !provenanceEvent || provenanceEvent === importEvent;
       const importGroup = consistentEvent && /^616-CUT-/i.test(importEvent) ? "616" : consistentEvent && /^CUTPDF-\d{8}-\d{3}$/i.test(importEvent) ? "CUTPDF" : "";
       project.rows.push({id,name:String(job.name || "Untitled job"),cut:root.CuttingJobChronology?.readCutLabel(job) ?? "—",
+        filesKnown:Array.isArray(job.files),files:Array.isArray(job.files) ? job.files.map((file,index)=>({name:String(file?.name || `File ${index + 1}`),local:file?.source === "wj_cuts_reference"})) : [],
         date:job.completedAtISO || job.startISO || "—",completed:isCompleted,importEvent,importGroup,
         navigable:!duplicate,...financials(job, profit, ambiguous,isCompleted)});
     }
@@ -172,13 +173,29 @@
       project.adjustedAverageHour = applicableHours > 0 && Number.isFinite(applicableHours) && project.provisional.value !== null ? project.provisional.value / applicableHours : null;
       project.applicableHours = Number.isFinite(applicableHours) ? applicableHours : null;
     }
-    projects.sort((a,b)=>a.number.localeCompare(b.number,undefined,{numeric:true}) || a.id.localeCompare(b.id));
+    projects.sort((a,b)=>{
+      const numericA = /^\d+$/.test(a.number), numericB = /^\d+$/.test(b.number);
+      return (numericA && numericB ? Number(b.number) - Number(a.number) : numericA ? -1 : numericB ? 1 : a.number.localeCompare(b.number)) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id);
+    });
     return {projects,issues};
   }
   const esc = value => String(value ?? "").replace(/[&<>"']/g, char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
   const money = value => value === null ? "Unavailable" : new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(value);
   const hours = (value,digits=2) => value === null ? "Unavailable" : `${value.toLocaleString("en-US",{maximumFractionDigits:digits})} hr`;
   const coverage = metric => `${metric.known}/${metric.total} jobs with reliable data${metric.known < metric.total ? "; partial coverage" : ""}`;
+  function filesMarkup(row){
+    if (!row.navigable) return '<span class="small muted">Identity review required</span>';
+    const cache = root.cfr05CloudPresentation;
+    const state = cache?.peek?.(row.id), loading = cache?.isLoading?.(row.id);
+    const ready = state && !state.error && !state.blockers?.length && !state.rejectedMetadataDocumentCount && typeof root.filterAttachedCuttingJobCloudFiles === "function";
+    const cloudFiles = state && typeof root.filterAttachedCuttingJobCloudFiles === "function" ? root.filterAttachedCuttingJobCloudFiles(row.id,state.files) : [];
+    const status = loading ? "Checking secure cloud files…" : !state ? "Cloud files not checked" : !ready ? "Cloud metadata unavailable or incomplete" : "Cloud metadata checked";
+    const localFiles = row.files || [], total = localFiles.length + cloudFiles.length;
+    if (!total && row.filesKnown && ready) return '<span class="small muted">No files</span>';
+    const fileLink = (name,source) => `<li><button type="button" data-project-file-job="${esc(row.id)}" title="Open from the original Cutting Job">${esc(name)}</button><span class="small muted">${esc(source)}</span></li>`;
+    return `<details class="project-files"><summary>${total ? `${total} file${total === 1 ? "" : "s"}` : "Files"}${!ready ? " · check cloud" : ""}</summary><ul>${localFiles.map(file=>fileLink(file.name,file.local ? "WJ Cuts reference · verified local root required" : "Legacy attachment metadata")).join("")}${cloudFiles.map(file=>fileLink(file.originalName || "Unnamed cloud file","Secure cloud")).join("")}</ul>
+      <p class="small muted" role="status">${esc(status)}${!row.filesKnown ? "; legacy attachment metadata not recorded" : ""}.</p><button type="button" data-project-check-cloud="${esc(row.id)}" ${loading ? "disabled" : ""}>${state ? "Refresh" : "Check"} secure cloud files</button><p class="small muted">File names open the original Cutting Job’s preview/download workflow.</p></details>`;
+  }
   function summary(project){
     if (!project) return '<p class="small muted">Select an existing project to view its cutting performance.</p>';
     const m = project.metrics, count = project.rows.length;
@@ -218,11 +235,11 @@
       <p class="small muted">Failure deductions use the same financially eligible population and are included once in the primary figures. Projects convention: missing/null/blank failure percentages use effective 0%; ${project.failure.assumedZero} included records use this convention. No stored values are changed. Invalid values keep adjusted results unavailable. Material estimates do not verify inventory consumption or Purchase History expenditure.</p></section>
       <p class="small muted">Reporting duration uses recorded historical hours where supported; current jobs retain stored Hours Taken. Historical estimate fallbacks are labeled. Material cost is material cost × quantity. Total Cutting Cost includes processing plus estimated material for jobs with both expenses known; it excludes Purchase History and other project expenditure. Different IDs are never excluded for matching import details.</p>
       <details class="project-jobs"><summary>View Project Cutting Jobs (${count})</summary><div class="project-table-scroll" tabindex="0" role="region" aria-label="Project Cutting Jobs"><table>
-        <thead><tr>${["Cut Number","Cutting Job Name","Date (completed / start)","Hours Taken","Processing Cost","Estimated Material Cost","Failure %","Failure-Adjusted Modeled Cut Net"].map(label=>`<th scope="col">${label}</th>`).join("")}</tr></thead>
-        <tbody>${project.rows.map(row=>`<tr><td>${esc(row.cut)}</td><td>${row.navigable ? `<button type="button" data-project-job="${esc(row.id)}">${esc(row.name)}</button>` : `${esc(row.name)} <span class="small muted">(ID review required)</span>`}</td><td>${esc(dateKey(row.date) || "—")}</td><td title="${esc(row.durationNote || row.hoursSource)}">${esc(hours(row.hours))}<br><span class="small muted">${esc(row.hoursSource)}${row.completed ? "" : " (active plan)"}</span></td><td>${esc(money(row.processing))}</td><td>${esc(money(row.material))}</td><td>${row.effectiveFailurePercent === null ? "Unavailable (invalid)" : `${esc(row.effectiveFailurePercent)}%${row.missingFailure ? " (reporting default; not recorded)" : ""}`}</td><td><strong class="${netTone(row.net)}">${esc(money(row.net))}</strong><br><span class="small muted">No failures: ${esc(money(row.unadjustedNet))}</span></td></tr>`).join("") || '<tr><td colspan="8">No Cutting Jobs are associated with this project.</td></tr>'}</tbody>
-      </table></div></details>`;
+        <colgroup>${["cut","name","date","hours","processing","material","failure","net","files"].map(key=>`<col class="project-col-${key}">`).join("")}</colgroup><thead><tr>${["Cut Number","Cutting Job Name","Date (completed / start)","Hours Taken","Processing Cost","Estimated Material Cost","Failure %","Failure-Adjusted Modeled Cut Net","Files"].map(label=>`<th scope="col">${label}</th>`).join("")}</tr></thead>
+        <tbody>${project.rows.map(row=>`<tr><td>${esc(row.cut)}</td><td>${row.navigable ? `<button type="button" data-project-job="${esc(row.id)}">${esc(row.name)}</button>` : `${esc(row.name)} <span class="small muted">(ID review required)</span>`}</td><td>${esc(dateKey(row.date) || "—")}</td><td title="${esc(row.durationNote || row.hoursSource)}">${esc(hours(row.hours))}<br><span class="small muted">${esc(row.hoursSource)}${row.completed ? "" : " (active plan)"}</span></td><td>${esc(money(row.processing))}</td><td>${esc(money(row.material))}</td><td title="${row.missingFailure ? "Not recorded; effective 0% for Projects reporting only" : row.effectiveFailurePercent === null ? "Invalid failure value; unavailable" : "Current recorded failure percentage"}">${row.effectiveFailurePercent === null ? "—" : `${esc(row.effectiveFailurePercent)}%${row.missingFailure ? "*" : ""}`}</td><td><strong class="${netTone(row.net)}">${esc(money(row.net))}</strong><br><span class="small muted">No failures: ${esc(money(row.unadjustedNet))}</span></td><td data-project-files="${esc(row.id)}">${filesMarkup(row)}</td></tr>`).join("") || '<tr><td colspan="9">No Cutting Jobs are associated with this project.</td></tr>'}</tbody>
+      </table></div><p class="small muted">0%* means failure was not recorded; Projects uses effective 0% for reporting only.</p></details>`;
   }
-  root.ProjectDashboard = Object.freeze({build,duration,financials,summary});
+  root.ProjectDashboard = Object.freeze({build,duration,financials,summary,filesMarkup});
   root.renderProjects = function(){
     const content = document.getElementById("content");
     const params = new URLSearchParams(location.hash.split("?")[1] || "");
@@ -231,9 +248,9 @@
     let model = readModel();
     const selected = model.projects.find(project=>project.id === selectedId);
     content.innerHTML = `<section class="projects-page"><h1>Projects</h1><p class="muted">Waterjet production and modeled cutting performance by project.</p>
-      <label class="project-selector" for="projectSelector">Project<input id="projectSelector" type="search" list="projectOptions" autocomplete="off" placeholder="Search project number or name" value="${esc(selected?.label || "")}" aria-describedby="projectSelectorHelp"></label>
-      <datalist id="projectOptions">${model.projects.map(project=>`<option value="${esc(project.label)}"></option>`).join("")}</datalist>
-      <p id="projectSelectorHelp" class="small muted">${model.projects.length ? "Choose a project from the suggestions. Selection is retained in this page’s URL." : "No projects with verified category ownership are available."}</p>
+      <div class="project-selector"><label for="projectSelector">Project</label><div class="project-combobox"><span id="projectSelectedColor" class="project-color-dot" aria-hidden="true"></span><input id="projectSelector" type="search" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="projectOptions" autocomplete="off" placeholder="Search project number or name" value="${esc(selected?.label || "")}" aria-describedby="projectSelectorHelp"><button type="button" id="projectOptionsToggle" aria-label="Show projects" aria-controls="projectOptions" aria-expanded="false">▾</button></div>
+      <ul id="projectOptions" class="project-options" role="listbox" aria-label="Projects" hidden></ul><p id="projectNoResults" class="small muted" role="status" hidden>No matching projects.</p></div>
+      <p id="projectSelectorHelp" class="small muted">${model.projects.length ? "Type to search; use Arrow keys and Enter to select. Projects are ordered by descending number. Selection is retained in this page’s URL." : "No projects with verified category ownership are available."}</p>
       <div class="project-mode"><label class="project-mode-switch"><input type="checkbox" id="projectIncludeActive" ${includeActive ? "checked" : ""}>Include Active Cutting Jobs</label>
         <button type="button" class="project-mode-info" popovertarget="projectModeHelp" aria-label="About including active Cutting Jobs">i</button>
         <div id="projectModeHelp" class="project-mode-help" popover role="note"><p><strong>ON:</strong> Includes completed and active Cutting Jobs. Active jobs may use planned cutting hours and projected costs, so totals are modeled estimates.</p><p><strong>OFF:</strong> Shows completed Cutting Jobs only. This is better for reviewing completed production, although historical cutting hours and costs may still include estimates.</p><button type="button" popovertarget="projectModeHelp" popovertargetaction="hide">Close</button></div>
@@ -249,20 +266,68 @@
       query.set("active",includeActive ? "1" : "0");
       root.history.replaceState(null,"",`#/projects?${query}`);
     };
+    const list = document.getElementById("projectOptions"), noResults = document.getElementById("projectNoResults"), dropdown = document.getElementById("projectOptionsToggle");
+    let filtered = [], activeIndex = -1;
+    const color = id => {
+      const value = root.getJobCategoryColorData?.(id)?.accentHex;
+      return /^#[0-9a-f]{6}$/i.test(value || "") ? value : "transparent";
+    };
+    const selectedColor = () => {
+      const dot = document.getElementById("projectSelectedColor");
+      dot.style.backgroundColor = selectedId ? color(selectedId) : "transparent";
+    };
+    const closeList = () => {list.hidden = true;noResults.hidden = true;input.setAttribute("aria-expanded","false");dropdown.setAttribute("aria-expanded","false");input.removeAttribute("aria-activedescendant");};
+    const markActive = () => {
+      Array.from(list.children).forEach((option,index)=>option.setAttribute("aria-selected",String(index === activeIndex)));
+      if (activeIndex >= 0){input.setAttribute("aria-activedescendant",`projectOption${activeIndex}`);list.children[activeIndex]?.scrollIntoView({block:"nearest"});}
+      else input.removeAttribute("aria-activedescendant");
+    };
+    const openList = (all=false) => {
+      const query = all ? "" : input.value.trim().toLocaleLowerCase();
+      filtered = model.projects.filter(project=>project.label.toLocaleLowerCase().includes(query));activeIndex = -1;
+      list.innerHTML = filtered.map((project,index)=>`<li role="option" id="projectOption${index}" data-project-option="${esc(project.id)}" aria-selected="false"><span class="project-color-dot" aria-hidden="true" style="background-color:${color(project.id)}"></span><span>${esc(project.label)}</span></li>`).join("");
+      list.hidden = false;noResults.hidden = !!filtered.length;input.setAttribute("aria-expanded","true");dropdown.setAttribute("aria-expanded","true");input.removeAttribute("aria-activedescendant");
+    };
+    const choose = project => {selectedId = project.id;input.value = project.label;selectedColor();closeList();update(project);};
+    selectedColor();
     input.addEventListener("input",()=>{
       const matches = model.projects.filter(project=>project.label === input.value);
-      const project = matches.length === 1 ? matches[0] : null;
-      selectedId = project?.id || null;
-      update(project);
+      if (matches.length === 1) choose(matches[0]);else openList();
     });
+    input.addEventListener("focus",()=>openList(input.value === model.projects.find(project=>project.id === selectedId)?.label));
+    dropdown.addEventListener("pointerdown",event=>event.preventDefault());
+    dropdown.addEventListener("click",()=>{const open = input.getAttribute("aria-expanded") === "true";input.focus();if(open)closeList();else openList(true);});
+    input.addEventListener("keydown",event=>{
+      if (event.key === "Escape"){event.preventDefault();input.value = model.projects.find(project=>project.id === selectedId)?.label || "";closeList();return;}
+      if (["ArrowDown","ArrowUp"].includes(event.key)){
+        event.preventDefault();if (list.hidden) openList(true);
+        if (filtered.length){activeIndex = activeIndex < 0 ? (event.key === "ArrowDown" ? 0 : filtered.length - 1) : (activeIndex + (event.key === "ArrowDown" ? 1 : -1) + filtered.length) % filtered.length;markActive();}return;
+      }
+      if (event.key === "Enter" && !list.hidden){event.preventDefault();const project = filtered[activeIndex >= 0 ? activeIndex : 0];if(project)choose(project);}
+      if (event.key === "Tab") closeList();
+    });
+    list.addEventListener("pointerdown",event=>event.preventDefault());
+    list.addEventListener("click",event=>{const option = event.target.closest("[data-project-option]");const project = filtered.find(project=>project.id === option?.dataset.projectOption);if(project)choose(project);});
+    input.addEventListener("blur",()=>{closeList();input.value = model.projects.find(project=>project.id === selectedId)?.label || "";});
     document.getElementById("projectIncludeActive").addEventListener("change",event=>{
       includeActive = event.target.checked;
       model = readModel();
       update(model.projects.find(project=>project.id === selectedId),true);
     });
-    panel.addEventListener("click",event=>{
-      const button = event.target.closest("[data-project-job]");
-      if (button) redirectToCuttingJobPage(button.getAttribute("data-project-job"));
+    panel.addEventListener("click",async event=>{
+      const button = event.target.closest("[data-project-job], [data-project-file-job]");
+      if (button){redirectToCuttingJobPage(button.dataset.projectJob || button.dataset.projectFileJob);return;}
+      const check = event.target.closest("[data-project-check-cloud]");
+      if (!check || check.disabled) return;
+      const id = check.dataset.projectCheckCloud, cell = check.closest("[data-project-files]");
+      const row = model.projects.find(project=>project.id === selectedId)?.rows.find(row=>row.id === id && row.navigable);
+      if (!row) return;
+      check.disabled = true;cell.querySelector('[role="status"]').textContent = "Checking secure cloud files…";
+      try {
+        if (typeof root.refreshCfr05CloudPresentation !== "function") throw Error("unavailable");
+        await root.refreshCfr05CloudPresentation(id,{force:true});
+        if (cell.isConnected){cell.innerHTML = filesMarkup(row);const details = cell.querySelector("details");if(details)details.open = true;}
+      } catch (_error){if(cell.isConnected){cell.querySelector('[role="status"]').textContent = "Secure cloud metadata unavailable; attachments are not confirmed absent.";check.disabled = false;}}
     });
   };
 })(typeof window !== "undefined" ? window : globalThis);
