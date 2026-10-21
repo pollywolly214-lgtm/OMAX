@@ -5,6 +5,7 @@ function nav(){
     <button data-go="#/settings">Settings</button>
     <button data-go="#/tolerance">Tolerance</button>
     <button data-go="#/jobs">Jobs</button>
+    <button data-go="#/projects">Projects</button>
     <button data-go="#/costs">Costs</button>
     <button data-go="#/inventory">Inventory</button>
     <button data-go="#/order-request">Order Request</button>
@@ -96,6 +97,7 @@ function route(options = {}){
     if (raw === "#settings"  || raw === "#/settings")  return `#/settings${suffix}`;
     if (raw === "#tolerance" || raw === "#/tolerance") return "#/tolerance";
     if (raw === "#jobs"      || raw === "#/jobs")      return "#/jobs";
+    if (raw === "#projects"  || raw === "#/projects")  return `#/projects${suffix}`;
     if (raw === "#costs"     || raw === "#/costs")     return "#/costs";
     if (raw === "#inventory" || raw === "#/inventory") return "#/inventory";
     if (raw === "#order-request" || raw === "#/order-request") return "#/order-request";
@@ -105,6 +107,7 @@ function route(options = {}){
   }
 
   function setActiveTabs(norm){
+    norm = norm.split("?")[0];
     // Header <nav> anchors
     document.querySelectorAll("header .nav a").forEach(a=>{
       const want = normalizeHash(a.getAttribute("href") || "");
@@ -128,6 +131,7 @@ function route(options = {}){
     if (norm === "#/settings" || norm.startsWith("#/settings?"))      { renderSettings();   return; }
     if (norm === "#/tolerance")     { renderTolerance();  return; }
     if (norm === "#/jobs")          { renderJobs();       return; }
+    if (norm === "#/projects" || norm.startsWith("#/projects?")) { renderProjects(); return; }
     if (norm === "#/costs")         { renderCosts();      return; }
     if (norm === "#/inventory")     { renderInventory();  return; }
     if (norm === "#/order-request") { renderOrderRequest(); return; }

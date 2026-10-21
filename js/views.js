@@ -2777,7 +2777,7 @@ function cuttingJobFinancialTone(key, value){
 
 function formatCuttingJobFinancialValue(profit, key){
   if (key === "failurePercent") return `${Math.round(profit[key])}%`;
-  const value = ["cuttingCost", "materialExpense"].includes(key) ? (-profit[key] || 0) : profit[key];
+  const value = ["cuttingCost", "materialExpense", "revenueLost"].includes(key) ? (-profit[key] || 0) : profit[key];
   return new Intl.NumberFormat(undefined, {style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(value);
 }
 
@@ -2786,21 +2786,38 @@ function expandedCuttingJobNetIds(){
   return window.__expandedCuttingJobNetIds;
 }
 
+function recordedCuttingJobFailurePercent(job){
+  const raw = job?.failurePercent;
+  if ((typeof raw !== "number" && typeof raw !== "string") || String(raw).trim() === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
+}
+
+function cuttingJobFailureLabel(job){
+  const value = recordedCuttingJobFailurePercent(job);
+  return value === null ? "Not recorded" : `${Math.round(value)}%`;
+}
+
 function renderCuttingJobNetBreakdown(job){
   const profit = computeCuttingJobProfit(job);
+  const failureKnown = recordedCuttingJobFailurePercent(job) !== null;
+  const displayProfit = failureKnown ? profit : {...profit,totalProfit:profit.originalNetProfit};
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const id = String(job.id);
   const expanded = expandedCuttingJobNetIds().has(id);
   const detailsId = `jobNetDetails_${encodeURIComponent(id)}`;
-  const money = key => esc(formatCuttingJobFinancialValue(profit, key));
-  const tone = key => cuttingJobFinancialTone(key, profit[key]);
+  const money = key => !failureKnown && key === "failurePercent" ? "Not recorded"
+    : !failureKnown && ["adjustedRevenue","revenueLost"].includes(key) ? "Unavailable"
+    : esc(formatCuttingJobFinancialValue(displayProfit, key));
+  const tone = key => !failureKnown && ["failurePercent","adjustedRevenue","revenueLost"].includes(key) ? "job-finance-neutral"
+    : cuttingJobFinancialTone(key, displayProfit[key]);
   const rate = value => esc(new Intl.NumberFormat(undefined, {style:"currency",currency:"USD",minimumFractionDigits:0,maximumFractionDigits:20}).format(value));
   const hours = esc(String(profit.hours));
   const fields = [["failurePercent","Failure percentage"],["revenue","Original revenue"],["adjustedRevenue","Revenue remaining"],
     ["cuttingCost","Full cutting expense"],["materialExpense","Full material expense"],["originalNetProfit","Original net profit"],
-    ["totalProfit","Adjusted net profit"],["revenueLost","Revenue lost / potential profit reduction"]];
+    ["totalProfit",failureKnown ? "Adjusted net profit" : "Provisional net (failure not recorded)"],["revenueLost","Revenue lost / potential profit reduction"]];
   return `<div class="job-net-summary" data-job-net-id="${esc(id)}">
-    <div class="job-net-total">Net Total: <strong class="${tone("totalProfit")}">${money("totalProfit")}</strong></div>
+    <div class="job-net-total">${failureKnown ? "Net Total" : "Net Total (provisional, failure not recorded)"}: <strong class="${tone("totalProfit")}">${money("totalProfit")}</strong></div>
     <div class="${tone("revenue")}">Revenue: ${rate(profit.chargeRate)}/hr × ${hours} hr = ${money("revenue")}</div>
     <div class="${tone("materialExpense")}">Material Expense: ${money("materialExpense")}</div>
     <div class="${tone("cuttingCost")}">Cutting Expense: ${rate(-profit.costRate || 0)}/hr × ${hours} hr = ${money("cuttingCost")}</div>
@@ -3999,7 +4016,7 @@ function viewJobs(){
                 <span class="job-actions-trigger-caret" aria-hidden="true">▾</span>
               </button>
               <div class="job-actions-menu" id="${esc(actionMenuId)}" data-history-actions-menu="${job.id}" hidden>
-                <button type="button" data-history-failed-cut="${esc(String(job.id))}">Failed Cut — ${Math.round(computeCuttingJobProfit(job).failurePercent)}%</button>
+                <button type="button" data-history-failed-cut="${esc(String(job.id))}">Failed Cut — ${cuttingJobFailureLabel(job)}</button>
                 <button type="button" data-history-activate="${job.id}">Make active copy</button>
                 <button type="button" data-history-edit="${job.id}">Edit</button>
                 <button type="button" class="danger" data-history-delete="${job.id}">Delete</button>
