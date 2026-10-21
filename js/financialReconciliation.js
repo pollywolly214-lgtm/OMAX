@@ -1,8 +1,8 @@
 (function(root, factory){
-  const api = factory();
+  const api = factory(root?.OMAXCuttingJobSourceEvidence || (typeof require === "function" ? require("./cuttingJobSourceEvidence") : null));
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.OMAXFinancialReconciliation = api;
-})(typeof window === "undefined" ? null : window, function(){
+})(typeof window === "undefined" ? null : window, function(sourceVerifier){
   "use strict";
   const ranges = Object.freeze([
     {key:"7d", label:"1W", days:7}, {key:"30d", label:"1M", days:30},
@@ -79,7 +79,7 @@
   function selectJobs(jobs, {profit, range = "all", today} = {}){
     if (typeof profit !== "function") throw new Error("The canonical Cutting Job profit helper is required.");
     const window = period(range,today), entries = [], identities = new Map();
-    const financialAudit = audit(jobs,{profit});
+    const financialAudit = audit(jobs,{profit,today:window.endISO,range});
     const duplicateIndexes = new Set(financialAudit.duplicateGroups.flatMap(group=>group.rows.map(row=>row.index)));
     for (const [index,job] of (Array.isArray(jobs) ? jobs : []).entries()){
       if (!job || typeof job !== "object" || Array.isArray(job)) continue;
@@ -122,7 +122,67 @@
       largestLosses:rows.filter(row=>row.profit.totalProfit<0).slice().sort((a,b)=>a.profit.totalProfit-b.profit.totalProfit).slice(0,10),
       previousAllTime:{count:oldRows.length,net:oldNet},populationChanges};
   }
-  function audit(jobs,{profit} = {}){
+  function sourceEvidence(job){
+    const source=job.importProvenance?.sourceRecord || job.importProvenance || {};
+    return {file:String(source.source_file || ""),text:String(source.source_text || ""),
+      importRow:source.sourceRowNumber ?? job.importProvenance?.sourceRowNumber ?? null,
+      importId:String(job.import_event_id || source.import_event_id || ""),
+      date:source.completed_date ?? "",name:source.job_name ?? "",project:source.project_number ?? "",
+      dimensions:source.source_dimensions_raw || [source.path_length_ft,source.path_width_ft,source.thickness_raw || source.thickness_inches].filter(present).join(" × "),
+      minutes:source.actual_cut_minutes ?? "",thickness:source.thickness_inches ?? null,charge:source.charge_rate_per_hr ?? null,cost:source.cost_rate_per_hr ?? null,
+      rateNote:[['charge_rate_per_hr',200,'charge'],['cost_rate_per_hr',45,'cost']].map(([key,value,label])=>
+        Object.hasOwn(source,key) && !String(source[key]??"").trim()
+          ? `Blank source ${label} cell: importer supplies $${value}/hr; current saved value may have been edited.`
+          : Object.hasOwn(source,key) ? `Source ${label} cell retained; historical realized rate is not independently verified.`
+          : `Original ${label} cell unavailable; a saved rate alone does not establish historical actual cost/revenue.`).join(" ")};
+  }
+  const sourceStatuses=Object.freeze({confirmed:"Source-confirmed duplicate import",possible:"Possible duplicate requiring review",
+    separate:"Verified separate cuts",insufficient:"Insufficient source evidence"});
+  const pairKey=(a,b)=>JSON.stringify([String(a),String(b)].sort());
+  function sourceReview(a,b,verification){
+    const retained=row=>{const source=row.sourceEvidence;return source.file.trim() && source.text.trim() && dateKey(source.date)
+      && String(source.project).trim() && valid(source.minutes,true) && Number(source.minutes)>0;};
+    const complete=retained(a) && retained(b);
+    const base={status:complete ? "possible" : "insufficient",reason:complete
+      ? "Retained source text/files can be compared, but no shared unique physical entry has been verified."
+      : "Original source text, file identity or date/project/minutes context is missing for at least one record; physical-entry linkage is unavailable."};
+    const left=verification?.rows[a.index],right=verification?.rows[b.index];
+    if (left?.status==="matched" && right?.status==="matched"){
+      const status=left.entry.id===right.entry.id ? "confirmed" : "separate";
+      return {status,label:sourceStatuses[status],document:verification.document,sha256:verification.sha256,
+        reason:`Verified supplied PDF physical entries: left page ${left.entry.page}, cut ${left.entry.cut}; right page ${right.entry.page}, cut ${right.entry.cut}. ${status==="confirmed" ? "Both retained source records identify the same unique entry; material/rate correctness is a separate review." : "These identify distinct log entries even if dates, durations or costs match."}`};
+    }
+    return {...base,label:sourceStatuses[base.status],reason:[base.reason,left?.reason,right?.reason].filter(Boolean).join(" ")};
+  }
+  function reviewSourcePairs(report){
+    const results=[],countsById=new Map();
+    for (const row of report.rows) countsById.set(String(row.id),(countsById.get(String(row.id))||0)+1);
+    for (const group of report.duplicateGroups) for (const [left,right] of group.possiblePairs){
+      const a=report.rows.find(row=>row.index===left),b=report.rows.find(row=>row.index===right),key=pairKey(a.id,b.id),review=sourceReview(a,b,report.sourceVerification);
+      const result={key,left:a.id,right:b.id,review};results.push(result);
+      if (!String(a.id??"").trim() || !String(b.id??"").trim() || countsById.get(String(a.id))!==1 || countsById.get(String(b.id))!==1)
+        result.review={status:"insufficient",label:sourceStatuses.insufficient,reason:"Missing or repeated stable job identity; no unique record decision can be made."};
+    }
+    return {pairs:results,counts:Object.fromEntries(Object.keys(sourceStatuses).map(status=>[status,results.filter(item=>item.review.status===status).length]))};
+  }
+  function previewExclusions(report,selectedIds=[]){
+    const counts=new Map();for (const row of report.rows) if (row.id!=null) counts.set(String(row.id),(counts.get(String(row.id))||0)+1);
+    const candidates=new Set(report.duplicateGroups.flatMap(group=>group.rows.map(row=>String(row.id))));
+    const ids=Array.isArray(selectedIds) ? selectedIds.map(String) : [],unique=new Set(ids),errors=[];
+    if (!Array.isArray(selectedIds)) errors.push("Exclusions must be an explicit list of stable job IDs.");
+    if (unique.size!==ids.length) errors.push("Repeated exclusion IDs are not accepted.");
+    for (const id of unique) if (!id.trim() || counts.get(id)!==1 || !candidates.has(id)) errors.push(`Unknown, non-candidate or ambiguous stable job ID: ${id}`);
+    const eligible=report.rows.filter(row=>row.finite && inPeriod(row.date,report.previewWindow));
+    for (const id of unique) if (!eligible.some(row=>String(row.id)===id)) errors.push(`Selected record is outside the canonical financial preview period: ${id}`);
+    const totals=rows=>({count:rows.length,revenue:finiteSum(rows,row=>row.revenue),runtimeExpense:finiteSum(rows,row=>row.runtimeExpense),
+      materialExpense:finiteSum(rows,row=>row.materialExpense),net:finiteSum(rows,row=>row.modeledNet)});
+    const warnings=[];
+    for (const group of report.duplicateGroups) if (group.rows.every(row=>unique.has(String(row.id)))) warnings.push("Every representation in a candidate group is selected; this hypothesis removes the entire group.");
+    return {hypothetical:true,window:report.previewWindow,selectedIds:ids,errors,warnings,baseline:totals(eligible),
+      excluded:errors.length ? null : totals(eligible.filter(row=>unique.has(String(row.id)))),
+      remaining:errors.length ? null : totals(eligible.filter(row=>!unique.has(String(row.id)))),outsidePeriod:report.rows.length-eligible.length};
+  }
+  function audit(jobs,{profit,today,range="all"} = {}){
     if (typeof profit!=="function") throw new Error("The canonical Cutting Job profit helper is required.");
     const rows=[];
     for (const [index,job] of (Array.isArray(jobs) ? jobs : []).entries()){
@@ -143,6 +203,8 @@
         duration,zeroWithActual:duration.originalHours===0 && recorded,
         originalNet:original.totalProfit,modeledNet:modeled.totalProfit,
         netChange:Number.isFinite(modeled.totalProfit-original.totalProfit) ? modeled.totalProfit-original.totalProfit : null,
+        sourceEvidence:sourceEvidence(job),revenue:modeled.adjustedRevenue,runtimeExpense:modeled.cuttingCost,
+        finite:["hours","chargeRate","costRate","revenue","revenueLost","adjustedRevenue","cuttingCost","materialExpense","totalProfit"].every(key=>Number.isFinite(modeled[key])),
         materialExpense:modeled.materialExpense,materialUnitCost:modeled.materialCost,materialQty:modeled.materialQty,
         chargeRate:modeled.chargeRate,costRate:modeled.costRate,failurePercent:modeled.failurePercent});
     }
@@ -180,7 +242,7 @@
     const byImport=Object.fromEntries(["CUTPDF","616-CUT","Other / manual"].map(family=>[family,{
       candidates:rows.filter(row=>row.family===family && row.zeroWithActual).length,
       resolved:rows.filter(row=>row.family===family && row.duration.usedRecorded).length}]));
-    return {readOnly:true,count:rows.length,rows,byImport,
+    return {readOnly:true,count:rows.length,rows,byImport,previewWindow:period(range,today),
       zeroWithActual:rows.filter(row=>row.zeroWithActual).length,resolved:rows.filter(row=>row.duration.usedRecorded).length,
       durationConflicts:rows.filter(row=>row.duration.issues.length).length,
       unresolvedZero:rows.filter(row=>row.zeroWithActual && !row.duration.usedRecorded).length,
@@ -271,5 +333,6 @@
       // No loaded record currently proves cost composition and complete ledger coverage.
       netWaterjetImpact:null,coverageReason:financialCoverage.blockers.join(" ")};
   }
-  return Object.freeze({ranges,dateKey,localToday,period,selectJobs,expenses,build,audit});
+  const verifySources=async report=>({...report,sourceVerification:await sourceVerifier.verify(report)});
+  return Object.freeze({ranges,dateKey,localToday,period,selectJobs,expenses,build,audit,sourceStatuses,pairKey,sourceReview,reviewSourcePairs,previewExclusions,verifySources});
 });

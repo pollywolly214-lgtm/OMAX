@@ -13703,6 +13703,23 @@ function getPurchaseOrderApi(){
   return window.purchaseOrderApi;
 }
 
+function bindCuttingJobFinancialPreview(panel,report,readLatest){
+  const api=window.OMAXFinancialReconciliation,snapshot=JSON.stringify(report.rows);
+  const update=()=>{
+    const output=panel.querySelector("[data-financial-preview-output]"),latest=readLatest();
+    if (JSON.stringify(latest.rows)!==snapshot || JSON.stringify(latest.previewWindow)!==JSON.stringify(report.previewWindow)){
+      output.textContent="Loaded records or the local financial date changed. Run the read-only audit again before previewing exclusions.";
+      return;
+    }
+    const selected=Array.from(panel.querySelectorAll("[data-financial-preview-id]:checked"),input=>input.dataset.financialPreviewId);
+    output.innerHTML=renderCuttingJobExclusionPreview(api.previewExclusions(report,selected));
+  };
+  panel.onchange=event=>{if(event.target.matches("[data-financial-preview-id]"))update();};
+  panel.querySelector("[data-financial-preview-clear]")?.addEventListener("click",()=>{
+    panel.querySelectorAll("[data-financial-preview-id]").forEach(input=>{input.checked=false;});update();
+  });
+}
+
 function bindFinancialPeriodControls(root, rerender){
   root.querySelectorAll("[data-financial-period]").forEach(control => {
     control.addEventListener("change", () => {

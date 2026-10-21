@@ -1,6 +1,7 @@
 "use strict";
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs/promises"),path=require("node:path"),http=require("node:http");
 const {chromium}=require(process.env.OMAX_PLAYWRIGHT_PATH||"playwright"),{productionShape}=require("./fixtures/cje-completed-financial");
+const {june29}=require('./fixtures/cje-source-evidence');
 test("CJE-01G: existing audit and all financial views agree on 172 synthetic records with zero source/backend writes",{timeout:90000},async t=>{
   const root=path.resolve(__dirname,".."),server=http.createServer(async(req,res)=>{
     const pathname=new URL(req.url,"http://localhost").pathname,file=path.resolve(root,"."+pathname+(pathname.endsWith("/")?"index.html":""));
@@ -16,11 +17,14 @@ test("CJE-01G: existing audit and all financial views agree on 172 synthetic rec
   const load=async()=>{await page.goto(origin+"/?devsafe=1&cjeg="+(++loads)+"#/costs",{waitUntil:"load"});await page.waitForFunction(()=>window.__initialAdoptComplete&&window.OMAXDevSafe?.active);};
   await load();assert.equal(await page.evaluate(()=>typeof firebase),"undefined");assert.equal((await page.evaluate(()=>saveCloudNow())).saved,true);
   await load();assert.equal((await page.evaluate(()=>saveCloudNow())).saved,true);
+  const jobs=productionShape(),ambiguousIndexes=jobs.map((job,index)=>job.name==='ATM Person Door' ? index : -1).filter(index=>index>=0),sourceCuts=june29();
+  ambiguousIndexes.forEach((index,i)=>{jobs[index]={...sourceCuts[i],cat:'project',files:[]};});
+  jobs[ambiguousIndexes[3]].importProvenance.thickness_inches='1.1875';
   await page.evaluate(async jobs=>{
     const state=(await FB.docRef.get()).data();state.cuttingJobs=[];state.completedCuttingJobs=jobs;
     state.jobFolders=[{id:"jobs_root",name:"All Jobs",parent:null,order:1},{id:"project",name:"1254 Blanco",projectNumber:"1254",parent:"jobs_root",order:2}];
     await FB.docRef.set(state);
-  },productionShape());
+  },jobs);
   await load();await page.waitForFunction(()=>completedCuttingJobs.length===172);
   const cloud=()=>page.evaluate(async()=>(await FB.docRef.get()).data());
   const loadedSource=()=>page.evaluate(()=>{const state=getCuttingJobImporterState();return JSON.stringify({jobFolders:window.jobFolders,...Object.fromEntries(Object.getOwnPropertyNames(state).map(key=>[key,state[key]]))});});
@@ -50,6 +54,7 @@ test("CJE-01G: existing audit and all financial views agree on 172 synthetic rec
   assert.match(await page.locator('[aria-label="Completed job summary"]').textContent(),/Financial reporting uses 12\.3 hr from actualHours/);
   await page.locator(`[data-history-cancel="${c074}"]`).click();
   await page.evaluate(()=>openReviewedCuttingJobImporter());await page.locator('#cuttingJobRepairAudit').click();
+  await page.waitForSelector('#cuttingJobFinancialAudit[data-source-ready="true"]');
   const report=await page.locator('#cuttingJobImportRows').evaluate(el=>JSON.parse(el.dataset.lastRepairAudit));
   assert.equal(report.financial.resolved,155);assert.equal(report.financial.duplicateGroups.length,38);assert.equal(report.readOnly,true);assert.equal(report.stateMutationDetected,false);
   const panel=page.locator('#cuttingJobFinancialAudit');assert.equal(await panel.isVisible(),true);
@@ -57,6 +62,26 @@ test("CJE-01G: existing audit and all financial views agree on 172 synthetic rec
   assert.match(await panel.textContent(),/DIFFERENT MATERIAL COSTS/);assert.match(await panel.textContent(),/Ambiguous group — manual review/);
   const ambiguous=panel.locator('[data-financial-duplicate-group]').filter({hasText:"3 CUTPDF / 2 616-CUT"});await ambiguous.locator('summary').first().click();
   assert.match(await ambiguous.textContent(),/ATM Person Door/);assert.match(await ambiguous.textContent(),/6 possible cross-import matches, at most 2 simultaneous pairings/);
+  assert.equal(await panel.locator('[data-financial-preview-id]:checked').count(),0);
+  const sourceCounts=await panel.locator('[data-source-review-counts]').textContent();
+  assert.match(sourceCounts,/Source-confirmed duplicate import: 2/);assert.match(sourceCounts,/Verified separate cuts: 4/);assert.match(sourceCounts,/Insufficient source evidence: 37/);
+  assert.equal(await ambiguous.locator('[data-source-pair-status="confirmed"]').count(),2);assert.equal(await ambiguous.locator('[data-source-pair-status="separate"]').count(),4);
+  assert.match(await ambiguous.textContent(),/1.1875 differs.*0.1875/);assert.match(await ambiguous.textContent(),/Blank source charge cell/);
+  const preview=panel.locator('[data-financial-preview-output]'),first=ambiguous.locator('[data-financial-preview-id]').first();
+  const selected=await first.getAttribute('data-financial-preview-id');
+  const selectedNet=await page.evaluate(id=>computeCuttingJobProfit(completedCuttingJobs.find(job=>job.id===id)).totalProfit,selected);
+  await first.check();
+  const remaining=preview.locator('tbody tr').nth(2);
+  assert.equal(await remaining.locator('td').first().textContent(),'171');
+  assert.equal(await remaining.locator('td').last().textContent(),new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(expected.net-selectedNet));
+  assert.match(await preview.textContent(),/Hypothetical modeled totals/);
+  await panel.locator('[data-financial-preview-clear]').click();assert.equal(await panel.locator('[data-financial-preview-id]:checked').count(),0);
+  assert.equal(await remaining.locator('td').first().textContent(),'172');
+  // Simulate a changing read snapshot without altering a loaded business record.
+  await page.evaluate(()=>{window.__cjeAudit=OMAXFinancialReconciliation.audit;OMAXFinancialReconciliation={...OMAXFinancialReconciliation,audit:(...args)=>{const result=__cjeAudit(...args);return {...result,previewWindow:{...result.previewWindow,endISO:'2026-10-22'}};}};});
+  await first.check();assert.match(await preview.textContent(),/local financial date changed/);
+  await page.evaluate(()=>{OMAXFinancialReconciliation={...OMAXFinancialReconciliation,audit:__cjeAudit};});
+  await panel.locator('[data-financial-preview-clear]').click();
   const out=process.env.OMAX_CJE_SCREENSHOT_DIR;if(out){await fs.mkdir(out,{recursive:true});await page.screenshot({path:path.join(out,"completed-financial-audit.png")});}
   await page.setViewportSize({width:390,height:844});
   const bounds=await panel.evaluate(el=>({width:el.getBoundingClientRect().width,viewport:innerWidth,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight}));

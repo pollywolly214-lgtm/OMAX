@@ -5232,10 +5232,21 @@ window.runCuttingJobHistoryRepair=()=>window.CuttingJobRepair.repair(cuttingJobR
   document.addEventListener("click",event=>{const trigger=event.target?.closest?.("[data-cutting-job-import-open]");if(trigger){event.preventDefault();openDialog(trigger);}});
   close.addEventListener("click",closeDialog);dialog.addEventListener("cancel",event=>{event.preventDefault();closeDialog();});
   repairAudit?.addEventListener("click",()=>{lastRepairAudit=window.auditCuttingJobHistoryRepair();repairRun.disabled=Boolean(lastRepairAudit.blockingError);status.textContent=lastRepairAudit.blockingError?`Audit blocked: ${lastRepairAudit.blockingError}`:`Read-only audit: ${lastRepairAudit.jobCount} jobs; ${lastRepairAudit.repairPlan.created.length} categories to create; ${lastRepairAudit.repairPlan.renamed.length} to rename; ${lastRepairAudit.repairPlan.assignments.length} assignments reviewed.`;if(lastRepairAudit.legacy1111.jobIds.length||lastRepairAudit.legacy1111.folderIds.length)status.textContent+=" Historical 1111 review required: "+lastRepairAudit.legacy1111.jobIds.length+" jobs, "+lastRepairAudit.legacy1111.folderIds.length+" folders (no migration).";if(lastRepairAudit.categoryOwnershipDiagnostics?.length)status.textContent+=" "+lastRepairAudit.categoryOwnershipDiagnostics.map(item=>item.message).join(" ");rows.dataset.lastRepairAudit=JSON.stringify(lastRepairAudit);});
-  repairAudit?.addEventListener("click",()=>{
-    const panel=document.getElementById("cuttingJobFinancialAudit"),financial=lastRepairAudit?.financial;
+  repairAudit?.addEventListener("click",async()=>{
+    const panel=document.getElementById("cuttingJobFinancialAudit"),captured=lastRepairAudit,financial=captured?.financial;
     if (!panel || !financial) return;
-    panel.hidden=false;panel.innerHTML=renderCuttingJobFinancialAudit(financial);
+    panel.hidden=false;delete panel.dataset.sourceReady;panel.textContent="Checking retained source evidence against reviewed reference entries…";
+    let verified=financial;
+    try { verified=await window.OMAXFinancialReconciliation.verifySources(financial); }
+    catch (_) { verified={...financial,sourceVerification:null}; }
+    if (lastRepairAudit!==captured) return;
+    const readLatest=()=>window.OMAXFinancialReconciliation.audit(window.completedCuttingJobs,{profit:computeCuttingJobProfit});
+    const latest=readLatest();
+    if (JSON.stringify(latest.rows)!==JSON.stringify(financial.rows) || JSON.stringify(latest.previewWindow)!==JSON.stringify(financial.previewWindow)){
+      panel.textContent="Loaded records or the local financial date changed. Run the read-only audit again.";return;
+    }
+    captured.financial=verified;rows.dataset.lastRepairAudit=JSON.stringify(captured);
+    panel.innerHTML=renderCuttingJobFinancialAudit(verified);bindCuttingJobFinancialPreview(panel,verified,readLatest);panel.dataset.sourceReady="true";
     status.textContent+=` Financial audit: ${financial.resolved} supported durations resolved; ${financial.durationConflicts} duration reviews; ${financial.duplicateGroups.length} possible cross-import duplicate groups. No financial records changed.`;
   });
   repairRun?.addEventListener("click",async()=>{if(!lastRepairAudit||lastRepairAudit.blockingError||!window.confirm("Download a full backup, repair the audited category assignments, and resequence every cut?"))return;repairRun.disabled=true;status.textContent="Revalidating, backing up, repairing, and saving…";const result=await window.runCuttingJobHistoryRepair();rows.dataset.lastRepairResult=JSON.stringify(result);status.textContent=result.saveCompleted?`Repair saved: ${result.assignments.length} jobs assigned and ${result.resequence.total} cuts numbered.`:result.saveIndeterminate?"Repair save outcome indeterminate. Refresh and read-verify; do not retry.":`Repair not completed: ${result.error}`;lastRepairAudit=null;});

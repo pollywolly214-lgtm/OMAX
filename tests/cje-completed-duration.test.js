@@ -113,9 +113,9 @@ test("Cutting Jobs, Cost Data Center and Financial Breakdown use exactly the sam
   assert.match(c.renderFinancialBreakdown(report),/1 supported zero\/missing durations resolved/);assert.equal(jobs[0].estimateHours,0);
 });
 test("audit safely displays IDs, dates, cut numbers, source evidence, modeling effect and material differences",()=>{
-  const c=vm.createContext({window:{}});vm.runInContext(section(views,"function renderCuttingJobFinancialAudit(","function renderFinancialBreakdown("),c);
+  const c=vm.createContext({window:{OMAXFinancialReconciliation:api}});vm.runInContext(section(views,"function renderCuttingJobFinancialAudit(","function renderFinancialBreakdown("),c);
   const jobs=[imported("CUTPDF",1,{name:'<img src=x onerror=alert(1)>',cutNumber:"C074"}),imported("616-CUT",1,{name:'<img src=x onerror=alert(1)>',materialCost:99})];
   const r=audit(freeze(jobs)),before=JSON.stringify(r),html=c.renderCuttingJobFinancialAudit(r);
-  for(const text of ["C074","CUTPDF-","616-CUT-","Strong one-to-one candidate","DIFFERENT MATERIAL COSTS","actual_cut_minutes","modeled change","Available import provenance"])assert.ok(html.includes(text),text);
+  for(const text of ["C074","CUTPDF-","616-CUT-","One-to-one candidate","DIFFERENT MATERIAL COSTS","actual_cut_minutes","modeled change","Available import provenance"])assert.ok(html.includes(text),text);
   assert.ok(!html.includes("<img"));assert.ok(html.includes("&lt;img"));assert.equal(JSON.stringify(r),before);
 });

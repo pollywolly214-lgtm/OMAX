@@ -1,5 +1,7 @@
 # CJE-01C — Financial reconciliation
 
+Latest source-based findings, pair decisions, hypothetical totals and CJE-01H validation: [CJE-01H source reconciliation](cje-01h-source-reconciliation.md). Earlier sections below describe their respective implementation stages.
+
 Cost Analysis now builds a read-only financial report from loaded `completedCuttingJobs`, corrected maintenance event cost rows already produced by CCR, and Purchase History's `receiptTrackerWeeks`. The Central Data Table is a presentation, not a new financial ledger. No records, defaults, schema, persistence guards or job-entry calculations are rewritten.
 
 The existing `computeCuttingJobProfit()` remains unchanged. Both Cost Analysis and Past Cutting Jobs call the shared `OMAXFinancialReconciliation.selectJobs()` with the same session-only financial period. All-Time is the default; 1W/1M/3M/6M/1Y mean 7/30/90/182/365 inclusive calendar days through today. This is a separate control from the unchanged machine-hour efficiency snapshot and saved CCR calculation window. Job category/search filters are explicitly additional on Past Cutting Jobs.
