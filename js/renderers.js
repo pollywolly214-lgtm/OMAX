@@ -20698,7 +20698,7 @@ function computeCostModel(){
   const financialWindow = financialReconciliation.window.description;
   summaryCards.splice(0, summaryCards.length,
     {key:"cuttingJobs",icon:"✂",title:"Cutting Job Net Profit",value:financialMoney(financialReconciliation.totals.net),tone:financialTone(financialReconciliation.totals.net),
-      hint:`${financialReconciliation.totals.count} completed jobs · ${financialWindow}. Modeled using canonical job rates; see Financial Breakdown.`},
+      hint:`${financialReconciliation.totals.count} completed jobs · ${financialWindow}. Modeled using resolved financial hours and job rates. Loaded audit: ${financialReconciliation.audit.durationConflicts} duration reviews, ${financialReconciliation.audit.duplicateGroups.length} possible duplicate groups; all records retained. See Financial Breakdown.`},
     {key:"recordedPurchases",icon:"$",title:"Recorded purchases",value:financialExpense(financialReconciliation.purchases.total),tone:"negative",
       hint:`${financialWindow}. Purchase History spending; not all purchases are maintenance or verified payments. Shown separately.`},
     {key:"maintenanceExpenses",icon:"⚙",title:"Maintenance event costs",value:financialExpense(financialReconciliation.maintenance.knownSubtotal),tone:"negative",

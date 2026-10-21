@@ -313,6 +313,8 @@ body.pump-notes-open,body.pump-baseline-open { overflow:hidden; }
 .financial-breakdown summary span{ display:inline-block; margin-left:8px; font-size:12px; font-weight:400; }
 .financial-breakdown details{ margin:12px 0; }
 .financial-breakdown p{ line-height:1.5; }
+#cuttingJobFinancialAudit{ max-height:40vh; overflow:auto; margin:12px; }
+#cuttingJobFinancialAudit pre{ white-space:pre-wrap; overflow-wrap:anywhere; }
 .financial-metrics{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin:16px 0; }
 .financial-metrics dt{ font-size:12px; color:#334b65; }
 .financial-metrics dd{ margin:4px 0 0; font-weight:600; font-variant-numeric:tabular-nums; }

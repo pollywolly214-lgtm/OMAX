@@ -1351,6 +1351,22 @@ function renderFinancialPeriodControl(windowRange, id){
     <span>${selected.description}</span></div>`;
 }
 
+function renderCuttingJobFinancialAudit(audit){
+  const esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const money=value=>Number.isFinite(value) ? new Intl.NumberFormat(undefined,{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(value) : "Unavailable";
+  const table=rows=>`<div class="financial-table-scroll"><table class="cost-table"><thead><tr><th>Cut / job / import IDs</th><th>Date / project / name</th><th>Original hours → financial hours</th><th>Actual time evidence</th><th>Material unit × quantity = expense</th><th>Original → modeled net / change</th><th>Review / provenance</th></tr></thead><tbody>${rows.map(row=>`<tr data-financial-audit-job="${esc(row.id)}"><td>${esc(row.cutNumber)} · ${esc(row.id)}<br>${esc(row.importId || "Not imported")}</td><td>${esc(row.suppliedDate)} · ${esc(row.project)}<br>${esc(row.name)}<br>Source date/name: ${esc(row.sourceDate)} / ${esc(row.sourceName)}</td><td>${esc(row.duration.originalHours)} → ${esc(row.duration.hours)} hr<br>${esc(row.duration.source)}</td><td>${row.duration.evidence.map(item=>`${esc(item.source)}: ${esc(item.hours)} hr${item.date ? ` (${esc(item.date)})` : ""}`).join("<br>") || "No valid actual cutting time"}</td><td>${money(row.materialUnitCost)} × ${esc(row.materialQty)} = ${money(row.materialExpense)}</td><td>${money(row.originalNet)} → ${money(row.modeledNet)}<br>Change ${money(row.netChange)}</td><td>${row.duration.issues.map(esc).join(" ")}${row.duration.estimateActualDifference ? " Positive original financial hours differ from actual; preserved for review." : ""}<details><summary>Available import provenance</summary><pre>${esc(JSON.stringify(row.provenance,null,2))}</pre></details></td></tr>`).join("") || '<tr><td colspan="7">No records in this review.</td></tr>'}</tbody></table></div>`;
+  return `<h4>Completed-job financial reconciliation (read-only)</h4>
+    <p>${audit.count} loaded completed records, all dates before financial-period exclusions. ${audit.zeroWithActual} zero/missing financial durations have positive recorded actual time; ${audit.resolved} pass the supported-duration rule; ${audit.unresolvedZero} remain unresolved; ${audit.durationConflicts} records have duration conflicts/invalid evidence.</p>
+    <p>${Object.entries(audit.byImport).map(([family,count])=>`${esc(family)}: ${count.candidates} candidates / ${count.resolved} resolved`).join(" · ")}</p>
+    <p>Modeled net using original estimateHours: ${money(audit.originalNet)} → supported-duration net ${money(audit.modeledNet)}; modeled change ${money(audit.netChange)}. Both totals include every loaded row, including possible duplicates and records excluded by the financial-period/date rules. They are diagnostic totals, not an approved historical profit.</p>
+    <p>Only completed zero/missing durations can change in calculations. Positive actualHours or the latest valid cumulative manual log is required; available actual/log/source minutes must agree within 0.000001 hr. Logs are not summed. Invalid, contradictory, decreasing or post-completion evidence requires review. Original estimateHours and all source records are preserved.</p>
+    <details open><summary>Duration reconciliation (${audit.rows.filter(row=>row.zeroWithActual || row.duration.issues.length || row.duration.estimateActualDifference).length})</summary>${table(audit.rows.filter(row=>row.zeroWithActual || row.duration.issues.length || row.duration.estimateActualDifference))}</details>
+    <h4>Possible cross-import duplicates — no records removed</h4>
+    <p>${audit.duplicateGroups.length} groups; at most ${audit.pairingUpperBound} cross-import pairings, not confirmed duplicates. Candidates share completion date, project and consistent recorded actual time (within 0.000001 hr). One-to-one candidates also match names. Same-import repeats are never consolidated; conflicted durations are not used to infer matches.</p>
+    ${audit.duplicateGroups.map((group,index)=>`<details data-financial-duplicate-group><summary>Group ${index+1}: ${group.oneToOne ? "Strong one-to-one candidate (unconfirmed)" : "Ambiguous group — manual review"}; ${group.cutpdf} CUTPDF / ${group.excel} 616-CUT${group.differentMaterial ? "; DIFFERENT MATERIAL COSTS" : ""}</summary><p>${group.possiblePairs.length} possible cross-import matches, at most ${group.pairingUpperBound} simultaneous pairings. All ${group.rows.length} records contribute ${money(group.modeledNet)} to the modeled total; no duplicate-adjusted total is inferred. ${group.differentMaterial ? "Material inputs differ, so choosing a record would also change expense and profit. Verify the original source and separate-cut evidence." : "Verify source identities and separate-cut evidence before any business-data correction."}</p>${table(group.rows)}</details>`).join("") || '<p>No candidates met these matching rules. This does not certify that history is duplicate-free.</p>'}
+    <details><summary>All loaded completed records (${audit.count})</summary>${table(audit.rows)}</details>`;
+}
+
 function renderFinancialBreakdown(report){
   const esc = value => String(value ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const money = value => Number.isFinite(value) ? new Intl.NumberFormat(undefined,{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(value) : "Unavailable";
@@ -1362,6 +1378,7 @@ function renderFinancialBreakdown(report){
   return `<details class="financial-breakdown" data-financial-breakdown>
     <summary>Financial Breakdown <span>${t.count} completed jobs · ${esc(report.window.description)}</span></summary>
     <p>Live calculation from loaded completed-job records. Net Total uses the same canonical calculation as Cutting Jobs. Amounts are modeled from job inputs, not verified invoice receipts.</p>
+    <p role="status">Loaded-record audit: ${report.audit.resolved} supported zero/missing durations resolved; ${report.audit.durationConflicts} duration reviews; ${report.audit.duplicateGroups.length} possible CUTPDF / 616-CUT duplicate groups. Every record is retained. Historical profitability remains provisional until duplicate and financial-input issues are reviewed. Open Cutting Jobs → reviewed import → Audit Cutting Jobs for row evidence.</p>
     ${window.__cuttingJobDisplayUnconfirmed ? '<p role="alert">The latest job save is unverified; these loaded values may include pending edits.</p>' : ""}
     <dl class="financial-metrics">
       ${metric("Completed jobs included",t.count)}${metric("Positive / negative / zero",`${t.positive} / ${t.negative} / ${t.zero}`)}
@@ -1371,7 +1388,7 @@ function renderFinancialBreakdown(report){
       ${metric("Total modeled job expense (runtime + material)",expense(t.runtimeExpense==null || t.materialExpense==null ? null : t.runtimeExpense+t.materialExpense))}
       ${metric("Average Net Profit / completed job",money(t.average))}
     </dl>
-    <p class="small">Net profit = Hours Taken × charge rate × (1 − failed-cut % / 100) − runtime expense − material unit cost × quantity. Legitimate separate cuts remain separate, including matching names, projects and dates.</p>
+    <p class="small">Net profit = resolved financial hours × charge rate × (1 − failed-cut % / 100) − runtime expense − material unit cost × quantity. Positive original financial hours stay unchanged; completed zero/missing hours use supported actual time. Legitimate separate cuts remain separate, including matching names, projects and dates.</p>
     ${t.net<0 ? `<p class="job-finance-negative">This loaded population has a modeled loss: adjusted revenue ${money(t.revenue)} + runtime expense ${expense(t.runtimeExpense)} + material expense ${expense(t.materialExpense)} = ${money(t.net)}. The rows below reproduce saved inputs; they do not verify that a historical rate represented legitimate operating costs. Review rate sources, import defaults and largest losses before correcting any source data.</p>` : ""}
     <h4>Runtime rate evidence from these same jobs</h4>
     <p>The snapshot's total modeled job expense includes both runtime and material. Dividing that total by job hours does not isolate the runtime cost/hr; use the weighted runtime rate below.</p>
@@ -1408,7 +1425,7 @@ function renderFinancialBreakdown(report){
     <ul>${report.coverage.blockers.map(reason=>`<li>${esc(reason)}</li>`).join("")}</ul>
     <p>${esc(report.coverage.resolution)} No maintenance, purchase subtotal or annual forecast is subtracted again from canonical job profit. Forecasts remain separate projections. Unused machine capacity is not an expense in this report.</p>
     <details><summary>Excluded jobs and changes from the previous all-time card</summary>
-      <p>Previous card eligibility applied to these same loaded records: ${report.previousAllTime.count} jobs, ${money(report.previousAllTime.net)}. Current selection: ${t.count} jobs, ${money(t.net)}. Differences below identify period, date or settings-link eligibility changes; this is not a reproduction of an earlier production screenshot.</p>
+      <p>Previous card eligibility applied to these same loaded records: ${report.previousAllTime.count} jobs, ${money(report.previousAllTime.net)}. That comparison uses the original estimateHours-only calculation. Current selection: ${t.count} jobs, ${money(t.net)}. The Cutting Jobs audit explains modeled changes from supported actual durations. Differences below identify population/period/date/settings-link changes; this is not a reproduction of an earlier production screenshot.</p>
       <div class="financial-table-scroll"><table class="cost-table"><thead><tr><th>Job / ID</th><th>Completion date supplied</th><th>Canonical net</th><th>Population change</th></tr></thead><tbody>
       ${report.populationChanges.map(row=>`<tr><td>${jobName(row)}</td><td>${esc(row.job.completedAtISO || "Missing")}</td><td>${money(row.profit.totalProfit)}</td><td>${esc(row.change)}</td></tr>`).join("") || '<tr><td colspan="4">No changes to the previous card population.</td></tr>'}</tbody></table></div>
       <p>${report.excluded.length} total excluded row(s).</p><ul>${report.excluded.map(row=>`<li>${jobName(row)}: ${esc(row.reason)}</li>`).join("")}</ul>
@@ -2879,6 +2896,8 @@ function renderCuttingJobNetBreakdown(job){
     <div class="${tone("materialExpense")}">Material Expense: ${money("materialExpense")}</div>
     <div class="${tone("cuttingCost")}">Cutting Expense: ${rate(-profit.costRate || 0)}/hr × ${hours} hr = ${money("cuttingCost")}</div>
     <div class="${tone("failurePercent")}">Failure: ${money("failurePercent")}</div>
+    ${profit.duration.usedRecorded ? `<div class="small">Financial duration: ${hours} hr from ${esc(profit.duration.source)}; stored estimateHours ${esc(profit.duration.storedEstimate ?? "missing")} hr preserved.</div>` : ""}
+    ${profit.duration.issues.length ? `<div class="small job-finance-negative">Duration requires review: ${profit.duration.issues.map(esc).join(" ")}</div>` : ""}
     <button type="button" class="job-net-toggle" data-job-net-toggle aria-expanded="${expanded}" aria-controls="${esc(detailsId)}">${expanded ? "Collapse" : "Expand"}</button>
     <dl class="job-net-breakdown" id="${esc(detailsId)}" data-job-net-details ${expanded ? "" : "hidden"}>
       ${fields.map(([key,label])=>`<dt>${label}</dt><dd class="${tone(key)}">${money(key)}</dd>`).join("")}
@@ -2889,15 +2908,15 @@ function renderCuttingJobNetBreakdown(job){
 function viewJobs(){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const textEsc = (str)=> String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const formatCurrency = (value, { showPlus = true } = {})=>{
+  const formatCurrency = (value, { showPlus = true, decimals } = {})=>{
     const num = Number(value);
     const safe = Number.isFinite(num) ? num : 0;
     const abs = Math.abs(safe);
     const formatted = new Intl.NumberFormat(undefined, {
       style: "currency",
       currency: "USD",
-      minimumFractionDigits: abs < 1000 ? 2 : 0,
-      maximumFractionDigits: abs < 1000 ? 2 : 0
+      minimumFractionDigits: decimals ?? (abs < 1000 ? 2 : 0),
+      maximumFractionDigits: decimals ?? (abs < 1000 ? 2 : 0)
     }).format(abs);
     if (safe < 0) return `-${formatted}`;
     if (safe > 0 && showPlus) return `+${formatted}`;
@@ -3752,7 +3771,7 @@ function viewJobs(){
   const completedStats = completedFiltered.reduce((acc, job)=>{
     const eff = computeJobEfficiency(job);
     const net = computeJobNetTotal(job, eff);
-    const estHours = Number(job?.estimateHours);
+    const estHours = resolveJobHours(job);
     const matCost = Number(job?.materialCost || 0);
     const matQty = Number(job?.materialQty || 0);
     const matTotal = (matCost * matQty) || 0;
@@ -3946,6 +3965,7 @@ function viewJobs(){
   const completedRows = completedFiltered.concat(unreconciledCompleted).map(job => {
     const eff = computeJobEfficiency(job);
     const netTotal = computeJobNetTotal(job);
+    const financialDuration = computeCuttingJobProfit(job).duration;
     const estHours = Number(job.estimateHours);
     const editingHistory = editingCompletedJobsSet.has(String(job.id));
     const priorityValue = priorityForJob(job);
@@ -4121,6 +4141,7 @@ function viewJobs(){
               </div>
               <aside class="job-edit-summary" aria-label="Completed job summary">
                 <div class="job-edit-summary-title">Job summary</div>
+                ${financialDuration.usedRecorded ? `<p class="small">Financial reporting uses ${esc(financialDuration.hours)} hr from ${esc(financialDuration.source)}. The Hours Taken input preserves the original stored estimateHours; opening this editor does not copy actual time into it.</p>` : ""}
                 <div class="job-edit-summary-metrics">
                   <div class="job-metric job-metric-total">
                     <span class="job-metric-label">Material total</span>
@@ -4227,8 +4248,8 @@ function viewJobs(){
       <div class="past-jobs-summary-wrap">
         <div class="past-jobs-summary">
           <div><span class="label">Jobs logged</span><span>${completedFiltered.length}</span></div>
-          <div><span class="label">Net Profit</span><span>${completedStats.total == null ? "Unavailable" : formatCurrency(completedStats.total)}</span></div>
-          <div><span class="label">Avg per job</span><span>${completedStats.total == null ? "Unavailable" : formatCurrency(completedAverage)}</span></div>
+          <div><span class="label">Net Profit</span><span>${completedStats.total == null ? "Unavailable" : formatCurrency(completedStats.total,{decimals:2})}</span></div>
+          <div><span class="label">Avg per job</span><span>${completedStats.total == null ? "Unavailable" : formatCurrency(completedAverage,{decimals:2})}</span></div>
         </div>
       </div>
       <table class="past-jobs-table job-table">
@@ -4947,6 +4968,7 @@ function viewJobs(){
       <h3>Past Cutting Jobs</h3>
       ${completedFinancial ? renderFinancialPeriodControl(completedFinancial.window,"jobsFinancialPeriod") : ""}
       ${completedFinancial ? '<p class="small muted">Shared financial period with Cost Analysis. Category and search filters also apply here; select All Jobs and clear search to compare totals.</p>' : ""}
+      ${completedFinancial ? `<p class="small" role="status">Modeled financial reporting: supported actual time resolves ${completedFinancial.rows.filter(row=>row.profit.duration.usedRecorded).length} zero/missing durations in this selection. ${completedFinancial.audit.durationConflicts} duration reviews and ${completedFinancial.audit.duplicateGroups.length} possible cross-import duplicate groups in the audited selection; all rows retained. Use Audit Cutting Jobs to reconcile the full loaded history before approving historical profit.</p>` : ""}
       <div class="past-jobs-toolbar">
         <div class="past-jobs-category">
           <label class="sr-only" for="jobHistoryCategoryFilter">Viewing past jobs category</label>

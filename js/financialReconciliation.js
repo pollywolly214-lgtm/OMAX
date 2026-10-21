@@ -37,8 +37,10 @@
   function issuesFor(job, profit){
     const issues = [];
     const flag = (code, message) => issues.push({code, message});
-    if (!valid(job.estimateHours,true)) flag("missing_hours", "Hours Taken missing/invalid; canonical calculation uses 0.");
+    if (profit.duration?.usedRecorded) flag("resolved_duration", `Zero/missing financial hours resolved from ${profit.duration.source}; original estimateHours preserved.`);
+    else if (!valid(job.estimateHours,true)) flag("missing_hours", "Hours Taken missing/invalid; no supported actual duration, so calculation uses 0.");
     else if (profit.hours === 0) flag("zero_hours", "Hours Taken is explicitly zero.");
+    if (profit.duration?.issues.length) flag("duration_conflict",profit.duration.issues.join(" "));
     for (const [field,label,nonnegative] of [["chargeRate","Charge rate",true],["costRate","Runtime expense rate",false]]){
       if (!valid(job[field],nonnegative)){
         if (valid(job.efficiency?.[field],nonnegative)) flag(`stored_${field}`, `${label} uses the stored efficiency rate.`);
@@ -77,6 +79,8 @@
   function selectJobs(jobs, {profit, range = "all", today} = {}){
     if (typeof profit !== "function") throw new Error("The canonical Cutting Job profit helper is required.");
     const window = period(range,today), entries = [], identities = new Map();
+    const financialAudit = audit(jobs,{profit});
+    const duplicateIndexes = new Set(financialAudit.duplicateGroups.flatMap(group=>group.rows.map(row=>row.index)));
     for (const [index,job] of (Array.isArray(jobs) ? jobs : []).entries()){
       if (!job || typeof job !== "object" || Array.isArray(job)) continue;
       const financial = profit(job), completionDate = dateKey(job.completedAtISO);
@@ -87,6 +91,7 @@
       const entry = {job,index,id:job.id ?? null,name:job.name || "Untitled job",completionDate,
         profit:financial,finite,included:!reason,reason,issues:issuesFor(job,financial)};
       entries.push(entry);
+      if (duplicateIndexes.has(index)) entry.issues.push({code:"possible_cross_import_duplicate",message:"Possible CUTPDF / 616-CUT duplicate; included without merging or exclusion. Review the Cutting Jobs audit."});
       if (job.id != null) identities.set(String(job.id),(identities.get(String(job.id)) || 0)+1);
     }
     // Never merge cuts by project/name/date or deduplicate identities while reading.
@@ -109,13 +114,78 @@
     const oldRows = entries.filter(row=>oldEligibility.get(row).included)
       .sort((a,b)=>oldEligibility.get(b).completedDateISO.localeCompare(oldEligibility.get(a).completedDateISO));
     // The old card counted eligible non-finite rows but skipped their net in its sum.
-    const oldNet = finiteSum(oldRows,row=>Number.isFinite(row.profit.totalProfit) ? row.profit.totalProfit : 0);
+    const oldNet = finiteSum(oldRows,row=>{ const previous=profit(row.job,{durationMode:"estimate"}).totalProfit; return Number.isFinite(previous) ? previous : 0; });
     const oldSet = new Set(oldRows);
     const populationChanges = entries.filter(row=>oldSet.has(row)!==row.included).map(row=>({...row,
       change:row.included ? `Added: ${oldEligibility.get(row).reason}` : row.reason}));
-    return {window,rows,excluded,entries,totals,warnings:[...warnings.values()],
+    return {window,rows,excluded,entries,totals,warnings:[...warnings.values()],audit:financialAudit,
       largestLosses:rows.filter(row=>row.profit.totalProfit<0).slice().sort((a,b)=>a.profit.totalProfit-b.profit.totalProfit).slice(0,10),
       previousAllTime:{count:oldRows.length,net:oldNet},populationChanges};
+  }
+  function audit(jobs,{profit} = {}){
+    if (typeof profit!=="function") throw new Error("The canonical Cutting Job profit helper is required.");
+    const rows=[];
+    for (const [index,job] of (Array.isArray(jobs) ? jobs : []).entries()){
+      if (!job || typeof job!=="object" || Array.isArray(job)) continue;
+      const modeled=profit(job),original=profit(job,{durationMode:"estimate"});
+      const source=job.importProvenance?.sourceRecord || job.importProvenance || {};
+      const importId=String(job.import_event_id || source.import_event_id || "");
+      const family=/^616-CUT(?:-|$)/i.test(importId) ? "616-CUT" : /^CUTPDF(?:-|$)/i.test(importId) ? "CUTPDF" : "Other / manual";
+      let duration=modeled.duration || {originalHours:original.hours,hours:modeled.hours,usedRecorded:false,issues:[],evidence:[]};
+      const recorded=duration.evidence.filter(item=>item.source!=="Imported actual_cut_minutes / 60").some(item=>item.hours>0)
+        || valid(job.actualHours,true) && Number(job.actualHours)>0
+        || (Array.isArray(job.manualLogs) && job.manualLogs.some(log=>valid(log?.completedHours,true) && Number(log.completedHours)>0));
+      if (!dateKey(job.completedAtISO)) duration={...duration,issues:[...duration.issues,"Missing/invalid completion date; actual time is not substituted."],
+        evidence:valid(job.actualHours,true) ? [{source:"actualHours (completion date unresolved)",hours:Number(job.actualHours)}] : duration.evidence};
+      rows.push({index,id:job.id ?? null,name:job.name || "Untitled job",named:typeof job.name==="string" && !!job.name.trim(),cutNumber:job.cutNumber ?? "",importId,family,
+        date:dateKey(job.completedAtISO),suppliedDate:job.completedAtISO,project:String(job.projectNumber ?? source.project_number ?? "").trim().toUpperCase(),
+        sourceDate:source.completed_date ?? "",sourceName:source.job_name ?? "",provenance:job.importProvenance || null,
+        duration,zeroWithActual:duration.originalHours===0 && recorded,
+        originalNet:original.totalProfit,modeledNet:modeled.totalProfit,
+        netChange:Number.isFinite(modeled.totalProfit-original.totalProfit) ? modeled.totalProfit-original.totalProfit : null,
+        materialExpense:modeled.materialExpense,materialUnitCost:modeled.materialCost,materialQty:modeled.materialQty,
+        chargeRate:modeled.chargeRate,costRate:modeled.costRate,failurePercent:modeled.failurePercent});
+    }
+    const buckets=new Map();
+    for (const row of rows){
+      if (row.family==="Other / manual" || !row.date || !row.project || row.duration.issues.length || !(row.duration.actualCandidate>0)) continue;
+      const key=JSON.stringify([row.date,row.project]);
+      if (!buckets.has(key)) buckets.set(key,[]);
+      buckets.get(key).push(row);
+    }
+    const duplicateGroups=[];
+    for (const bucket of buckets.values()){
+      const edges=new Map(),pairs=[];
+      for (let i=0;i<bucket.length;i++) for (let j=i+1;j<bucket.length;j++){
+        const a=bucket[i],b=bucket[j];
+        if (a.family===b.family || Math.abs(a.duration.actualCandidate-b.duration.actualCandidate)>0.000001) continue;
+        pairs.push([a.index,b.index]);
+        for (const [left,right] of [[a,b],[b,a]]){ if (!edges.has(left.index)) edges.set(left.index,new Set()); edges.get(left.index).add(right.index); }
+      }
+      const seen=new Set();
+      for (const id of edges.keys()){
+        if (seen.has(id)) continue;
+        const ids=new Set(),pending=[id];
+        while (pending.length){const next=pending.pop();if (ids.has(next)) continue;ids.add(next);seen.add(next);pending.push(...edges.get(next));}
+        const members=bucket.filter(row=>ids.has(row.index)),cutpdf=members.filter(row=>row.family==="CUTPDF").length,excel=members.length-cutpdf;
+        const nameKey=value=>String(value).trim().replace(/\s+/g," ").toLowerCase();
+        const oneToOne=cutpdf===1 && excel===1 && members.every(row=>row.named) && nameKey(members[0].name)===nameKey(members[1].name);
+        duplicateGroups.push({rows:members,cutpdf,excel,oneToOne,pairingUpperBound:Math.min(cutpdf,excel),
+          possiblePairs:pairs.filter(pair=>pair.every(index=>ids.has(index))),
+          differentMaterial:members.some(row=>!Number.isFinite(row.materialExpense) || Math.abs(row.materialExpense-members[0].materialExpense)>0.005
+            || Math.abs(row.materialUnitCost-members[0].materialUnitCost)>0.005 || row.materialQty!==members[0].materialQty),
+          modeledNet:finiteSum(members,row=>row.modeledNet)});
+      }
+    }
+    const byImport=Object.fromEntries(["CUTPDF","616-CUT","Other / manual"].map(family=>[family,{
+      candidates:rows.filter(row=>row.family===family && row.zeroWithActual).length,
+      resolved:rows.filter(row=>row.family===family && row.duration.usedRecorded).length}]));
+    return {readOnly:true,count:rows.length,rows,byImport,
+      zeroWithActual:rows.filter(row=>row.zeroWithActual).length,resolved:rows.filter(row=>row.duration.usedRecorded).length,
+      durationConflicts:rows.filter(row=>row.duration.issues.length).length,
+      unresolvedZero:rows.filter(row=>row.zeroWithActual && !row.duration.usedRecorded).length,
+      originalNet:finiteSum(rows,row=>row.originalNet),modeledNet:finiteSum(rows,row=>row.modeledNet),netChange:finiteSum(rows,row=>row.netChange ?? NaN),
+      duplicateGroups,pairingUpperBound:duplicateGroups.reduce((sum,group)=>sum+group.pairingUpperBound,0)};
   }
   function expenses(window, maintenanceRows = [], purchaseWeeks = [], purchaseFinancials){
     const maintenance = {count:0,recordedInputs:0,estimated:0,incomplete:0,parts:0,modeledLabor:0,knownSubtotal:0};
@@ -201,5 +271,5 @@
       // No loaded record currently proves cost composition and complete ledger coverage.
       netWaterjetImpact:null,coverageReason:financialCoverage.blockers.join(" ")};
   }
-  return Object.freeze({ranges,dateKey,localToday,period,selectJobs,expenses,build});
+  return Object.freeze({ranges,dateKey,localToday,period,selectJobs,expenses,build,audit});
 });
