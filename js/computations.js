@@ -38,6 +38,26 @@ function getTimeEfficiencyWindowMeta(days){
   return { key: `${normalized}d`, label, days: normalized, description };
 }
 
+// Read the same cumulative endpoints accepted by CCR. Never allocate a sparse
+// meter delta to one day, cap it at 24 hours, or require daily log entries.
+function computeSnapshotUsageAverage(startISO, endISO, todayISO){
+  const api = typeof window !== "undefined" && window.OMAXCutCostFeedback;
+  const effectiveEnd = endISO < todayISO ? endISO : todayISO;
+  if (!api || startISO > effectiveEnd) return {average:null,description:"Meter average unavailable: no elapsed measurement window."};
+  const reading = api.actualHours({totalHistory:typeof totalHistory === "undefined" ? [] : totalHistory},startISO,effectiveEnd);
+  const days = reading.measurementStartDate && reading.measurementEndDate
+    ? (Date.parse(reading.measurementEndDate+"T00:00:00Z")-Date.parse(reading.measurementStartDate+"T00:00:00Z"))/86400000 : 0;
+  // Zero meter movement is a valid usage average, though not a CCR rate divisor.
+  const usable = Number.isFinite(reading.hours) && days>0 && !reading.issues.some(issue=>!["invalid","zero_hours"].includes(issue.code));
+  const boundary = reading.measurementStartDate < startISO || reading.measurementEndDate < effectiveEnd
+    ? " Sparse readings expand the start to the prior baseline and/or end at the latest reading; this is the observed span, not an interpolated selected-period total." : "";
+  return {average:usable ? reading.hours/days : null,hours:reading.hours,days,
+    startISO:reading.measurementStartDate,endISO:reading.measurementEndDate,
+    description:usable
+      ? `${reading.hours} meter hours ÷ ${days} elapsed calendar days (${reading.measurementStartDate} baseline excluded, through ${reading.measurementEndDate} inclusive; weekends included).${boundary}${reading.issues.some(issue=>issue.code==="invalid") ? " Invalid readings ignored." : ""}`
+      : `Meter average unavailable. ${reading.warnings.join(" ")}`};
+}
+
 function computeTimeEfficiency(rangeDays, options = {}){
   const normalizedDays = Math.max(1, Math.round(Number(rangeDays) || 0));
   const meta = getTimeEfficiencyWindowMeta(normalizedDays);
@@ -90,11 +110,11 @@ function computeTimeEfficiency(rangeDays, options = {}){
   const configuredDailyHours = (Number.isFinite(configuredDailyHoursRaw) && configuredDailyHoursRaw > 0)
     ? configuredDailyHoursRaw
     : CUTTING_BASELINE_DAILY_HOURS;
-  const averageDailyHours = (typeof getAverageDailyCutHours === "function")
+  const dashboardAverageDailyHours = (typeof getAverageDailyCutHours === "function")
     ? getAverageDailyCutHours()
     : null;
-  const goalDailyHours = (goalMode === "average" && Number.isFinite(Number(averageDailyHours)) && Number(averageDailyHours) > 0)
-    ? Number(averageDailyHours)
+  const goalDailyHours = (goalMode === "average" && Number.isFinite(Number(dashboardAverageDailyHours)) && Number(dashboardAverageDailyHours) > 0)
+    ? Number(dashboardAverageDailyHours)
     : configuredDailyHours;
   const goalDailyHoursLabel = `${Math.abs(goalDailyHours - Math.round(goalDailyHours)) < 0.05 ? Math.round(goalDailyHours) : goalDailyHours.toFixed(1)} hr`;
   let actual = 0;
@@ -138,6 +158,9 @@ function computeTimeEfficiency(rangeDays, options = {}){
     ? (actual / targetHours) * 100
     : (baseline > 0 ? (actual / baseline) * 100 : null);
   const percentGoal = baseline > 0 ? (actual / baseline) * 100 : null;
+  // Avoid the shared Date parser's UTC conversion of local Date instances.
+  const localKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const usageAverage = computeSnapshotUsageAverage(localKey(startDate),localKey(endDate),localKey(todayLocal));
 
   return {
     windowDays: normalizedDays,
@@ -156,9 +179,10 @@ function computeTimeEfficiency(rangeDays, options = {}){
     goalSourceLabel: goalMode === "average"
       ? `Average cut hours/day (${goalDailyHoursLabel})`
       : `Dashboard goal hours/day (${goalDailyHoursLabel})`,
-    averageDailyHours,
-    startISO: ymd(startDate),
-    endISO: ymd(endDate),
+    averageDailyHours:usageAverage.average,
+    usageAverage,
+    startISO: localKey(startDate),
+    endISO: localKey(endDate),
     description: meta.description,
     label: meta.label,
     key: meta.key
@@ -298,7 +322,63 @@ function inclusiveDayCount(startDate, endDate){
   return diff + 1;
 }
 
-// Cutting-job duration keeps its legacy storage key. Historical progress is not duration.
+// Manual completedHours entries are cumulative progress snapshots, never additive.
+// Only zero/missing completed-job financial durations may use supported actuals.
+// This is a read-time resolution: no business record is normalized or repaired.
+function resolveCuttingJobFinancialDuration(job){
+  const number = raw => ["number","string"].includes(typeof raw) && String(raw).trim()!=="" && Number.isFinite(Number(raw)) && Number(raw)>=0 ? Number(raw) : null;
+  const date = raw => {
+    if (typeof raw!=="string" || !/^\d{4}-\d{2}-\d{2}(?:$|T)/.test(raw)) return null;
+    const key=raw.slice(0,10),d=new Date(key+"T00:00:00Z");
+    return Number.isFinite(+d) && d.toISOString().slice(0,10)===key && (raw.length===10 || Number.isFinite(Date.parse(raw))) ? key : null;
+  };
+  const raw=job?.estimateHours;
+  const originalHours=raw!=null && raw!=="" && Number.isFinite(Number(raw)) && Number(raw)>=0 ? Number(raw) : 0;
+  const result={hours:originalHours,originalHours,storedEstimate:raw,usedRecorded:false,source:"Original estimateHours",issues:[],evidence:[],actualCandidate:null};
+  const completed=date(job?.completedAtISO);
+  if (!completed) return result; // Active jobs and scheduling estimates keep their existing behavior.
+  const issue=message=>{if (!result.issues.includes(message)) result.issues.push(message);},evidence=result.evidence;
+  if (job.actualHours!=null && job.actualHours!==""){
+    const value=number(job.actualHours);
+    if (value==null) issue("Invalid recorded actualHours requires review.");
+    else evidence.push({source:"actualHours",hours:value});
+  }
+  const logs=[];
+  if (job.manualLogs!=null && !Array.isArray(job.manualLogs)) issue("Manual logs are not a valid list.");
+  for (const log of Array.isArray(job.manualLogs) ? job.manualLogs : []){
+    const key=date(log?.dateISO),value=number(log?.completedHours);
+    if (!key || key>completed || value==null){issue("Invalid, undated or post-completion manual cutting time requires review.");continue;}
+    if (log.import_event_id && job.import_event_id && log.import_event_id!==job.import_event_id){issue("Manual log import identity differs from the job.");continue;}
+    logs.push({date:key,hours:value});
+  }
+  logs.sort((a,b)=>a.date.localeCompare(b.date));
+  const close=(a,b)=>Math.abs(a-b)<=0.000001;
+  for (let i=1;i<logs.length;i++){
+    if (logs[i].date===logs[i-1].date && !close(logs[i].hours,logs[i-1].hours)) issue("Conflicting same-date cumulative manual logs.");
+    else if (logs[i].hours<logs[i-1].hours-0.000001) issue("Cumulative manual cutting time decreases; review corrections before using it.");
+  }
+  if (logs.length) evidence.push({source:"Latest cumulative manual log",hours:logs.at(-1).hours,date:logs.at(-1).date});
+  const provenance=job.importProvenance?.sourceRecord || job.importProvenance;
+  if (provenance && provenance.actual_cut_minutes!=null && String(provenance.actual_cut_minutes).trim()!==""){
+    const minutes=number(provenance.actual_cut_minutes);
+    if (minutes==null) issue("Invalid imported source cutting minutes requires review.");
+    else evidence.push({source:"Imported actual_cut_minutes / 60",hours:minutes/60});
+  }
+  const anchor=evidence.find(item=>item.source==="actualHours") || evidence.find(item=>item.source==="Latest cumulative manual log");
+  if (anchor){
+    result.actualCandidate=anchor.hours;
+    if (evidence.some(item=>!close(item.hours,anchor.hours))) issue("Recorded actual, terminal manual log and/or imported minutes contradict each other.");
+  } else if (evidence.some(item=>item.hours>0)) issue("Imported minutes alone lack a recorded actual or authoritative manual log; review required.");
+  if (originalHours>0){
+    result.estimateActualDifference=anchor && !close(originalHours,anchor.hours);
+    return result; // Preserve the existing positive financial duration.
+  }
+  if (anchor?.hours>0 && !result.issues.length){
+    result.hours=anchor.hours;result.usedRecorded=true;result.source=anchor.source;
+  }
+  return result;
+}
+
 function computeCuttingJobProfit(job, options = {}){
   const finiteValue = (values, fallback, nonnegative = false) => {
     for (const raw of values){
@@ -308,7 +388,8 @@ function computeCuttingJobProfit(job, options = {}){
     }
     return fallback;
   };
-  const hours = finiteValue([job?.estimateHours], 0, true);
+  const duration = resolveCuttingJobFinancialDuration(job);
+  const hours = options.durationMode === "estimate" ? duration.originalHours : duration.hours;
   const chargeRate = finiteValue([job?.chargeRate, job?.efficiency?.chargeRate], JOB_RATE_PER_HOUR, true);
   // efficiency.costRate remains a positive expense magnitude for subtracting consumers.
   const costRate = Math.abs(finiteValue([job?.costRate, job?.efficiency?.costRate], JOB_BASE_COST_PER_HOUR));
@@ -323,7 +404,7 @@ function computeCuttingJobProfit(job, options = {}){
   const adjustedRevenue = revenue * (1 - failurePercent / 100);
   const originalNetProfit = revenue - cuttingCost - materialExpense;
   const totalProfit = adjustedRevenue - cuttingCost - materialExpense;
-  return { hours, chargeRate, costRate, netRate, materialCost, materialQty, materialExpense,
+  return { hours, duration, chargeRate, costRate, netRate, materialCost, materialQty, materialExpense,
     failurePercent, revenue, adjustedRevenue, revenueLost, cuttingCost, originalNetProfit, totalProfit };
 }
 
@@ -485,7 +566,7 @@ function computePrioritySchedule(jobs){
     const priority = getJobPriority(job);
     const eff = computeJobEfficiency(job);
     efficiencies.set(idStr, eff);
-    const remaining = computeCuttingJobProfit(job).hours;
+    const remaining = computeCuttingJobProfit(job,{durationMode:"estimate"}).hours;
     const list = groups.get(priority) || [];
     list.push({ id: idStr, remaining });
     groups.set(priority, list);
@@ -510,7 +591,7 @@ function computePrioritySchedule(jobs){
 
 function computeRequiredDaily(job, options = {}){
   if (!job || !job.startISO || !job.dueISO) return { remainingHours:0, remainingDays:0, requiredPerDay:0, backlogHours:0, jobRemainingHours:0 };
-  const jobRemainingHours = computeCuttingJobProfit(job).hours;
+  const jobRemainingHours = computeCuttingJobProfit(job,{durationMode:"estimate"}).hours;
   const backlogHours = Number.isFinite(Number(options.backlogHours))
     ? Math.max(0, Number(options.backlogHours))
     : 0;

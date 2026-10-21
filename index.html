@@ -162,14 +162,15 @@
       <div class="cutting-job-import-actions">
         <input id="cuttingJobImportFile" type="file" accept=".xlsx,.csv,.json">
         <button id="cuttingJobImportPreview" type="button">Preview import</button>
-        <button id="cuttingJobRepairAudit" type="button">Audit 67-job repair</button>
-        <button id="cuttingJobRepairRun" type="button" disabled>Repair audited history</button>
+        <button id="cuttingJobRepairAudit" type="button">Audit Cutting Jobs (read-only)</button>
+        <button id="cuttingJobRepairRun" type="button" disabled>Repair categories / numbering</button>
         <label><input id="cuttingJobImportReviewed" type="checkbox"> I reviewed the preview and want to import all ready rows.</label>
         <button id="cuttingJobImportRun" type="button" disabled>Import reviewed jobs</button>
       </div>
       <div id="cuttingJobImportStatus" class="cutting-job-import-summary" aria-live="polite"></div>
     </div>
     <div id="cuttingJobImportRows" class="cutting-job-import-table-scroll" tabindex="0" aria-label="Cutting-job import preview"></div>
+    <div id="cuttingJobFinancialAudit" class="financial-breakdown" hidden></div>
   </dialog>
 
   <dialog id="cuttingJobImportConfirm" aria-labelledby="cuttingJobImportConfirmTitle">
@@ -266,6 +267,8 @@
   <script src="js/maintenance-duplication.js"></script>
   <script src="js/calendar.js"></script>
   <script src="js/purchaseFinancials.js"></script>
+  <script src="js/cuttingJobSourceEvidence.js"></script>
+  <script src="js/financialReconciliation.js"></script>
   <script src="js/purchaseOrders.js"></script>
   <script src="js/views.js"></script>
   <script src="js/cutCostRepair.js"></script>

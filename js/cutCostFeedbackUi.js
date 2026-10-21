@@ -7,10 +7,10 @@
   let saving=false;
   const jobControllers=new WeakMap();
   const saved=()=>api.settings(window.appConfig?.cutCostFeedback);
-  const today=()=>ymd(new Date());
+  const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
   const model=()=>computeCostModel();
   function calculate(config=saved(),current=model()){
-    return api.calculate({state:window,rows:current.maintenanceCostRows||[],config,today:today(),resolve:resolveEffectiveDailyCutHours});
+    return api.calculate({state:window,rows:current.maintenanceCostRows||[],config,today:current.financialReconciliation?.window.endISO||today(),resolve:resolveEffectiveDailyCutHours});
   }
   async function saveChange(build,label="Cut Cost configuration"){
     const failure=error=>({saved:false,error:String(error?.message||error)});
