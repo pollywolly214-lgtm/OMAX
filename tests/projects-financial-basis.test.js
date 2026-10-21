@@ -29,7 +29,7 @@ test("ACC03 historical and modern eligibility is independent of age and unknown 
 test("ACC03 averages exclude missing financial inputs and their hours from both denominators",()=>{
   const p=project(state([job("a"),job("b",{actualHours:1,chargeRate:200,failurePercent:100}),job("missing",{actualHours:50,materialCost:undefined})]));
   assert.equal(p.metrics.unadjustedNet.value,300);assert.equal(p.metrics.unadjustedNet.known,2);assert.equal(p.averageJob,150);assert.equal(p.averageHour,100);assert.equal(p.applicableHours,3);assert.equal(p.metrics.hours.value,53);
-  assert.match(api.summary(p),/2\/3 jobs eligible for unadjusted net/);assert.match(api.summary(p),/3 hr across 2\/3 eligible jobs/);
+  assert.match(api.summary(p),/2\/3 financially eligible jobs/);assert.match(api.summary(p),/3 hr across 2\/3 financially eligible jobs/);assert.match(api.summary(p),/partial result, not the complete project total/);
 });
 test("ACC03 missing and invalid financial inputs stay unavailable; no new rates are inferred",()=>{
   for(const key of ["actualHours","chargeRate","costRate","materialCost","materialQty"]){
@@ -97,7 +97,7 @@ test("ACC07 toggle controls active hours and financial population without changi
     const active=job("active",{estimateHours:3,completedAtISO:undefined,failurePercent}),p=project(state(completed,[active]));
     assert.equal(p.rows.length,7);assert.equal(p.failure.total,7);assert.equal(p.failure.value,failurePercent===100?20:0);
     assert.equal(p.financialScope.completed.value,840);assert.equal(p.financialScope.active.value,220);assert.equal(p.metrics.unadjustedNet.value,1060);assert.equal(p.financialScope.completed.value+p.financialScope.active.value,p.metrics.unadjustedNet.value);
-    const html=api.summary(p);assert.match(html,/active contributions are projections/);assert.match(html,/Completed-only unadjusted modeled net: <strong>\$840.00/);assert.match(html,/Active-job projected unadjusted net: <strong>\$220.00/);
+    const html=api.summary(p);assert.match(html,/active contributions are projections/);assert.doesNotMatch(html,/data-project-financial-scope/);assert.match(html,/No failures: \$1,060.00/);
     const off=project(state(completed,[active]),false);assert.equal(off.rows.length,6);assert.equal(off.metrics.unadjustedNet.value,840);assert.equal(off.failure.value,0);assert.doesNotMatch(api.summary(off),/data-project-financial-scope/);
   }
 });

@@ -1,5 +1,7 @@
 # PROJ-01B-ACC07 — Population toggle and time-weighted failure rate
 
+[ACC08](proj-01b-acc08.md) now presents adjusted financial results as primary with smaller no-failure comparisons. It removes the standalone provisional result and unadjusted subtotals described below. The toggle, weighted failure calculation, source protection and duration rules remain unchanged.
+
 Updates existing open PR #517 from ACC05 commit `1d922e3a89b078078e5dd19107580c66f341a4bb`. No ACC06 implementation was present. Do not merge automatically. This change touches Projects aggregation/rendering, scoped styles, targeted tests and documentation. No production records were accessed or modified.
 
 ## Behavior

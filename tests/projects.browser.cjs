@@ -37,10 +37,12 @@ test("PROJ-01B browser: population toggle, weighted failure, safe saves, help, n
   await page.waitForURL(url=>url.hash==="#/projects?project=blanco&active=1");
   const values=()=>page.locator('.project-summary-grid .project-metric > strong').allTextContents();
   assert.deepEqual(await values(),["3","6 hr","16.67%","$150.00","$75.00","$225.00"]);
-  assert.deepEqual(await page.locator('.project-finance-grid .project-metric > strong').allTextContents(),["$675.00","$225.00","$112.50","-$150.00"]);
-  assert.deepEqual(await page.locator('.project-finance-grid h3').allTextContents(),["Total Unadjusted Modeled Cut Net","Average Unadjusted Net per Job","Average Unadjusted Net per Hour","Known Failure-Related Reduction"]);
+  const finance=()=>page.locator('.project-finance-grid .project-metric > strong').allTextContents(),hypothetical=()=>page.locator('.project-finance-grid .project-no-failures').allTextContents();
+  assert.deepEqual(await finance(),["$525.00","$175.00","$87.50","-$150.00"]);
+  assert.deepEqual(await hypothetical(),["No failures: $675.00","No failures: $225.00","No failures: $112.50"]);
+  assert.deepEqual(await page.locator('.project-finance-grid h3').allTextContents(),["Modeled Cut Net","Average Net per Job","Average Net per Cutting Hour","Known Failure-Related Reduction"]);
   assert.match(await page.locator('.project-finance-grid').textContent(),/3\/3 jobs with reliable data/);
-  assert.equal(await page.locator('[data-project-provisional-net] strong').textContent(),"$525.00");
+  assert.equal(await page.locator('[data-project-provisional-net]').count(),0);assert.equal(await page.locator('.project-finance-grid .project-metric').count(),4);
   assert.match(await page.locator('.project-summary-grid').textContent(),/1 hr failed cutting hours \/ 6 hr included hours/);
   assert.equal(await page.locator('#projectIncludeActive').isChecked(),true);
   // Native popover: mouse, keyboard, Escape and light dismissal, with no business save.
@@ -51,10 +53,11 @@ test("PROJ-01B browser: population toggle, weighted failure, safe saves, help, n
   await info.click();await page.locator('.projects-page h1').click();assert.equal(await help.isVisible(),false);
   const details=page.locator('.project-jobs');assert.equal(await details.getAttribute('open'),null);await details.locator('summary').click();assert.notEqual(await details.getAttribute('open'),null);
   assert.equal(await page.locator('[data-project-job]').count(),3);assert.equal(await page.locator('[data-project-job="past"]').textContent(),"Same visible job name");
+  const pastNet=page.locator('[data-project-job="past"]').locator('xpath=ancestor::tr').locator('td').last();assert.equal(await pastNet.locator('strong').textContent(),"$75.00");assert.match(await pastNet.locator('span').textContent(),/No failures: \$225.00/);
   await page.locator('#projectIncludeActive').uncheck();
   assert.deepEqual(await values(),["2","4 hr","25.00%","$100.00","$50.00","$150.00"]);
-  assert.deepEqual(await page.locator('.project-finance-grid .project-metric > strong').allTextContents(),["$450.00","$225.00","$112.50","-$150.00"]);
-  assert.equal(await page.locator('[data-project-provisional-net] strong').textContent(),"$300.00");assert.equal(await page.locator('[data-project-financial-scope]').count(),0);
+  assert.deepEqual(await finance(),["$300.00","$150.00","$75.00","-$150.00"]);
+  assert.deepEqual(await hypothetical(),["No failures: $450.00","No failures: $225.00","No failures: $112.50"]);assert.equal(await page.locator('[data-project-financial-scope]').count(),0);
   assert.notEqual(await details.getAttribute('open'),null);assert.equal(await page.locator('[data-project-job]').count(),2);assert.equal(await page.locator('[data-project-job="active"]').count(),0);
   await page.locator('#projectSelector').fill("1251 — ATM");assert.equal(await page.locator('#projectIncludeActive').isChecked(),false);
   assert.equal(new URL(page.url()).hash,"#/projects?project=atm&active=0");
@@ -66,11 +69,12 @@ test("PROJ-01B browser: population toggle, weighted failure, safe saves, help, n
   await page.reload();await ready();assert.equal(await page.locator('#projectSelector').inputValue(),"1254 — Blanco");assert.equal(await page.locator('#projectIncludeActive').isChecked(),true);assert.deepEqual(await values(),["3","6 hr","16.67%","$150.00","$75.00","$225.00"]);
   await details.locator('summary').click();await page.locator('[data-project-job="past"]').click();await page.waitForURL(url=>url.hash==="#/jobs");
   await page.locator('[data-history-row="past"]').waitFor({state:"visible"});assert.equal(await page.evaluate(()=>window.pendingJobRowHighlight?.id),"past");
+  assert.equal(await page.locator('[data-job-net-id="past"] .job-net-total strong').textContent(),"$75.00"); // Same Hours Taken basis as the Projects row.
   await page.locator('#tab-projects').click();await page.locator('#projectSelector').fill("1251 — ATM");assert.deepEqual(await values(),["2","2 hr","0%","$50.00","$50.00","$100.00"]);
   assert.match(await page.locator('.project-coverage-notice').textContent(),/may overlap across imports.*All distinct records are currently included/);
   assert.match(await page.locator('.project-summary-grid').textContent(),/2 recorded/);
   assert.deepEqual(await page.locator('.project-finance-grid .project-metric > strong').allTextContents(),["$200.00","$100.00","$100.00","$0.00"]);
-  assert.equal(await page.locator('[data-project-provisional-net] strong').textContent(),"$200.00");
+  assert.deepEqual(await hypothetical(),["No failures: $200.00","No failures: $100.00","No failures: $100.00"]);
   await page.reload();await ready();assert.equal(await page.locator('#projectSelector').inputValue(),"1251 — ATM");assert.deepEqual(await values(),["2","2 hr","0%","$50.00","$50.00","$100.00"]);
   await details.locator('summary').click();assert.equal(await page.locator('[data-project-job="atm-job"]').count(),1);assert.equal(await page.locator('[data-project-job="atm-other"]').count(),1);
   await page.locator('[data-project-job="atm-other"]').click();await page.waitForURL(url=>url.hash==="#/jobs");await page.locator('[data-history-row="atm-other"]').waitFor({state:"visible"});
@@ -86,6 +90,12 @@ test("PROJ-01B browser: population toggle, weighted failure, safe saves, help, n
   for(const viewport of [{width:1440,height:1000},{width:768,height:1024},{width:375,height:812}]){
     await page.setViewportSize(viewport);await page.locator('.project-jobs summary').click();
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),true);
+    assert.equal(await page.locator('.project-finance-grid .project-metric').count(),4);
+    for(const card of await page.locator('.project-finance-grid .project-metric').all()){
+      const comparison=card.locator('.project-no-failures');if(!await comparison.count())continue;
+      const primary=card.locator(':scope > strong'),primaryBox=await primary.boundingBox(),comparisonBox=await comparison.boundingBox();
+      assert.ok(comparisonBox.y>=primaryBox.y+primaryBox.height-1);assert.ok(await comparison.evaluate((el,primarySize)=>parseFloat(getComputedStyle(el).fontSize)<primarySize,await primary.evaluate(el=>parseFloat(getComputedStyle(el).fontSize))));
+    }
     if(process.env.OMAX_SCREENSHOT_DIR){await fs.mkdir(process.env.OMAX_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.OMAX_SCREENSHOT_DIR,`projects-${viewport.width}.png`),fullPage:true});}
     await page.locator('.project-jobs summary').click();
   }
@@ -108,9 +118,9 @@ test("PROJ-01B browser: population toggle, weighted failure, safe saves, help, n
   await page.goto(origin+"/?devsafe=1#/projects?project=blanco");await ready();const failureBefore=await cloud();
   assert.equal(await page.locator('.project-summary-grid .project-metric > strong').nth(2).textContent(),"0%");
   assert.equal(await page.locator('.project-finance-grid .project-metric > strong').first().textContent(),"$1,765.00");
-  assert.equal(await page.locator('[data-project-provisional-net] strong').textContent(),"$1,765.00");
+  assert.equal((await hypothetical())[0],"No failures: $1,765.00");
   assert.match(await page.locator('.project-summary-grid').textContent(),/0 of 7 currently failure-affected jobs/);
-  assert.match(await page.locator('[data-project-financial-scope]').textContent(),/Completed-only unadjusted modeled net: \$1,695.00.*Active-job projected unadjusted net: \$70.00/);
+  assert.equal(await page.locator('[data-project-financial-scope]').count(),0);
   await page.locator('.project-jobs summary').click();assert.equal(await page.locator('[data-project-job="failure-edit"]').locator('xpath=ancestor::tr').locator('td').nth(2).textContent(),"2026-10-02");
   await page.locator('[data-project-job="failure-edit"]').click();await page.waitForURL(url=>url.hash==="#/jobs");
   const jobNet=page.locator('[data-job-net-id="failure-edit"]');await jobNet.waitFor({state:"visible"});
@@ -135,39 +145,42 @@ test("PROJ-01B browser: population toggle, weighted failure, safe saves, help, n
   assert.equal(await page.locator('[data-failure-preview="revenueLost"]').textContent(),"-$168.00");
   await saveFailure();
   assert.match(await jobNet.textContent(),/Failure: 10%/);
+  assert.equal(await jobNet.locator('.job-net-total strong').textContent(),"$1,177.00");
   const failureAfter=await cloud(),saved=failureAfter.completedCuttingJobs.find(j=>j.id==="failure-edit"),failureExpected=structuredClone(failureBefore);
   assert.equal(saved.failurePercent,10);assert.equal(saved.cutChronologyHistory.at(-1).kind,"failure");assert.equal(saved.cutChronologyHistory.length,2);assert.deepEqual(saved.cutChronologyHistory.at(-1).before,{failurePercent:0});
   failureExpected.syncMeta=failureAfter.syncMeta;const expectedJob=failureExpected.completedCuttingJobs.find(j=>j.id==="failure-edit");expectedJob.failurePercent=10;expectedJob.cutChronologyHistory=saved.cutChronologyHistory;
   assert.deepEqual(failureAfter,failureExpected);
   await reloadProjects();
-  assert.equal(await page.locator('.project-finance-grid .project-metric > strong').first().textContent(),"$1,765.00");
+  assert.equal(await page.locator('.project-finance-grid .project-metric > strong').first().textContent(),"$1,597.00");
   assert.equal(await page.locator('.project-finance-grid .project-metric > strong').nth(3).textContent(),"-$168.00");
-  assert.equal(await page.locator('[data-project-provisional-net] strong').textContent(),"$1,597.00");
+  assert.equal((await hypothetical())[0],"No failures: $1,765.00");
   assert.match(await page.locator('.project-summary-grid').textContent(),/1 of 7 currently failure-affected jobs/);
   assert.equal(await page.locator('.project-summary-grid .project-metric > strong').nth(2).textContent(),"5.38%");
   assert.deepEqual(await cloud(),failureAfter);
+  await page.locator('.project-jobs summary').click();assert.equal(await page.locator('[data-project-job="failure-edit"]').locator('xpath=ancestor::tr').locator('td').last().locator('strong').textContent(),"$1,177.00");await page.locator('.project-jobs summary').click();
   await openTarget();await editFailure(0);await saveFailure();const reset=await cloud(),resetJob=reset.completedCuttingJobs.find(j=>j.id==="failure-edit");
   assert.equal(resetJob.failurePercent,0);assert.equal(resetJob.cutChronologyHistory.length,3);assert.deepEqual(resetJob.cutChronologyHistory.at(-1).before,{failurePercent:10});
   assert.deepEqual(resetJob.cutChronologyHistory.slice(0,2),saved.cutChronologyHistory);
   const resetExpected=structuredClone(failureBefore);resetExpected.syncMeta=reset.syncMeta;const resetExpectedJob=resetExpected.completedCuttingJobs.find(j=>j.id==="failure-edit");resetExpectedJob.failurePercent=0;resetExpectedJob.cutChronologyHistory=resetJob.cutChronologyHistory;assert.deepEqual(reset,resetExpected);
-  await reloadProjects();assert.equal(await page.locator('.project-finance-grid .project-metric > strong').first().textContent(),"$1,765.00");assert.equal(await page.locator('.project-finance-grid .project-metric > strong').nth(3).textContent(),"$0.00");assert.equal(await page.locator('[data-project-provisional-net] strong').textContent(),"$1,765.00");
+  await reloadProjects();assert.equal(await page.locator('.project-finance-grid .project-metric > strong').first().textContent(),"$1,765.00");assert.equal(await page.locator('.project-finance-grid .project-metric > strong').nth(3).textContent(),"$0.00");assert.equal((await hypothetical())[0],"No failures: $1,765.00");
   assert.match(await page.locator('.project-summary-grid').textContent(),/0 of 7 currently failure-affected jobs/);assert.equal(await page.locator('.project-summary-grid .project-metric > strong').nth(2).textContent(),"0%");assert.deepEqual(await cloud(),reset);assert.deepEqual(errors,[]);
   // User-supplied Mesquite arithmetic, reproduced only on a disposable local fixture.
   await page.evaluate(async()=>{
     const ref=OMAXDevSafe.db.doc(FB.docRef.path),s=(await ref.get()).data();
     s.jobFolders.push({id:"mesquite",name:"1242 Mesquite",projectNumber:"1242",parent:"jobs_root",order:4});
-    const job=(id,estimateHours,extra={})=>({id,name:`Fixture ${id}`,cat:"mesquite",projectNumber:"1242",estimateHours,chargeRate:200,costRate:45,materialCost:10,materialQty:1,startISO:"2026-10-01",files:[],manualLogs:[],...extra});
-    s.completedCuttingJobs=[2.8,5,6,7,8,2.88].map((h,i)=>job(`mesquite-${i}`,h,{completedAtISO:"2026-10-02",...(i===0?{failurePercent:39}:i===1?{failurePercent:0,cutChronologyHistory:[{kind:"failure",after:{failurePercent:80}}]}:{})}));
+    const job=(id,estimateHours,extra={})=>({id,name:`Fixture ${id}`,cat:"mesquite",projectNumber:"1242",estimateHours,chargeRate:600,costRate:450,materialCost:60,materialQty:1,startISO:"2026-10-01",files:[],manualLogs:[],...extra});
+    s.completedCuttingJobs=[2.8,5,6,7,8,2.88].map((h,i)=>job(`mesquite-${i}`,h,{completedAtISO:"2026-10-02",materialCost:i===5?59.31:60,...(i===0?{failurePercent:39}:i===1?{failurePercent:0,cutChronologyHistory:[{kind:"failure",after:{failurePercent:80}}]}:{})}));
     s.cuttingJobs=[job("mesquite-active",18.5)];s.syncMeta.rev+=1;await ref.set(s);
   });
   await page.goto(origin+"/?devsafe=1#/projects?project=mesquite");await ready();const mesquiteBefore=await cloud();
-  assert.deepEqual(await values(),["7","50.18 hr","2.18%","$2,258.10","$70.00","$2,328.10"]);
-  assert.deepEqual(await page.locator('.project-finance-grid .project-metric > strong').allTextContents(),["$7,707.90","$1,101.13","$153.61","-$218.40"]);
-  assert.equal(await page.locator('[data-project-provisional-net] strong').textContent(),"$7,489.50");assert.match(await page.locator('.project-summary-grid').textContent(),/1.092 hr failed cutting hours \/ 50.18 hr included hours.*1 of 7 currently failure-affected jobs/);
+  assert.deepEqual(await values(),["7","50.18 hr","2.18%","$22,581.00","$419.31","$23,000.31"]);
+  assert.deepEqual(await finance(),["$6,452.49","$921.78","$128.59","-$655.20"]);
+  assert.deepEqual(await hypothetical(),["No failures: $7,107.69","No failures: $1,015.38","No failures: $141.64"]);assert.match(await page.locator('.project-summary-grid').textContent(),/1.092 hr failed cutting hours \/ 50.18 hr included hours.*1 of 7 currently failure-affected jobs/);
   await details.locator('summary').click();assert.equal(await page.locator('[data-project-job]').count(),7);await page.locator('#projectIncludeActive').uncheck();
-  assert.deepEqual(await values(),["6","31.68 hr","3.45%","$1,425.60","$60.00","$1,485.60"]);
-  assert.deepEqual(await page.locator('.project-finance-grid .project-metric > strong').allTextContents(),["$4,850.40","$808.40","$153.11","-$218.40"]);
-  assert.equal(await page.locator('[data-project-provisional-net] strong').textContent(),"$4,632.00");assert.match(await page.locator('.project-summary-grid').textContent(),/1.092 hr failed cutting hours \/ 31.68 hr included hours.*1 of 6 currently failure-affected jobs/);assert.equal(await page.locator('[data-project-job]').count(),6);
+  assert.deepEqual(await values(),["6","31.68 hr","3.45%","$14,256.00","$359.31","$14,615.31"]);
+  assert.deepEqual(await finance(),["$3,737.49","$622.92","$117.98","-$655.20"]);
+  assert.deepEqual(await hypothetical(),["No failures: $4,392.69","No failures: $732.11","No failures: $138.66"]);assert.match(await page.locator('.project-summary-grid').textContent(),/1.092 hr failed cutting hours \/ 31.68 hr included hours.*1 of 6 currently failure-affected jobs/);assert.equal(await page.locator('[data-project-job]').count(),6);
+  const loss=page.locator('[data-project-job="mesquite-0"]').locator('xpath=ancestor::tr').locator('td').last();assert.equal(await loss.locator('strong').textContent(),"-$295.20");assert.match(await loss.locator('strong').getAttribute('class'),/job-finance-negative/);assert.match(await loss.locator('span').textContent(),/No failures: \$360.00/);
   await page.reload();await ready();assert.equal(await page.locator('#projectIncludeActive').isChecked(),false);assert.deepEqual(await cloud(),mesquiteBefore);
   // Separate touch-capable mobile context, with every nonlocal request blocked.
   const touchContext=await browser.newContext({hasTouch:true,isMobile:true,viewport:{width:375,height:812}});t.after(()=>touchContext.close());

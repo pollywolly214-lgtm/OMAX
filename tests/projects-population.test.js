@@ -21,7 +21,7 @@ test("ACC07 Mesquite disposable fixture: both populations govern every metric an
     assert.equal(p.failure.value.toFixed(2),rate.toFixed(2));assert.equal(p.failure.affected,1);assert.equal(p.failure.known,count);assert.equal(p.failure.total,count);
     for(const key of Object.keys(m))assert.equal(m[key].total,count,key);
     assert.equal((html.match(/data-project-job=/g)||[]).length,count);assert.match(html,new RegExp(`1 of ${count} currently failure-affected jobs`));
-    assert.match(html,/1.092 hr failed cutting hours/);assert.equal(html.includes("data-project-financial-scope"),includeActive);assert.doesNotMatch(html,/Limited data|Cut Success Rate/);
+    assert.match(html,/1.092 hr failed cutting hours/);assert.doesNotMatch(html,/data-project-financial-scope|Limited data|Cut Success Rate/);
     assert.deepEqual(s,before);
   }
   assert.equal(api.build(s,history,c.computeCuttingJobProfit).projects[0].rows.length,7); // Default ON.

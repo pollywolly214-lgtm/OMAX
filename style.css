@@ -6732,6 +6732,7 @@ body.job-category-modal-open{overflow:hidden}
 .project-metric h3 { font-size: .9rem; font-weight: 600; margin: 0 0 12px; color: #42546b; }
 .project-metric strong { display: block; font-size: clamp(1.2rem, 2.2vw, 1.8rem); overflow-wrap: anywhere; }
 .project-metric p { margin-bottom: 0; }
+.project-no-failures { display: block; margin-top: 6px; font-size: .85rem; font-weight: 400; }
 .project-performance { margin-top: 28px; }
 .project-performance h2 { font-size: 1.2rem; }
 .project-coverage-notice { padding: 14px; border: 1px solid #dfc989; border-radius: 8px; background: #fff9e9; color: #594519; }
