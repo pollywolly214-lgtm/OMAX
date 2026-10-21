@@ -1,5 +1,7 @@
 # PROJ-01B-ACC05 — Zero-failure persistence and project reporting populations
 
+The reporting policy below records ACC05's historical behavior. [ACC07](proj-01b-acc07.md) replaces success/coverage reporting with a population toggle, time-weighted failure rate and effective-zero convention for missing percentages in Projects. The explicit-zero save behavior documented here remains unchanged.
+
 Updates existing open PR #517 from `41a861d62558855e8295e296af00d55d28d3ba80`. Latest fetched main remains `d1489aa3ebc4299e53687b2e11d859298269382b`, already incorporated. No production records were read or modified; all save tests used disposable records. Do not merge automatically.
 
 ## Explicit zero persistence

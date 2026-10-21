@@ -58,15 +58,15 @@ test("ACC02 usable historical estimate fallback stays explicitly estimated",()=>
   const p=project(state([imported("one","616-CUT-P01-L001",{actualHours:0,estimateHours:2,importProvenance:{actual_cut_minutes:""}})]));
   assert.equal(p.rows[0].hours,2);assert.equal(p.rows[0].hoursBasis,"estimated");assert.equal(p.rows[0].processing,90);assert.match(api.summary(p),/historical estimate/i);
 });
-test("ACC02 missing failure leaves adjusted net unavailable while historical hours and expenses stay visible",()=>{
+test("ACC02 hours and expenses remain; ACC07 missing failures use effective zero",()=>{
   const p=project(state([imported("one","616-CUT-P01-L001",{failurePercent:undefined}),imported("two","616-CUT-P01-L002",{failurePercent:null})]));
   assert.equal(p.rows.length,2);assert.equal(p.metrics.hours.value,7);assert.equal(p.metrics.processing.value,315);assert.equal(p.metrics.material.value,40);assert.equal(p.metrics.totalCost.value,355);
-  assert.equal(p.success.known,0);assert.equal(p.success.value,null);assert.equal(p.metrics.net.known,0);assert.equal(p.metrics.reduction.known,0);assert.equal(p.metrics.unadjustedNet.known,2);assert.equal(p.averageHour,1045/7);
-  const html=api.summary(p);assert.match(html,/0\/2 jobs with reliable data; partial coverage/);assert.match(html,/failure-adjusted net.*unavailable/i);
+  assert.equal(p.failure.value,0);assert.equal(p.failure.assumedZero,2);assert.equal(p.metrics.net.known,2);assert.equal(p.metrics.reduction.known,2);assert.equal(p.metrics.unadjustedNet.known,2);assert.equal(p.averageHour,1045/7);
+  assert.equal(p.metrics.reduction.value,0);assert.match(api.summary(p),/2 included records use this convention/);
 });
 test("ACC02 failures preserve expenses; ACC03 primary averages use exactly the unadjusted-net population",()=>{
   const p=project(state([imported("a","616-CUT-P01-L001",{actualHours:1,failurePercent:50}),imported("b","616-CUT-P01-L002",{actualHours:3,failurePercent:100}),imported("c","616-CUT-P01-L003",{actualHours:8,failurePercent:null})]));
-  assert.equal(p.metrics.net.value,-120);assert.equal(p.metrics.net.known,2);assert.equal(p.metrics.reduction.value,700);assert.equal(p.metrics.unadjustedNet.value,1800);assert.equal(p.averageJob,600);assert.equal(p.averageHour,150);assert.equal(p.applicableHours,12);
+  assert.equal(p.metrics.net.value,1100);assert.equal(p.metrics.net.known,3);assert.equal(p.metrics.reduction.value,700);assert.equal(p.metrics.unadjustedNet.value,1800);assert.equal(p.averageJob,600);assert.equal(p.averageHour,150);assert.equal(p.applicableHours,12);
   assert.equal(p.metrics.hours.value,12);assert.equal(p.metrics.processing.value,540);assert.equal(p.metrics.material.value,60);
 });
 for(const [date,minutes,count] of [["2026-07-20",29,2],["2026-09-04",25,4],["2026-10-06",4,2]])test(`ACC02 ${count} legitimate identical cuts on ${date} remain separate`,()=>{
