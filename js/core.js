@@ -2740,7 +2740,9 @@ function startWorkspaceStateListener(){
   const hasActiveBlockingOverlay = ()=>{
     if (typeof document === "undefined") return false;
     const activeEl = document.activeElement;
-    if (isEditableTarget(activeEl)) return true;
+    // The financial period is a read-only view preference. Leaving its SELECT
+    // focused must not indefinitely hide already-adopted historical snapshots.
+    if (isEditableTarget(activeEl) && !activeEl.matches?.("[data-financial-period]")) return true;
     const body = document.body;
     if (body?.classList?.contains("modal-open")) return true;
     if (body?.classList?.contains("forecast-modal-open")) return true;

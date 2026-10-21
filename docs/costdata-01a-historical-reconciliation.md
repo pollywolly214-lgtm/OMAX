@@ -2,7 +2,7 @@
 
 ## Status and baseline
 
-**NOT READY TO MERGE.** The reproduced maintenance, date-normalization and chart-window defects are repaired and controlled historical fixtures reconcile. The reported omission of specific purchases from the production **table** still needs a dated description or stable/import ID and a read-only comparison against the deployed version/loaded state. Main's original initial purchase-table mapper traversed every receipt week; it did not have a January/year cutoff. It would be inaccurate to claim that a particular production purchase omission has been conclusively explained without those records. The smallest next action is to supply one missing purchase example and compare it with the authoritative loaded receipt row and deployed display. No production cleanup/backfill is proposed.
+**Status superseded by COSTDATA-01B.** A confirmed missing purchase/event ID is not required. The follow-up reproduced a focused-period-selector/realtime-render defect on main and this branch, implemented a narrow correction, and added loading/window/navigation/reload regressions. See [the COSTDATA-01B investigation](costdata-01b-intermittent-display.md). The historical source mappings and COSTDATA-01A test record below remain applicable; the previous missing-ID merge gate is withdrawn.
 
 Fetched baseline: `origin/main` / initial repair HEAD `633e144c76c564e88419e4c0f3b1efe8027b132d`. Repair branch: `codex/costdata-01a`; clean initial worktree at `C:/CodexProjects/OMAX/.worktrees/costdata-01a`.
 
