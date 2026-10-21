@@ -1,13 +1,13 @@
 (function(root, factory){
-  const api = factory(root?.OMAXCuttingJobSourceEvidence || (typeof require === "function" ? require("./cuttingJobSourceEvidence") : null));
+  const api = factory(root?.OMAXCuttingJobSourceEvidence || (typeof require === "function" ? require("./cuttingJobSourceEvidence") : null), root?.normalizePurchaseHistory || (typeof require === "function" ? require("./purchaseFinancials").normalizePurchaseHistory : null));
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.OMAXFinancialReconciliation = api;
-})(typeof window === "undefined" ? null : window, function(sourceVerifier){
+})(typeof window === "undefined" ? null : window, function(sourceVerifier, normalizePurchases){
   "use strict";
   const ranges = Object.freeze([
     {key:"7d", label:"1W", days:7}, {key:"30d", label:"1M", days:30},
     {key:"90d", label:"3M", days:90}, {key:"182d", label:"6M", days:182},
-    {key:"365d", label:"1Y", days:365}, {key:"all", label:"All-Time", days:null}
+    {key:"365d", label:"1Y", days:365}, {key:"ytd", label:"YTD", days:null}, {key:"all", label:"All-Time", days:null}
   ].map(Object.freeze));
   function dateKey(value){
     if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}(?:$|T)/.test(value)) return null;
@@ -21,6 +21,7 @@
     const endISO = dateKey(today);
     if (!endISO) throw new Error("A valid financial analysis date is required.");
     let startISO = null;
+    if (option.key === "ytd") startISO = endISO.slice(0,4) + "-01-01";
     if (option.days){
       const start = new Date(endISO + "T00:00:00Z");
       start.setUTCDate(start.getUTCDate() - option.days + 1);
@@ -262,12 +263,13 @@
     }
     maintenance.knownSubtotal = maintenance.recordedInputs + maintenance.estimated;
     const purchases = {count:0,total:0,incomplete:0,invalidDates:0};
-    for (const week of purchaseWeeks) for (const row of Array.isArray(week?.rows) ? week.rows : []){
+    for (const entry of normalizePurchases(purchaseWeeks)){
+      const {row} = entry;
       if (!row || !String(row.purchased || "").trim()) continue;
       const key = dateKey(row.date);
       if (!key){purchases.invalidDates++;continue;}
       if (!inPeriod(key,window)) continue;
-      if (typeof purchaseFinancials !== "function" || !valid(row.cost,true) || !valid(row.qty,true)
+      if (entry.identityConflict || entry.costIncomplete || typeof purchaseFinancials !== "function" || !valid(row.cost,true) || !valid(row.qty,true)
         || [row.shipping,row.tax].some(value=>present(value) && !valid(value,true))){purchases.incomplete++;continue;}
       const value = purchaseFinancials(row).totalSpend;
       if (!Number.isFinite(value)){purchases.incomplete++;continue;}

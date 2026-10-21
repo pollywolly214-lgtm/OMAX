@@ -187,7 +187,7 @@ test("maintenance forecast uses calendar days across Chicago DST rather than cou
   try{
     class FixedDate extends Date{constructor(...args){super(...(args.length?args:[2026,9,20,12]));}}
     const c=vm.createContext({Date:FixedDate,window:{costForecastProjectionMethod:"run_rate",costForecastProjectionWindow:"ytd"},
-      centralMaintenanceRows:[{occurredAt:new FixedDate(2026,9,1),totalCost:300}],JOB_DAY_MS:86400000});
+      completeCentralMaintenanceRows:[{occurredAt:new FixedDate(2026,9,1),totalCost:300}],JOB_DAY_MS:86400000});
     vm.runInContext(computations,c);
     vm.runInContext(section(renderers,"  const today = new Date();\n  today.setHours(0, 0, 0, 0);\n  const currentYear =","  const timeframeDefsCentral =")+
       ";this.result={elapsedDays,daysRemaining,projectionWindowDays,annualForecastFromCentral};",c);

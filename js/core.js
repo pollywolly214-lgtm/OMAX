@@ -328,7 +328,9 @@ function normalizeDateISO(value){
     if (!trimmed) return null;
     if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)){
       const parsed = parseDateLocal(trimmed);
-      return parsed ? ymd(parsed) : null;
+      // A validated business-date string is already canonical. Re-parsing its
+      // local midnight through ymd's UTC Date path shifts it in positive zones.
+      return parsed ? trimmed : null;
     }
     const parsed = parseDateLocal(trimmed);
     if (parsed) return ymd(parsed);

@@ -66,25 +66,35 @@
     const canonical=id=>String(legacy.find(task=>String(task.id)===String(id))?.templateId||id);
     const aliases=new Map(v2.map(task=>[String(task.id),canonical(task.legacyTaskId||task.id)]));
     const streams=new Map(compatibility.filter(row=>row.sourceSystem==='v2').map(row=>[row.rootOccurrenceId,row]));
-    const shadows=new Set();
+    const shadows=new Set(),shadowEventIds=new Set(),importedShadows=new Set();
     for(const event of state.maintenanceOccurrencesV2||[]){
       const alias=aliases.get(String(event.taskId))||canonical(event.legacyTaskId||event.taskId);
-      for(const key of [event.originalDateISO,event.effectiveDateISO,event.displayDateISO,event.payload?.toDateISO])if(date(key))shadows.add(alias+'|'+key);
+      if(event.import_event_id)shadowEventIds.add(alias+'|'+String(event.import_event_id));
+      for(const key of [event.originalDateISO,event.effectiveDateISO,event.displayDateISO,event.payload?.toDateISO])if(date(key)){
+        shadows.add(alias+'|'+key);
+        if(event.import_event_id)importedShadows.add(alias+'|'+key);
+      }
+    }
+    const legacyPeersByDate=new Map();
+    for(const row of rows)if(row.sourceSystem!=='v2'){
+      const key=canonical(row.taskId)+'|'+row.dateISO,identities=legacyPeersByDate.get(key)||new Set();
+      identities.add(row.historyEventId||'day');legacyPeersByDate.set(key,identities);
     }
     const seen=new Set(),out=[];
     for(const row of rows){
       const isV2=row.sourceSystem==='v2',stream=streams.get(row.rootOccurrenceId),alias=aliases.get(String(row.taskId))||canonical(row.taskId);
       const task=legacy.find(task=>String(task.id)===alias)||v2.find(task=>String(task.id)===String(row.taskId));
       const key=date(row.dateISO);if(!key)continue;
-      if(!isV2&&shadows.has(alias+'|'+key))continue;
-      const identity=isV2?'v2:'+row.rootOccurrenceId:alias+'|'+key;
+      const unambiguousMirror=legacyPeersByDate.get(alias+'|'+key)?.size===1&&!importedShadows.has(alias+'|'+key);
+      if(!isV2&&(row.historyEventId?(shadowEventIds.has(alias+'|'+String(row.historyEventId))||unambiguousMirror&&shadows.has(alias+'|'+key)):shadows.has(alias+'|'+key)))continue;
+      const identity=isV2?'v2:'+row.rootOccurrenceId:alias+'|'+key+(row.historyEventId?'|'+row.historyEventId:'');
       if(seen.has(identity))continue;seen.add(identity);
       const family=legacy.filter(member=>String(member.id)===alias||String(member.templateId||'')===alias);
-      const allHistory=family.flatMap(member=>member.manualHistory||[]).filter(entry=>date(entry?.dateISO||entry?.date)===key);
+      const allHistory=family.flatMap(member=>member.manualHistory||[]).filter(entry=>date(entry?.dateISO||entry?.date||entry?.doneDateISO)===key);
       const removed=family.some(member=>(Array.isArray(member.removedOccurrences)?member.removedOccurrences:Object.keys(member.removedOccurrences||{})).some(value=>date(value?.dateISO||value)===key));
       if(!isV2&&(removed||['removed','uncompleted','canceled','cancelled'].includes(String(allHistory.at(-1)?.status||'').toLowerCase())))continue;
       const history=allHistory.filter(entry=>!['scheduled','removed','uncompleted','canceled','cancelled'].includes(String(entry.status||'').toLowerCase()));
-      const occurrence=history.filter(entry=>entry.source==='cut_cost_correction').sort((a,b)=>String(a.recordedAtISO||'').localeCompare(String(b.recordedAtISO||''))).at(-1)||history.at(-1)||{};
+      const occurrence=history.filter(entry=>entry.source==='cut_cost_correction').sort((a,b)=>String(a.recordedAtISO||'').localeCompare(String(b.recordedAtISO||''))).at(-1)||history.find(entry=>row.historyEventId&&String(entry.import_event_id||entry.id)===String(row.historyEventId))||history.at(-1)||{};
       const durationTask=family.find(member=>number(member.occurrenceHours?.[key])!==null)||task;
       const rawParts=isV2?stream?.partsCostSnapshot:occurrence.partsCostSnapshot??occurrence.partsCost??occurrence.calendarPrice;
       const configuredTasks=[task,v2.find(member=>String(member.id)===String(row.taskId))].filter(Boolean);

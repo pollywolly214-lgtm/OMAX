@@ -6312,7 +6312,7 @@ function renderDashboard(){
   const globalSearchInput = document.getElementById("dashboardGlobalSearch");
   const globalSuggestions = document.getElementById("dashboardGlobalSearchSuggestions");
   const centralModel = (typeof computeCostModel === "function") ? computeCostModel() : null;
-  const maintenanceRows = Array.isArray(centralModel?.maintenanceDataTable) ? centralModel.maintenanceDataTable : [];
+  const maintenanceRows = Array.isArray(centralModel?.allMaintenanceDataTable) ? centralModel.allMaintenanceDataTable : [];
   const allCutJobsForLabels = ([]).concat(Array.isArray(window.cuttingJobs) ? window.cuttingJobs : [], Array.isArray(window.completedCuttingJobs) ? window.completedCuttingJobs : []).filter(Boolean);
   const cutJobsById = new Map(allCutJobsForLabels.map(job=>[String(job?.id || ""), job]));
   const maintenanceByTask = new Map();
@@ -12779,7 +12779,7 @@ function renderSettings(){
       if (!meta) return;
       const t = meta.task;
       const model = (typeof computeCostModel === 'function') ? computeCostModel() : null;
-      const rows = Array.isArray(model?.maintenanceDataTable) ? model.maintenanceDataTable.filter(row => String(row?.taskId || '') === String(id)) : [];
+      const rows = Array.isArray(model?.allMaintenanceDataTable) ? model.allMaintenanceDataTable.filter(row => String(row?.taskId || '') === String(id)) : [];
       const completedDates = Array.from(new Set(rows.map(r => String(r?.dateISO || '').trim()).filter(Boolean))).sort();
       const scheduledDates = Array.from(new Set([].concat(Array.isArray(t.manualHistory) ? t.manualHistory.map(x=>x&&x.dateISO).filter(Boolean) : [], t.calendarDateISO ? [t.calendarDateISO] : [], completedDates))).sort();
       const lastCompleted = completedDates.length ? completedDates[completedDates.length-1] : '';
@@ -13793,6 +13793,8 @@ function setupFinancialBreakdownModal(report,content){
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
+  const previousCutCostConfig = content.querySelector("[data-cut-cost-config]");
+  const wasCutCostConfigOpen = previousCutCostConfig && !previousCutCostConfig.hidden;
   const previousModal = document.getElementById("costDataCenterModal");
   const previousEfficiencyModal = document.getElementById("efficiencySnapshotModal");
   const wasDataCenterOpen = Boolean(previousModal && !previousModal.hasAttribute("hidden"));
@@ -13831,6 +13833,7 @@ function renderCosts(){
   content.innerHTML = viewCosts(model);
   bindFinancialPeriodControls(content, renderCosts);
   window.OMAXCutCostFeedbackUi?.mountCosts(content, model);
+  if (wasCutCostConfigOpen) content.querySelector("[data-cut-cost-configure]")?.click();
   const pendingWeeklyScrollState = (typeof window !== "undefined" && window.__costWeeklyScrollState && typeof window.__costWeeklyScrollState === "object")
     ? { ...window.__costWeeklyScrollState }
     : null;
@@ -14887,26 +14890,13 @@ function renderCosts(){
         return startISO && endISO ? `${weekText} (${startISO} to ${endISO})` : weekText;
       };
       const flatRows = [];
-      (window.receiptTrackerWeeks || []).forEach(entry => {
-        const weekLabel = getWeekLabel(entry);
-        normalizeRows(entry?.rows).forEach((row, idx) => {
-          const financials = getPurchaseFinancials(row);
-          flatRows.push({
-            dateISO: toIsoDate(row.date) || "",
-            purchased: String(row.purchased || ""),
-            poNumber: String(row.poNumber ?? "").trim(),
-            partNumber: String(row.partNumber || ""),
-            qty: financials.qty,
-            cost: financials.unitCost,
-            merchandiseSubtotal: financials.merchandiseSubtotal,
-            shipping: financials.shipping,
-            tax: financials.tax,
-            total: financials.totalSpend,
-            weekLabel,
-            weekKey: String(entry?.key || ""),
-            rowIndex: idx
-          });
-        });
+      const period = window.OMAXFinancialReconciliation?.period(window.__cuttingFinancialRange);
+      normalizePurchaseHistory(window.receiptTrackerWeeks).forEach(({row,week,rowIndex,financials,costIncomplete,identityConflict})=>{
+        const dateISO = window.OMAXFinancialReconciliation?.dateKey(row.date) || toIsoDate(row.date);
+        if (period && (!dateISO || dateISO > period.endISO || (period.startISO && dateISO < period.startISO))) return;
+        flatRows.push({dateISO,purchased:String(row.purchased || ""),partNumber:String(row.partNumber || ""),poNumber:String(row.poNumber ?? "").trim(),
+          qty:financials.qty,cost:financials.unitCost,merchandiseSubtotal:financials.merchandiseSubtotal,shipping:financials.shipping,tax:financials.tax,
+          total:financials.totalSpend,costIncomplete:costIncomplete || identityConflict,weekLabel:getWeekLabel(week),weekKey:week.key,rowIndex});
       });
       flatRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
       if (!flatRows.length){
@@ -14925,7 +14915,7 @@ function renderCosts(){
           <td class="purchase-number">${formatUsd(row.merchandiseSubtotal)}</td>
           <td class="purchase-number">${formatUsd(row.shipping)}</td>
           <td class="purchase-number">${formatUsd(row.tax)}</td>
-          <td class="purchase-number">${formatUsd(row.total)}</td>
+          <td class="purchase-number">${row.costIncomplete ? "Incomplete" : formatUsd(row.total)}</td>
         </tr>
       `).join("");
     };
@@ -17145,124 +17135,19 @@ const appendEmptyRow = (focusFirst = false)=>{
   let tooltipEl = canvasWrap ? canvasWrap.querySelector(".cost-chart-tooltip") : null;
   let lastPointerClientPos = null;
   const rangeButtons = Array.from(content.querySelectorAll("[data-cost-range]"));
-  const allowedChartRanges = ["1", "3", "6", "12", "ytd", "all"];
-  const defaultChartRange = "6";
-  const rangeLabelMap = new Map([
-    ["1", "1 month"],
-    ["3", "3 months"],
-    ["6", "6 months"],
-    ["12", "12 months"],
-    ["ytd", "YTD"],
-    ["all", "All time"]
-  ]);
-
-  const normalizeChartRange = (value)=>{
-    const key = String(value == null ? "" : value).toLowerCase();
-    return allowedChartRanges.includes(key) ? key : defaultChartRange;
-  };
-
-  const getChartRangeState = ()=>{
-    if (typeof window !== "undefined" && window.__costChartRangeState && typeof window.__costChartRangeState === "object"){
-      const state = window.__costChartRangeState;
-      state.months = normalizeChartRange(state.months);
-      return state;
-    }
-    const state = { months: defaultChartRange };
-    if (typeof window !== "undefined"){
-      window.__costChartRangeState = state;
-    }
-    return state;
-  };
-
-  const setChartRangeMonths = (value)=>{
-    const state = getChartRangeState();
-    state.months = normalizeChartRange(value);
-    if (typeof window !== "undefined"){
-      window.__costChartRangeState = state;
-    }
-    return state.months;
-  };
-
+  const chartPeriods = {"1":"30d","3":"90d","6":"182d","12":"365d",ytd:"ytd",all:"all"};
   const updateChartRangeButtons = ()=>{
-    const { months } = getChartRangeState();
-    rangeButtons.forEach(btn => {
-      const btnValue = normalizeChartRange(btn?.getAttribute("data-cost-range"));
-      const isActive = btnValue === months;
-      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
-      if (isActive){
-        btn.classList.add("is-active");
-      }else{
-        btn.classList.remove("is-active");
-      }
+    rangeButtons.forEach(btn=>{
+      const active = chartPeriods[btn.getAttribute("data-cost-range")] === model.financialReconciliation.window.key;
+      btn.setAttribute("aria-pressed",String(active));
+      btn.classList.toggle("is-active",active);
     });
   };
-
-  const limitChartSeries = (points, limit = 180)=>{
-    if (!Array.isArray(points)) return [];
-    const normalizedLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 180;
-    if (points.length > normalizedLimit){
-      return points.slice(-normalizedLimit);
-    }
-    return points.slice();
-  };
-
-  const filterChartSeriesByRange = (points, rangeValue)=>{
-    if (!Array.isArray(points)){
-      return { points: [], domainStart: null, domainEnd: null };
-    }
-    const normalizedRange = normalizeChartRange(rangeValue);
-    const sanitized = points
-      .filter(pt => pt && pt.date instanceof Date && !Number.isNaN(pt.date.getTime()))
-      .sort((a, b) => a.date - b.date);
-    if (!sanitized.length){
-      return { points: [], domainStart: null, domainEnd: null };
-    }
-
-    const latestPoint = sanitized[sanitized.length - 1];
-    const latestTime = latestPoint.date.getTime();
-    const cutoff = new Date(latestTime);
-    cutoff.setHours(0, 0, 0, 0);
-    if (normalizedRange === "ytd"){
-      cutoff.setMonth(0, 1);
-    }else if (normalizedRange !== "all"){
-      const months = Number(normalizedRange);
-      cutoff.setMonth(cutoff.getMonth() - (Number.isFinite(months) ? months : 6));
-    }else{
-      const oldest = sanitized[0]?.date;
-      if (oldest instanceof Date && !Number.isNaN(oldest.getTime())){
-        cutoff.setTime(oldest.getTime());
-        cutoff.setHours(0, 0, 0, 0);
-      }
-    }
-    const cutoffTime = cutoff.getTime();
-
-    let filtered = normalizedRange === "all"
-      ? sanitized.slice()
-      : sanitized.filter(pt => pt.date.getTime() >= cutoffTime);
-
-    if (!filtered.length){
-      const fallback = sanitized[sanitized.length - 1];
-      const fallbackValue = fallback ? Number(fallback.value) : null;
-      if (fallback && Number.isFinite(fallbackValue)){
-        const endPoint = { ...fallback, date: new Date(latestTime), value: fallbackValue };
-        const startPoint = { ...endPoint, date: new Date(cutoffTime) };
-        filtered = [startPoint, endPoint];
-      }
-    }
-
-    const limited = normalizedRange === "all"
-      ? filtered.slice()
-      : limitChartSeries(filtered, Math.max(180, Math.ceil((Number(normalizedRange) || 6) * 31)));
-    if (!allowedChartRanges.includes(normalizedRange)){
-      return { points: limited, domainStart: null, domainEnd: null };
-    }
-
-    return {
-      points: limited,
-      domainStart: cutoffTime,
-      domainEnd: latestTime
-    };
-  };
+  const filterChartSeriesByRange = points=>({
+    points: points.slice(),
+    domainStart: model.financialReconciliation.window.startISO ? new Date(model.financialReconciliation.window.startISO + "T00:00:00").getTime() : null,
+    domainEnd: new Date(model.financialReconciliation.window.endISO + "T00:00:00").getTime()
+  });
 
   const escapeTooltip = (value)=> String(value ?? "").replace(/[&<>"']/g, c => ({
     "&": "&amp;",
@@ -17505,7 +17390,7 @@ const appendEmptyRow = (focusFirst = false)=>{
       if (safe > 0) return `+${base}`;
       return base;
     };
-    const { months } = getChartRangeState();
+    const months = model.financialReconciliation.window.key;
     const maintenanceRange = filterChartSeriesByRange(maintenanceSeriesBase, months);
     const spendRange = filterChartSeriesByRange(totalSpendSeriesBase, months);
     const jobRange = filterChartSeriesByRange(jobSeriesBase, months);
@@ -17522,13 +17407,13 @@ const appendEmptyRow = (focusFirst = false)=>{
     }, 0);
     const totalSpendPerCutValue = totalCutHoursInWindow > 0
       ? (totalSpendInWindow / totalCutHoursInWindow)
-      : 0;
-    const totalSpendPerCutLabel = formatCurrencyUnsigned(totalSpendPerCutValue);
+      : null;
+    const totalSpendPerCutLabel = totalSpendPerCutValue == null ? "INSUFFICIENT DATA" : formatCurrencyUnsigned(totalSpendPerCutValue);
     const cuttingTotalInWindow = jobRange.points.reduce((sum, item) => sum + (Number(item?.value) || 0), 0);
     const cuttingAverageValueInWindow = jobRange.points.length
       ? (cuttingTotalInWindow / jobRange.points.length)
       : 0;
-    const cuttingAverageLabelInWindow = formatCurrencySigned(cuttingAverageValueInWindow);
+    const cuttingAverageLabelInWindow = jobRange.points.length ? formatCurrencySigned(cuttingAverageValueInWindow) : "INSUFFICIENT DATA";
 
     const domainStarts = [maintenanceRange.domainStart, spendRange.domainStart, jobRange.domainStart]
       .map(value => Number.isFinite(value) ? Number(value) : null)
@@ -17553,7 +17438,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         ? { start: Math.min(...domainStarts), end: Math.max(...domainEnds) }
         : null
     };
-    const windowLabel = rangeLabelMap.get(months) || String(months || "selected range");
+    const windowLabel = model.financialReconciliation.window.description;
     const maintenanceCostPerCutEl = content.querySelector("[data-maint-cost-per-cut-label]");
     if (maintenanceCostPerCutEl){
       maintenanceCostPerCutEl.textContent = maintenanceCostPerCutLabel;
@@ -17608,9 +17493,8 @@ const appendEmptyRow = (focusFirst = false)=>{
     btn.addEventListener("click", event => {
       event.preventDefault();
       const value = btn.getAttribute("data-cost-range");
-      const months = normalizeChartRange(value);
-      setChartRangeMonths(months);
-      redraw();
+      window.__cuttingFinancialRange = chartPeriods[value] || "all";
+      renderCosts();
     });
   });
 
@@ -17705,6 +17589,25 @@ function buildCalendarMaintenanceHistory({ intervalTasks = [], asReqTasks = [] }
   });
 
   return { calendarCostByTemplateId };
+}
+
+function buildCostMachineHourHistory(financialPeriod){
+  // Historical hour evidence is independent of job financials. Reuse ACH's
+  // precedence rules without treating sparse meter intervals as dated jobs.
+  const hourKeys = [...(window.totalHistory || []), ...(window.dailyCutHours || [])]
+    .map(row=>window.OMAXFinancialReconciliation.dateKey(row?.dateISO)).filter(Boolean).sort();
+  const hourStart = financialPeriod.startISO || hourKeys[0] || financialPeriod.endISO;
+  const validHours = row=>["number","string"].includes(typeof row?.hours) && String(row.hours).trim() !== "" && Number.isFinite(Number(row.hours)) && Number(row.hours) >= 0;
+  const effectiveHours = resolveEffectiveDailyCutHours((window.dailyCutHours || []).filter(validHours), (window.totalHistory || []).filter(validHours), hourStart, financialPeriod.endISO);
+  const meterEvidence = new Map((window.totalHistory || []).map(row=>[window.OMAXFinancialReconciliation.dateKey(row?.dateISO),row.hours]));
+  return [...new Set([...effectiveHours.keys(), ...meterEvidence.keys()])].filter(Boolean)
+    .filter(dateISO=>dateISO <= financialPeriod.endISO && (!financialPeriod.startISO || dateISO >= financialPeriod.startISO)).sort().map(dateISO=>({
+      dateISO,
+      cumulativeHours: meterEvidence.get(dateISO) ?? null,
+      usageHours: effectiveHours.get(dateISO) ?? null,
+      source: (window.dailyCutHours || []).some(row=>row.dateISO===dateISO && row.source==="manual") ? "Manual daily hours"
+        : meterEvidence.has(dateISO) ? "Cumulative meter / interval evidence" : "Daily hour history"
+    }));
 }
 
 function computeCostModel(){
@@ -17854,7 +17757,7 @@ function computeCostModel(){
     if (!task) return false;
     if (hasDateKey(task.calendarDateISO)) return true;
     if (hasAnyDatedEntry(task.completedDates)) return true;
-    if (hasAnyDatedEntry(task.manualHistory, entry => entry && entry.dateISO)) return true;
+    if (hasAnyDatedEntry(task.manualHistory, entry => entry && (entry.dateISO || entry.date || entry.doneDateISO))) return true;
     return false;
   };
 
@@ -18206,9 +18109,11 @@ function computeCostModel(){
   const shouldIncludeManualHistoryEntry = (entry, completedDateKeys = null)=> {
     if (!entry) return false;
     const status = typeof entry.status === "string" ? entry.status.trim().toLowerCase() : "";
-    const entryKey = toHistoryDateKey(entry.dateISO);
+    const entryKey = toHistoryDateKey(entry.dateISO || entry.date || entry.doneDateISO);
     if (!entryKey) return false;
-    if (status === "removed") return false;
+    if (["removed", "uncompleted", "canceled", "cancelled"].includes(status)) return false;
+    // Older restored manual records predate explicit status/source fields.
+    if (!status) return true;
     if (status === "completed" || status === "complete" || status === "done" || status === "manual" || status === "logged"){
       return true;
     }
@@ -18313,7 +18218,7 @@ function computeCostModel(){
       const manualHistory = Array.isArray(payload.manualHistory) ? payload.manualHistory : [];
       manualHistory.forEach((item, index) => {
         if (!shouldIncludeManualHistoryEntry(item, completedDateKeys)) return;
-        const key = toHistoryDateKey(item.dateISO);
+        const key = toHistoryDateKey(item.dateISO || item.date || item.doneDateISO);
         if (key){
           const status = typeof item?.status === "string" ? item.status.trim().toLowerCase() : "logged";
           const marker = item?.recordedAtISO || item?.recordedAt || item?.timeISO || "";
@@ -18390,26 +18295,33 @@ function computeCostModel(){
     const pushHistory = (sourceTask)=>{
       if (!sourceTask) return;
       const completedDates = Array.isArray(sourceTask.completedDates) ? sourceTask.completedDates : [];
+      const manualHistory = Array.isArray(sourceTask.manualHistory) ? sourceTask.manualHistory : [];
+      const manualDates = new Set(manualHistory.filter(entry=>shouldIncludeManualHistoryEntry(entry))
+        .map(entry=>toHistoryDateKey(entry.dateISO || entry.date || entry.doneDateISO)));
       const completedDateKeys = new Set();
       completedDates.forEach((dateVal, index) => {
         const key = toHistoryDateKey(dateVal);
         if (!key) return;
         completedDateKeys.add(key);
+        if (manualDates.has(key)) return; // completedDates mirrors the manual event.
         addTaskEventForDate(key, {
           ...baseInfo,
           occurrenceId: `completed:${key}:${index}`
         });
       });
-      const manualHistory = Array.isArray(sourceTask.manualHistory) ? sourceTask.manualHistory : [];
       manualHistory.forEach((entry, index) => {
         if (!shouldIncludeManualHistoryEntry(entry, completedDateKeys)) return;
-        const key = toHistoryDateKey(entry.dateISO);
+        if (String(entry.status || "").toLowerCase() === "scheduled") return;
+        if (entry.source === "cut_cost_correction" && manualHistory.some(other=>other !== entry && other.source !== "cut_cost_correction" && toHistoryDateKey(other.dateISO || other.date || other.doneDateISO) === toHistoryDateKey(entry.dateISO || entry.date || entry.doneDateISO))) return;
+        const key = toHistoryDateKey(entry.dateISO || entry.date || entry.doneDateISO);
         if (key){
           const status = typeof entry?.status === "string" ? entry.status.trim().toLowerCase() : "logged";
           const marker = entry?.recordedAtISO || entry?.recordedAt || entry?.timeISO || "";
+          const eventId = entry.import_event_id || entry.id || null;
           addTaskEventForDate(key, {
             ...baseInfo,
-            occurrenceId: `manual:${status}:${key}:${marker}:${index}`
+            historyEventId: eventId,
+            occurrenceId: eventId ? `manual:${eventId}` : `manual:${status}:${key}:${marker}:${index}`
           });
         }
       });
@@ -18425,11 +18337,11 @@ function computeCostModel(){
     }
   };
 
-  if (Array.isArray(intervalTasks)){
-    intervalTasks.forEach(task => captureTaskHistory(task, { exists: true }));
+  if (Array.isArray(intervalTasksAll)){
+    intervalTasksAll.forEach(task => captureTaskHistory(task, { exists: true }));
   }
-  if (Array.isArray(asReqTasks)){
-    asReqTasks.forEach(task => captureTaskHistory(task, { exists: true }));
+  if (Array.isArray(asReqTasksAll)){
+    asReqTasksAll.forEach(task => captureTaskHistory(task, { exists: true }));
   }
 
   const maintenanceHistory = [];
@@ -19857,7 +19769,7 @@ function computeCostModel(){
     : "No usage history yet. Log machine hours to estimate maintenance spend.";
   const jobEmpty = "Add cutting jobs with Hours Taken to build the efficiency tracker.";
 
-  const chartNote = "Series use the financial period; chart controls can narrow it further. Maintenance shows modeled event expense, purchases show recorded spending, and completed jobs show canonical net profit. These overlapping components are not added together. Weekly reports retain their own labeled week.";
+  const chartNote = "Historical tables, cards and series use the selected financial period; chart controls update that same period. Incomplete costs are excluded from chart amounts and known subtotals; missing history is not zero. Maintenance shows modeled event expense, purchases show recorded spending, and completed jobs show canonical net profit. These overlapping components are not added together. Weekly reports retain their own labeled week.";
   const chartInfo = "Maintenance event expenses are drawn negative for comparison with job net profit. They may already be included in runtime cost rates. The chart does not establish a combined realized profit or loss.";
 
   const orderSorted = orderHistory.slice().sort((a,b)=>{
@@ -20100,6 +20012,7 @@ function computeCostModel(){
         : null;
       maintenanceDataTableRows.push({
         taskId: originalId,
+        historyEventId: taskMeta.historyEventId || null,
         taskName: task?.name || taskMeta.name || "Maintenance task",
         maintenanceHrs,
         partCost: partCostValue,
@@ -20116,8 +20029,7 @@ function computeCostModel(){
     });
   });
   const compatibilityRows = typeof window.buildMaintenanceCompatibilityStream === "function"
-    ? (Array.isArray(window.buildMaintenanceCompatibilityStream()) ? window.buildMaintenanceCompatibilityStream() : [])
-    : [];
+    ? window.buildMaintenanceCompatibilityStream() : [];
   const v2CompatibilityRows = compatibilityRows.filter(row => row && String(row.sourceSystem || "") === "v2");
   v2CompatibilityRows.forEach((row, idx) => {
     const taskId = String(row.taskId || "").trim();
@@ -20170,8 +20082,8 @@ function computeCostModel(){
         isCompleted,
         repeatBasis,
         provenance: row.provenance || null,
-        resolverStatus,
-        resolverDate
+        resolverStatus: resolvedStatus,
+        resolverDate: resolvedDate
       });
     }
     maintenanceDataTableRows.push({
@@ -20250,7 +20162,8 @@ function computeCostModel(){
     })
     .sort((a, b) => Number(b.occurredAt?.getTime?.() || 0) - Number(a.occurredAt?.getTime?.() || 0));
 
-  const centralTotals = centralMaintenanceRows.reduce((acc, row) => {
+  const completeCentralMaintenanceRows = centralMaintenanceRows.filter(row=>!row.costIncomplete);
+  const centralTotals = completeCentralMaintenanceRows.reduce((acc, row) => {
     acc.totalCost += row.totalCost;
     acc.totalHours += row.maintenanceHrs;
     return acc;
@@ -20263,9 +20176,9 @@ function computeCostModel(){
   const nextYearStart = new Date(currentYear + 1, 0, 1);
   const oneYearAgo = new Date(today);
   oneYearAgo.setDate(oneYearAgo.getDate() - 365);
-  const recentYearRows = centralMaintenanceRows.filter(row => row.occurredAt >= oneYearAgo && row.occurredAt <= today);
+  const recentYearRows = completeCentralMaintenanceRows.filter(row => row.occurredAt >= oneYearAgo && row.occurredAt <= today);
   const annualActualFromCentral = recentYearRows.reduce((sum, row) => sum + row.totalCost, 0);
-  const ytdRows = centralMaintenanceRows.filter(row => row.occurredAt >= yearStart && row.occurredAt <= today);
+  const ytdRows = completeCentralMaintenanceRows.filter(row => row.occurredAt >= yearStart && row.occurredAt <= today);
   const ytdActual = ytdRows.reduce((sum, row) => sum + row.totalCost, 0);
   const elapsedDays = Math.max(1, daysBetweenUTC(yearStart, today) + 1);
   const totalYearDays = Math.max(1, daysBetweenUTC(yearStart, nextYearStart));
@@ -20305,8 +20218,8 @@ function computeCostModel(){
       return start;
     }
     if (projectionWindowConfig.mode === "all"){
-      if (!centralMaintenanceRows.length) return null;
-      const oldest = centralMaintenanceRows[centralMaintenanceRows.length - 1]?.occurredAt;
+      if (!completeCentralMaintenanceRows.length) return null;
+      const oldest = completeCentralMaintenanceRows[completeCentralMaintenanceRows.length - 1]?.occurredAt;
       if (!(oldest instanceof Date) || Number.isNaN(oldest.getTime())) return null;
       const start = new Date(oldest);
       start.setHours(0, 0, 0, 0);
@@ -20324,7 +20237,7 @@ function computeCostModel(){
     if (dt > projectionWindowEnd) return false;
     return true;
   };
-  const projectionWindowRows = centralMaintenanceRows.filter(isInProjectionWindow);
+  const projectionWindowRows = completeCentralMaintenanceRows.filter(isInProjectionWindow);
   const projectionWindowTotal = projectionWindowRows.reduce((sum, row) => sum + row.totalCost, 0);
   const projectionWindowDays = projectionWindowStart
     ? Math.max(1, daysBetweenUTC(projectionWindowStart, projectionWindowEnd) + 1)
@@ -20348,7 +20261,7 @@ function computeCostModel(){
     end.setHours(23, 59, 59, 999);
     const start = def.days == null ? null : new Date(end);
     if (start) start.setDate(start.getDate() - def.days);
-    const rowsInWindow = centralMaintenanceRows.filter(row => {
+    const rowsInWindow = completeCentralMaintenanceRows.filter(row => {
       if (!start) return row.occurredAt <= end;
       return row.occurredAt >= start && row.occurredAt <= end;
     });
@@ -20371,7 +20284,7 @@ function computeCostModel(){
     end.setHours(23, 59, 59, 999);
     const start = def.days == null ? null : new Date(end);
     if (start) start.setDate(start.getDate() - def.days);
-    const rowsInWindow = centralMaintenanceRows.filter(row => {
+    const rowsInWindow = completeCentralMaintenanceRows.filter(row => {
       if (!start) return row.occurredAt <= end;
       return row.occurredAt >= start && row.occurredAt <= end;
     });
@@ -20416,7 +20329,7 @@ function computeCostModel(){
     };
   });
 
-  const modeGroupRows = (modeValue) => centralMaintenanceRows.filter(row => row.taskMode === modeValue);
+  const modeGroupRows = (modeValue) => completeCentralMaintenanceRows.filter(row => row.taskMode === modeValue);
   const makeForecastRows = (rows, prefix) => {
     const byTask = new Map();
     rows.forEach(row => {
@@ -20517,12 +20430,12 @@ function computeCostModel(){
       combinedLabel: `${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })} projected (${currentYear}) · ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })} actual YTD`
     }
   };
-  forecastBreakdownCentral.note = `Projection year: ${currentYear}. Method: ${projectionMethod === "run_rate" ? "YTD + remaining run rate" : "Annualized average"}. Source window: ${projectionWindowConfig.label} (${projectionWindowDays} day${projectionWindowDays === 1 ? "" : "s"}) from the central data table. Window actual = ${formatterCurrency(projectionWindowTotal, { decimals: projectionWindowTotal < 1000 ? 2 : 0 })}. YTD actual = ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })}. Past 12 months actual = ${formatterCurrency(annualActualFromCentral, { decimals: annualActualFromCentral < 1000 ? 2 : 0 })}. Remaining-year estimate = ${formatterCurrency(remainderProjection, { decimals: remainderProjection < 1000 ? 2 : 0 })}. Total ${currentYear} projection = ${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })}.`;
+  forecastBreakdownCentral.note = `Incomplete events excluded: ${centralMaintenanceRows.length - completeCentralMaintenanceRows.length}; forecasts use known event costs and may have partial coverage. Projection year: ${currentYear}. Method: ${projectionMethod === "run_rate" ? "YTD + remaining run rate" : "Annualized average"}. Source window: ${projectionWindowConfig.label} (${projectionWindowDays} day${projectionWindowDays === 1 ? "" : "s"}) from the central data table. Window actual = ${formatterCurrency(projectionWindowTotal, { decimals: projectionWindowTotal < 1000 ? 2 : 0 })}. YTD actual = ${formatterCurrency(ytdActual, { decimals: ytdActual < 1000 ? 2 : 0 })}. Past 12 months actual = ${formatterCurrency(annualActualFromCentral, { decimals: annualActualFromCentral < 1000 ? 2 : 0 })}. Remaining-year estimate = ${formatterCurrency(remainderProjection, { decimals: remainderProjection < 1000 ? 2 : 0 })}. Total ${currentYear} projection = ${formatterCurrency(annualForecastFromCentral, { decimals: annualForecastFromCentral < 1000 ? 2 : 0 })}.`;
 
-  const historyRowsCentral = centralMaintenanceRows.slice(0, 6).map(row => ({
+  const historyRowsCentral = centralMaintenanceRows.map(row => ({
     dateLabel: formatDateLabelShort(row.occurredAt),
     hoursLabel: formatHours(row.maintenanceHrs),
-    costLabel: formatterCurrency(row.totalCost, { decimals: row.totalCost < 1000 ? 2 : 0 }),
+    costLabel: row.costIncomplete ? "Incomplete" : formatterCurrency(row.totalCost, { decimals: row.totalCost < 1000 ? 2 : 0 }),
     dateISO: row.dateISO,
     key: `${row.taskId}_${row.dateISO}`,
     hoursValue: row.maintenanceHrs,
@@ -20553,11 +20466,13 @@ function computeCostModel(){
     id: `${row.taskId}_${row.dateISO}_${idx}`,
     taskId: row.taskId,
     taskName: row.taskName,
-    maintenanceHrsLabel: formatHoursValue(row.maintenanceHrs) || "0",
-    partCostLabel: formatterCurrency(row.partCost, { decimals: row.partCost < 1000 ? 2 : 0 }),
+    maintenanceHrsLabel: row.costFields?.duration.value === null ? "Unknown" : (formatHoursValue(row.maintenanceHrs) || "0"),
+    partCostLabel: row.costFields?.parts.value === null ? "Unknown" : formatterCurrency(row.partCost, { decimals: row.partCost < 1000 ? 2 : 0 }),
     chargeRateLabel: formatterCurrency(row.chargeRate, { decimals: 2 }),
-    laborCostLabel: formatterCurrency(row.laborCost, { decimals: row.laborCost < 1000 ? 2 : 0 }),
-    totalCostLabel: formatterCurrency(row.totalCost, { decimals: row.totalCost < 1000 ? 2 : 0 }),
+    laborCostLabel: row.costFields?.duration.value === null ? "Unknown" : formatterCurrency(row.laborCost, { decimals: row.laborCost < 1000 ? 2 : 0 }),
+    totalCostLabel: row.costIncomplete ? "Incomplete" : formatterCurrency(row.totalCost, { decimals: row.totalCost < 1000 ? 2 : 0 }),
+    costIncomplete: row.costIncomplete,
+    costEstimated: row.costEstimated,
     dateISO: row.dateISO,
     daysSinceLabel: Number.isFinite(row.daysSinceTask) ? String(row.daysSinceTask) : "—",
     cuttingHoursSinceLabel: Number.isFinite(row.cuttingHoursSince) ? formatHoursValue(row.cuttingHoursSince) : "—",
@@ -20598,51 +20513,18 @@ function computeCostModel(){
       }
     });
   }
-  const purchaseDataTableRows = [];
-  const flattenCentralSpendRows = (weekEntry)=>{
-    const rows = Array.isArray(weekEntry?.rows) ? weekEntry.rows : [];
-    return rows.map(row => {
-      const dateValue = String(row?.date || "").slice(0, 10);
-      const purchased = String(row?.purchased || "").trim();
-      const partNumber = String(row?.partNumber || "").trim();
-      const financials = getPurchaseFinancials(row);
-      return { dateValue, purchased, partNumber, poNumber:String(row?.poNumber ?? "").trim(), cost:financials.unitCost, qty:financials.qty, merchandiseSubtotal:financials.merchandiseSubtotal, shipping:financials.shipping, tax:financials.tax, total:financials.totalSpend };
-    });
-  };
-  (Array.isArray(window.receiptTrackerWeeks) ? window.receiptTrackerWeeks : []).forEach(weekEntry => {
-    const key = String(weekEntry?.key || "");
-    const weekNum = Number(weekEntry?.week);
-    const weekLabelBase = Number.isFinite(weekNum) && weekNum > 0 ? `Week ${weekNum}` : (key || "Week");
-    const startISO = String(weekEntry?.startISO || "");
-    const endISO = String(weekEntry?.endISO || "");
-    const weekLabel = startISO && endISO ? `${weekLabelBase} (${startISO} to ${endISO})` : weekLabelBase;
-    flattenCentralSpendRows(weekEntry).forEach((rawRow, rowIndex) => {
-      const dateISO = toHistoryDateKey(rawRow?.dateValue || "");
-      const purchased = String(rawRow?.purchased || "");
-      const partNumber = String(rawRow?.partNumber || "");
-      const cost = Math.max(0, Number(rawRow?.cost) || 0);
-      const qty = Math.max(0, Number(rawRow?.qty) || 0);
-      const shipping = Math.max(0, Number(rawRow?.shipping) || 0);
-      const tax = Math.max(0, Number(rawRow?.tax) || 0);
-      const total = Math.max(0, Number(rawRow?.total) || 0);
-      const merchandiseSubtotal = rawRow.merchandiseSubtotal;
-      if (!dateISO && !purchased && !partNumber && total <= 0) return;
-      purchaseDataTableRows.push({
-        dateISO,
-        purchased,
-        partNumber,
-        cost,
-        qty,
-        shipping,
-        tax,
-        total,
-        merchandiseSubtotal,
-        poNumber:rawRow.poNumber,
-        weekLabel,
-        weekKey: key,
-        rowIndex
-      });
-    });
+  const purchaseDataTableRows = normalizePurchaseHistory(window.receiptTrackerWeeks).map(({row,week,rowIndex,financials,costIncomplete,identityConflict})=>{
+    const weekNum = Number(week.week);
+    const weekLabelBase = Number.isFinite(weekNum) && weekNum > 0 ? `Week ${weekNum}` : (week.key || "Week");
+    return {
+      dateISO: window.OMAXFinancialReconciliation.dateKey(row.date),
+      purchased: String(row.purchased || "").trim(), partNumber: String(row.partNumber || "").trim(),
+      poNumber: String(row.poNumber ?? "").trim(), cost: financials.unitCost, qty: financials.qty,
+      shipping: financials.shipping, tax: financials.tax, merchandiseSubtotal: financials.merchandiseSubtotal,
+      total: financials.totalSpend, costIncomplete: costIncomplete || identityConflict,
+      weekLabel: week.startISO && week.endISO ? `${weekLabelBase} (${week.startISO} to ${week.endISO})` : weekLabelBase,
+      weekKey: week.key || "", rowIndex
+    };
   });
   purchaseDataTableRows.sort((a, b)=> String(b.dateISO || "").localeCompare(String(a.dateISO || "")));
   const purchaseDataTable = purchaseDataTableRows.map((row, idx) => ({
@@ -20659,12 +20541,12 @@ function computeCostModel(){
     partNumber: row.partNumber || "—",
     shippingLabel: formatterCurrency(row.shipping, { decimals: 2 }),
     taxLabel: formatterCurrency(row.tax, { decimals: 2 }),
-    totalLabel: formatterCurrency(row.total, { decimals: 2 })
+    totalLabel: row.costIncomplete ? "Incomplete" : formatterCurrency(row.total, { decimals: 2 })
   }));
   const spendByDate = new Map();
   purchaseDataTableRows.forEach(row => {
     const dateISO = toHistoryDateKey(row.dateISO || "");
-    if (!dateISO) return;
+    if (!dateISO || row.costIncomplete) return;
     const entry = spendByDate.get(dateISO) || { total: 0, items: [], rowCount: 0 };
     entry.total += Math.max(0, Number(row.total) || 0);
     entry.rowCount += 1;
@@ -20698,7 +20580,7 @@ function computeCostModel(){
     });
 
   const maintenanceTrendRows = maintenanceDataTableRows.filter(row => {
-    if (!row) return false;
+    if (!row || row.costIncomplete) return false;
     if (!row.taskId || (!row.settingsLink && row.sourceSystem !== "v2")) return false;
     if (!toHistoryDateKey(row.dateISO)) return false;
     return Number.isFinite(Number(row.totalCost)) && Number(row.totalCost) >= 0;
@@ -20759,7 +20641,7 @@ function computeCostModel(){
   const cutCostFeedback = window.OMAXCutCostFeedback?.calculate({state:window,rows:maintenanceDataTableRows,config:window.appConfig?.cutCostFeedback,today:financialAnalysisDate});
   const maintenanceCostPerCutValue = cutCostFeedback?.maintenanceCostPerHour ?? null;
   const totalSpendInFinancialPeriod = selectedSpendSeries.reduce((sum, item) => sum + Math.abs(Number(item?.value) || 0), 0);
-  const totalSpendPerCutValue = totalCutHoursInFinancialPeriod > 0 ? (totalSpendInFinancialPeriod / totalCutHoursInFinancialPeriod) : 0;
+  const totalSpendPerCutValue = totalCutHoursInFinancialPeriod > 0 ? (totalSpendInFinancialPeriod / totalCutHoursInFinancialPeriod) : null;
 
   // Read the loaded source records, not formatted Data Center cells. No writes or saved reports.
   const financialReconciliation = window.OMAXFinancialReconciliation.build({
@@ -20775,11 +20657,11 @@ function computeCostModel(){
   const financialTone = value => value == null || value === 0 ? "neutral" : value < 0 ? "negative" : "positive";
   const financialWindow = financialReconciliation.window.description;
   summaryCards.splice(0, summaryCards.length,
-    {key:"cuttingJobs",icon:"✂",title:"Cutting Job Net Profit",value:financialMoney(financialReconciliation.totals.net),tone:financialTone(financialReconciliation.totals.net),
+    {key:"cuttingJobs",icon:"✂",title:"Cutting Job Net Profit",value:financialReconciliation.totals.count ? financialMoney(financialReconciliation.totals.net) : "No records",tone:financialTone(financialReconciliation.totals.net),
       hint:`${financialReconciliation.totals.count} completed jobs · ${financialWindow}. Modeled using resolved financial hours and job rates. Loaded audit: ${financialReconciliation.audit.durationConflicts} duration reviews, ${financialReconciliation.audit.duplicateGroups.length} possible duplicate groups; all records retained. See Financial Breakdown.`},
-    {key:"recordedPurchases",icon:"$",title:"Recorded purchases",value:financialExpense(financialReconciliation.purchases.total),tone:"negative",
+    {key:"recordedPurchases",icon:"$",title:"Recorded purchases",value:financialReconciliation.purchases.count ? financialExpense(financialReconciliation.purchases.total) : "Unavailable",tone:"negative",
       hint:`${financialWindow}. Purchase History spending; not all purchases are maintenance or verified payments. Shown separately.`},
-    {key:"maintenanceExpenses",icon:"⚙",title:"Maintenance event costs",value:financialExpense(financialReconciliation.maintenance.knownSubtotal),tone:"negative",
+    {key:"maintenanceExpenses",icon:"⚙",title:"Maintenance event costs",value:financialReconciliation.maintenance.count > financialReconciliation.maintenance.incomplete ? financialExpense(financialReconciliation.maintenance.knownSubtotal) : "Unavailable",tone:"negative",
       hint:`${financialWindow}. Known subtotal with modeled labor; estimated/defaulted and incomplete events are identified below. Not subtracted again.`},
     {key:"maintenanceForecast",icon:"↗",title:`Projected maintenance (${currentYear})`,value:financialExpense(annualForecastFromCentral),tone:"negative",
       hint:`Annual projected expense, not historical loss. Source: ${projectionWindowConfig.label}. Remaining-year projected expense ${financialExpense(remainderProjection)}.`},
@@ -20793,11 +20675,12 @@ function computeCostModel(){
   return {
     summaryCards,
     financialReconciliation,
+    machineHourHistory: buildCostMachineHourHistory(financialPeriod),
     timeframeRows: timeframeRowsCentral,
     timeframeDetails: timeframeDetailsCentral,
     forecastBreakdown: forecastBreakdownCentral,
     timeframeNote,
-    historyRows: historyRowsCentral,
+    historyRows: historyRowsCentral.filter(inFinancialPeriod),
     historyEmpty,
     jobSummary,
     jobBreakdown,
@@ -20812,14 +20695,15 @@ function computeCostModel(){
     maintenanceCostPerCutWindowLabel: "saved Cost Analysis window",
     cutCostFeedback,
     totalSpendPerCutValue,
-    totalSpendPerCutLabel: formatterCurrency(totalSpendPerCutValue, { decimals: totalSpendPerCutValue < 1000 ? 2 : 0 }),
+    totalSpendPerCutLabel: totalSpendPerCutValue == null ? "INSUFFICIENT DATA" : formatterCurrency(totalSpendPerCutValue, { decimals: totalSpendPerCutValue < 1000 ? 2 : 0 }),
     cuttingAverageValue,
     cuttingAverageLabel: formatterCurrency(cuttingAverageValue, { showPlus: true, decimals: 0 }),
     orderRequestSummary,
-    maintenanceDataTable,
+    maintenanceDataTable: maintenanceDataTable.filter(inFinancialPeriod),
+    allMaintenanceDataTable: maintenanceDataTable,
     maintenanceCostRows: maintenanceDataTableRows,
-    purchaseDataTable,
-    cuttingJobsDataTable,
+    purchaseDataTable: purchaseDataTable.filter(inFinancialPeriod),
+    cuttingJobsDataTable: cuttingJobsDataTable.filter(row=>inFinancialPeriod({dateISO:row.completedDateISO})),
     efficiencySnapshot,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries: selectedMaintenanceSeries,

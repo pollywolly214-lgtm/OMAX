@@ -2431,6 +2431,14 @@ function viewCosts(model){
                 <button type="button" class="cost-data-center-tab" data-dc-tab="logs" role="tab" aria-selected="false">History Logs</button>
               </div>
               <div class="cost-data-center-panel-content" data-dc-panel="maintenance">
+              <p class="small muted" data-cost-history-period>${esc(data.financialReconciliation?.window.description || "All recorded history")}. Event costs retain recorded, estimated/default and incomplete classifications.</p>
+              <details data-machine-hour-history>
+                <summary>Machine / cut-hour evidence (${(data.machineHourHistory || []).length} readings)</summary>
+                <p class="small muted">Partial coverage: sparse meter deltas span readings; daily hours use existing manual/automatic precedence. Missing days are unknown. Machine hours do not establish job revenue or profit.</p>
+                <table class="cost-table"><thead><tr><th>Date</th><th>Cumulative meter</th><th>Daily / interval usage</th><th>Source</th></tr></thead><tbody>
+                ${(data.machineHourHistory || []).map(row=>`<tr data-machine-hour-date="${esc(row.dateISO)}"><td>${esc(row.dateISO)}</td><td>${esc(row.cumulativeHours ?? "Unknown")}</td><td>${esc(row.usageHours ?? "Unknown")}</td><td>${esc(row.source)}</td></tr>`).join("") || '<tr><td colspan="4">Insufficient machine-hour evidence in this period.</td></tr>'}
+                </tbody></table>
+              </details>
               <div class="cost-data-center-search">
                 <label for="costDataCenterSearch">Search table</label>
                 <input id="costDataCenterSearch" type="search" placeholder="Search task, date, counter, or link target" data-maintenance-search>
@@ -2484,7 +2492,7 @@ function viewCosts(model){
                         data-task-name="${esc(String(row.taskName || ""))}" data-v2-original-date-iso="${esc(String(row.originalDateISO || ""))}" data-search-text="${esc(`${row.counterLabel || ""} ${row.taskName || ""} ${row.dateISO || ""} ${row.qtyLabel || ""}`.toLowerCase())}">
                     <td>${esc(row.counterLabel || "#1")}</td>
                     <td>${esc(row.taskName || "Maintenance task")}</td>
-                    <td>${esc((row.sourceSystem || "legacy").toUpperCase())}</td>
+                    <td>${esc((row.sourceSystem || "legacy").toUpperCase())} · ${row.costIncomplete ? "Incomplete" : row.costEstimated ? "Estimated/default inputs" : "Recorded inputs"}</td>
                     <td>${esc(row.maintenanceHrsLabel || "0")}</td>
                     <td>${esc(row.repeatBasis || "—")}</td>
                     <td>${esc(row.partCostLabel || "$0.00")}</td>
