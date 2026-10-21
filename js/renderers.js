@@ -13730,6 +13730,66 @@ function bindFinancialPeriodControls(root, rerender){
   });
 }
 
+function setupFinancialBreakdownModal(report,content){
+  if (!report) return;
+  let dialog=document.getElementById("financialBreakdownModal");
+  if (!dialog){
+    dialog=document.createElement("dialog");
+    dialog.id="financialBreakdownModal";dialog.className="financial-breakdown-dialog";
+    dialog.setAttribute("aria-labelledby","financialBreakdownTitle");
+    dialog.innerHTML=`<header class="financial-breakdown-header"><h2 id="financialBreakdownTitle">Financial Breakdown</h2><button type="button" class="btn ghost" data-close-financial-breakdown>Close</button>${renderFinancialPeriodControl(report.window,"financialBreakdownPeriod")}</header><div class="financial-breakdown-body"></div>`;
+    document.body.appendChild(dialog);
+    const closeButton=dialog.querySelector("[data-close-financial-breakdown]");
+    const close=(returnFocus=true)=>{dialog.__returnFinancialFocus=returnFocus;dialog.close();};
+    closeButton.addEventListener("click",()=>close());
+    dialog.addEventListener("close",()=>{
+      if (dialog.open) return;
+      document.body.classList.remove("financial-breakdown-open");
+      if (dialog.__returnFinancialFocus!==false && location.hash.split("?")[0]==="#/costs")
+        document.querySelector("[data-open-financial-breakdown]")?.focus({preventScroll:true});
+      dialog.__returnFinancialFocus=true;
+    });
+    dialog.addEventListener("click",event=>{
+      if (event.target.closest("[data-financial-calculator]")){
+        close(false);
+        document.querySelector("[data-open-efficiency-snapshot]")?.click();
+      }
+    });
+    // One navigation listener for the single body-mounted dialog; Escape and
+    // focus trapping are provided by the native modal, without key listeners.
+    window.addEventListener("hashchange",()=>{
+      if (dialog.open && location.hash.split("?")[0]!=="#/costs") close(false);
+    });
+    bindFinancialPeriodControls(dialog.querySelector("header"),renderCosts);
+  }
+  const body=dialog.querySelector(".financial-breakdown-body"),scrollTop=body.scrollTop;
+  const label=details=>details.querySelector("summary")?.textContent.replace(/\(\d+\)/g,"");
+  const expanded=new Set(Array.from(body.querySelectorAll("details[open]"),label));
+  const focusedSummary=body.contains(document.activeElement) ? document.activeElement.closest("summary")?.textContent.replace(/\(\d+\)/g,"") : null;
+  const bodyHadFocus=body.contains(document.activeElement),windowKey=JSON.stringify(report.window);
+  const changedPeriod=dialog.dataset.financialWindow!==windowKey;
+  body.innerHTML=renderFinancialBreakdown(report);
+  body.querySelectorAll("details").forEach(details=>{details.open=expanded.has(label(details));});
+  body.querySelectorAll(".financial-table-scroll").forEach(table=>{
+    table.tabIndex=0;table.setAttribute("role","region");table.setAttribute("aria-label","Financial table; scroll to view all columns");
+  });
+  dialog.querySelector("[data-financial-period]").value=report.window.key;
+  dialog.querySelector(".financial-period span").textContent=report.window.description;
+  dialog.dataset.financialWindow=windowKey;
+  if (dialog.open && bodyHadFocus){
+    const target=Array.from(body.querySelectorAll("details")).find(details=>label(details)===focusedSummary)?.querySelector("summary");
+    (target || dialog.querySelector("[data-close-financial-breakdown]")).focus({preventScroll:true});
+  }
+  body.scrollTop=changedPeriod ? 0 : scrollTop;
+  const trigger=content.querySelector("[data-open-financial-breakdown]");
+  if (trigger) trigger.onclick=()=>{
+    if (!dialog.open) dialog.showModal();
+    document.body.classList.add("financial-breakdown-open");
+    body.scrollTop=0;
+    dialog.querySelector("[data-close-financial-breakdown]").focus({preventScroll:true});
+  };
+}
+
 function renderCosts(){
   const content = document.getElementById("content");
   if (!content) return;
@@ -13804,6 +13864,7 @@ function renderCosts(){
   setupJobCategoryWindow(model);
   setupWeeklyReportWindow(model);
   setupEfficiencyCalculator(model);
+  setupFinancialBreakdownModal(model.financialReconciliation,content);
   setupMaintenanceDataCenterActions({ openImmediately: wasDataCenterOpen });
 
   function focusCalendarAtOccurrence(taskId, dateISO, options = {}){

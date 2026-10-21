@@ -1,6 +1,6 @@
 # CJE-01C — Financial reconciliation
 
-Latest source-based findings, pair decisions, hypothetical totals and CJE-01H validation: [CJE-01H source reconciliation](cje-01h-source-reconciliation.md). Earlier sections below describe their respective implementation stages.
+Latest presentation changes and validation: [CJE-01I Financial Breakdown popup](cje-01i-financial-breakdown-popup.md). Source-based findings, pair decisions, hypothetical totals and CJE-01H validation: [CJE-01H source reconciliation](cje-01h-source-reconciliation.md). Earlier sections below describe their respective implementation stages.
 
 Cost Analysis now builds a read-only financial report from loaded `completedCuttingJobs`, corrected maintenance event cost rows already produced by CCR, and Purchase History's `receiptTrackerWeeks`. The Central Data Table is a presentation, not a new financial ledger. No records, defaults, schema, persistence guards or job-entry calculations are rewritten.
 

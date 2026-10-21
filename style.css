@@ -320,6 +320,45 @@ body.pump-notes-open,body.pump-baseline-open { overflow:hidden; }
 .financial-metrics dd{ margin:4px 0 0; font-weight:600; font-variant-numeric:tabular-nums; }
 .financial-table-scroll{ overflow:auto; max-height:32rem; margin-top:10px; }
 .financial-breakdown .cost-table{ min-width:700px; }
+/* Body-mounted native modal stays above clipped/draggable dashboard windows. */
+.financial-breakdown-dialog{ box-sizing:border-box; width:min(1080px,calc(100vw - 32px)); max-width:calc(100vw - 32px); height:min(860px,calc(100dvh - 32px)); max-height:calc(100dvh - 32px); margin:auto; padding:0; border:1px solid #b7c9dd; border-radius:16px; background:#fff; color:#13294a; box-shadow:0 24px 80px rgb(10 30 60 / 30%); overflow:hidden; }
+.financial-breakdown-dialog[open]{ display:flex; flex-direction:column; }
+.financial-breakdown-dialog::backdrop{ background:rgb(10 25 45 / 58%); }
+body.financial-breakdown-open{ overflow:hidden; }
+body.financial-breakdown-open #content{ overflow-x:clip; }
+.cost-overview-block .cost-summary-grid{ flex-shrink:0; }
+.cost-overview-block [data-open-financial-breakdown]{ align-self:flex-start; flex-shrink:0; margin-top:14px; padding:10px 14px; border:1px solid #8da8c6; border-radius:7px; background:#f5f9ff; color:#13294a; font:inherit; font-weight:600; cursor:pointer; }
+.financial-breakdown-header{ display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px 16px; padding:20px 24px 12px; border-bottom:1px solid #dbe4ef; background:#fff; color:#13294a; box-shadow:none; flex-shrink:0; }
+.financial-breakdown-header::after{ content:none; }
+.financial-breakdown-header h2{ margin:0; font-size:22px; color:#13294a; }
+.financial-breakdown-header .financial-period{ grid-column:1 / -1; margin:0; }
+.financial-breakdown-header .financial-period span{ display:none; }
+.financial-breakdown-header button{ min-height:40px; padding:8px 12px; border:1px solid #a9bfd7; border-radius:6px; background:#fff; color:#13294a; font:inherit; cursor:pointer; }
+.financial-breakdown-body{ min-height:0; overflow:auto; overscroll-behavior:contain; padding:24px; }
+.financial-breakdown-dialog .financial-breakdown{ margin:0; padding:0; border:0; border-radius:0; background:transparent; color:inherit; overflow-wrap:anywhere; }
+.financial-primary h3{ margin:0; font-size:16px; font-weight:600; }
+.financial-breakdown .financial-profit{ margin:6px 0; font-size:clamp(28px,4vw,38px); line-height:1.2; font-weight:700; font-variant-numeric:tabular-nums; }
+.financial-summary-note{ margin:10px 0 20px; color:#48617b; font-size:14px; }
+.financial-breakdown-dialog .financial-metrics{ grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr)); gap:12px; margin:16px 0 20px; }
+.financial-breakdown-dialog .financial-metrics > div{ min-width:0; padding:12px; border-radius:8px; border:1px solid #e0e8f2; background:#f6f9fd; }
+.financial-breakdown-dialog .financial-metrics dd{ font-size:16px; }
+.financial-primary .financial-metrics{ grid-template-columns:repeat(3,minmax(0,1fr)); }
+.financial-primary .financial-metrics > div:first-child{ grid-column:span 2; }
+.financial-calculator-link{ display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:13px; color:#48617b; }
+.financial-calculator-link button{ padding:8px 12px; border:1px solid #a9bfd7; border-radius:6px; background:#f5f9ff; color:#13294a; font:inherit; cursor:pointer; }
+.financial-breakdown-dialog details{ border-top:1px solid #dbe4ef; padding:14px 0 2px; }
+.financial-breakdown-dialog summary{ line-height:1.5; }
+.financial-breakdown-dialog summary:focus-visible,.financial-breakdown-dialog button:focus-visible,.financial-breakdown-dialog select:focus-visible,.financial-breakdown-dialog .financial-table-scroll:focus-visible{ outline:3px solid #1b6dc1; outline-offset:3px; }
+.financial-section-title{ margin:24px 0 4px; font-size:14px; color:#48617b; }
+.financial-breakdown-dialog .financial-table-scroll{ max-width:100%; border:1px solid #e0e8f2; }
+@media(max-width:600px){
+  .financial-breakdown-dialog{ width:calc(100vw - 16px); max-width:calc(100vw - 16px); height:calc(100dvh - 16px); max-height:calc(100dvh - 16px); border-radius:12px; }
+  .financial-breakdown-header{ padding:14px 16px 12px; gap:10px; }
+  .financial-breakdown-header h2{ font-size:19px; }
+  .financial-breakdown-body{ padding:16px; }
+  .financial-primary .financial-metrics{ grid-template-columns:1fr; }
+  .financial-primary .financial-metrics > div:first-child{ grid-column:auto; }
+}
 .cost-card{
   display:flex;
   gap:12px;

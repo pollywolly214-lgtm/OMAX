@@ -1395,43 +1395,53 @@ function renderFinancialBreakdown(report){
   const expense = value => value == null ? "Unavailable" : money(value === 0 ? 0 : -Math.abs(value));
   const t = report.totals, m = report.maintenance, p = report.purchases;
   const rates = report.rateAnalysis, ccr = report.coverage.currentCCR;
-  const metric = (label,value) => `<div><dt>${esc(label)}</dt><dd${String(value).startsWith("-") ? ' class="job-finance-negative"' : ""}>${esc(value)}</dd></div>`;
+  const metric = (label,value,key="") => `<div><dt>${esc(label)}</dt><dd${key ? ` data-financial-metric="${esc(key)}"` : ""}${String(value).startsWith("-") ? ' class="job-finance-negative"' : ""}>${esc(value)}</dd></div>`;
   const jobName = row => `${esc(row.name)} <span class="muted">(${esc(row.id ?? "ID missing")})</span>`;
-  return `<details class="financial-breakdown" data-financial-breakdown>
-    <summary>Financial Breakdown <span>${t.count} completed jobs · ${esc(report.window.description)}</span></summary>
-    <p>Live calculation from loaded completed-job records. Net Total uses the same canonical calculation as Cutting Jobs. Amounts are modeled from job inputs, not verified invoice receipts.</p>
-    <p role="status">Loaded-record audit: ${report.audit.resolved} supported zero/missing durations resolved; ${report.audit.durationConflicts} duration reviews; ${report.audit.duplicateGroups.length} possible CUTPDF / 616-CUT duplicate groups. Every record is retained. Historical profitability remains provisional until duplicate and financial-input issues are reviewed. Open Cutting Jobs → reviewed import → Audit Cutting Jobs for row evidence.</p>
+  return `<div class="financial-breakdown" data-financial-breakdown>
+    <section class="financial-primary" aria-labelledby="financialProfitTitle" data-financial-summary>
+    <h3 id="financialProfitTitle">Modeled Cutting Job Net Profit</h3>
+    <p class="financial-profit ${t.net<0 ? "job-finance-negative" : t.net>0 ? "job-finance-positive" : ""}" data-financial-metric="net">${money(t.net)}</p>
+    <p class="financial-summary-note">Modeled from saved job inputs. Duplicate records and historical rates are still under review.</p>
     ${window.__cuttingJobDisplayUnconfirmed ? '<p role="alert">The latest job save is unverified; these loaded values may include pending edits.</p>' : ""}
     <dl class="financial-metrics">
-      ${metric("Completed jobs included",t.count)}${metric("Positive / negative / zero",`${t.positive} / ${t.negative} / ${t.zero}`)}
-      ${metric("Gross cutting-job revenue",money(t.grossRevenue))}${metric("Failed-cut revenue adjustment",money(t.failureReduction == null ? null : -t.failureReduction))}
-      ${metric("Adjusted cutting-job revenue",money(t.revenue))}${metric("Runtime expense",money(t.runtimeExpense == null ? null : -t.runtimeExpense))}
-      ${metric("Material expense",money(t.materialExpense == null ? null : -t.materialExpense))}${metric("Canonical Cutting Job Net Profit",money(t.net))}
+      ${metric("Selected financial period",report.window.description,"period")}${metric("Completed jobs included",t.count,"count")}
+      ${metric("Adjusted cutting-job revenue",money(t.revenue),"revenue")}${metric("Runtime expense",expense(t.runtimeExpense),"runtime")}
+      ${metric("Material expense",expense(t.materialExpense),"material")}
+    </dl></section>
+    <p class="financial-calculator-link"><button type="button" class="btn ghost" data-financial-calculator>Open what-if calculator</button><span>Explore temporary rates separately from saved job results.</span></p>
+    <details class="financial-secondary"><summary>Financial details</summary><dl class="financial-metrics">
+      ${metric("Gross cutting-job revenue",money(t.grossRevenue))}${metric("Failed-cut revenue adjustment",expense(t.failureReduction))}
       ${metric("Total modeled job expense (runtime + material)",expense(t.runtimeExpense==null || t.materialExpense==null ? null : t.runtimeExpense+t.materialExpense))}
-      ${metric("Average Net Profit / completed job",money(t.average))}
-    </dl>
+      ${metric("Average Net Profit / completed job",money(t.average))}${metric("Financial hours",rates.hours)}
+      ${metric("Weighted runtime expense / job hour",`${money(rates.weightedCostRate)}/hr`)}${metric("Weighted gross charge / job hour",`${money(rates.weightedChargeRate)}/hr`)}
+    </dl></details>
+    <h3 class="financial-section-title">Advanced details</h3>
+    <details data-financial-advanced="rates"><summary>Runtime rates and calculations</summary>
     <p class="small">Net profit = resolved financial hours × charge rate × (1 − failed-cut % / 100) − runtime expense − material unit cost × quantity. Positive original financial hours stay unchanged; completed zero/missing hours use supported actual time. Legitimate separate cuts remain separate, including matching names, projects and dates.</p>
     ${t.net<0 ? `<p class="job-finance-negative">This loaded population has a modeled loss: adjusted revenue ${money(t.revenue)} + runtime expense ${expense(t.runtimeExpense)} + material expense ${expense(t.materialExpense)} = ${money(t.net)}. The rows below reproduce saved inputs; they do not verify that a historical rate represented legitimate operating costs. Review rate sources, import defaults and largest losses before correcting any source data.</p>` : ""}
-    <h4>Runtime rate evidence from these same jobs</h4>
-    <p>The snapshot's total modeled job expense includes both runtime and material. Dividing that total by job hours does not isolate the runtime cost/hr; use the weighted runtime rate below.</p>
+    <p>Total job expense includes runtime and material. The weighted runtime rate uses runtime expense only.</p>
     <dl class="financial-metrics">
-      ${metric("Hours Taken in this financial population",rates.hours)}${metric("Weighted runtime expense / job hour",`${money(rates.weightedCostRate)}/hr`)}
-      ${metric("Weighted gross charge / job hour",`${money(rates.weightedChargeRate)}/hr`)}${metric("Jobs: runtime rate exceeds adjusted charge rate",rates.aboveCharge)}
+      ${metric("Positive / negative / zero",`${t.positive} / ${t.negative} / ${t.zero}`)}${metric("Jobs: runtime rate exceeds adjusted charge rate",rates.aboveCharge)}
       ${metric("Imported jobs included",rates.imported)}${metric("What-if runtime expense at $45/hr",expense(rates.comparison.runtimeExpense))}
       ${metric("What-if net at $45/hr (same revenue/material)",money(rates.comparison.net))}
     </dl>
-    <p class="small">Runtime expense is Σ(Hours Taken × absolute effective saved cost/hr); material expense is separate. The weighted rate divides that expense by these jobs' Hours Taken, not machine-hour readings from the utilization snapshot. A negative stored cost rate is an expense magnitude, not a refund. The $45/hr comparison changes only cost/hr, keeping each job's charge, failure and material inputs; the temporary calculator can also override charge/hr and narrow the financial range. Neither model replaces saved rates or proves actual operating cost. Blank import rates are materialized as $200/hr charge and $45/hr cost by the importer; missing legacy rates instead fall back to $250/hr charge and $30/hr cost in the canonical helper. Original import cells and current saved values can differ after edits.</p>
+    <p class="small">Runtime expense = sum of each job's financial hours × absolute saved cost/hr. Negative saved cost rates represent expense, not refunds. Weighted rates use job hours, not the utilization meter.</p>
+    <p class="small">The $45/hr comparison changes cost/hr only; revenue and material stay the same. It does not replace saved inputs or verify actual operating cost. Blank import cells receive $200/hr charge and $45/hr cost defaults. Missing legacy rates fall back to $250/hr charge and $30/hr cost. Original import cells and current saved values can differ after edits.</p>
     <details><summary>Runtime expense by effective rate and source</summary><div class="financial-table-scroll"><table class="cost-table"><thead><tr><th>Cost / hr</th><th>Source</th><th>Jobs</th><th>Hours Taken</th><th>Runtime expense</th><th>Net profit</th></tr></thead><tbody>
       ${rates.groups.map(group=>`<tr><td>${money(group.rate)}</td><td>${esc(group.source)}</td><td>${group.count}</td><td>${esc(group.hours)}</td><td>${expense(group.runtimeExpense)}</td><td>${money(group.net)}</td></tr>`).join("") || '<tr><td colspan="6">No eligible jobs.</td></tr>'}
-    </tbody></table></div></details>
+    </tbody></table></div></details></details>
     <details><summary>Included completed jobs (${t.count})</summary><div class="financial-table-scroll"><table class="cost-table">
       <thead><tr><th>Job / ID</th><th>Completion date</th><th>Hours Taken</th><th>Effective charge / hr</th><th>Effective cost / hr</th><th>Rate evidence</th><th>Gross revenue</th><th>Failed-cut adjustment</th><th>Runtime expense</th><th>Material expense</th><th>Net Total</th></tr></thead>
       <tbody>${rates.rows.map(row=>`<tr data-financial-job-id="${esc(row.id ?? "")}"><td>${jobName(row)}</td><td>${esc(row.completionDate)}</td><td>${esc(row.profit.hours)}</td><td>${money(row.profit.chargeRate)}</td><td>${money(row.profit.costRate)}</td><td>Charge: ${esc(row.chargeEvidence.source)} (${esc(row.chargeEvidence.supplied ?? "missing")}); cost: ${esc(row.costEvidence.source)} (${esc(row.costEvidence.supplied ?? "missing")}). ${row.costEvidence.imported ? `Imported. Original charge/cost cells: ${esc(row.chargeEvidence.importValue ?? "not retained")} / ${esc(row.costEvidence.importValue ?? "not retained")}.${row.costEvidence.importBlank || row.chargeEvidence.importBlank ? " Blank source rate: importer default may apply." : ""}` : ""}</td><td>${money(row.profit.revenue)}</td><td>${expense(row.profit.revenueLost)}</td><td>${expense(row.profit.cuttingCost)}</td><td>${expense(row.profit.materialExpense)}</td><td class="${row.profit.totalProfit<0 ? "job-finance-negative" : row.profit.totalProfit>0 ? "job-finance-positive" : ""}">${money(row.profit.totalProfit)}</td></tr>`).join("") || '<tr><td colspan="11">No completed jobs in this period.</td></tr>'}</tbody></table></div></details>
+    <details data-financial-advanced="warnings"><summary>Source reconciliation, losses and input warnings</summary>
+    <p>Loaded-record audit: ${report.audit.resolved} supported zero/missing durations resolved; ${report.audit.durationConflicts} duration reviews; ${report.audit.duplicateGroups.length} possible CUTPDF / 616-CUT duplicate groups. Every record is retained. Source verification and hypothetical exclusion decisions remain in <a href="#/jobs">Cutting Jobs → reviewed import → Audit Cutting Jobs</a>.</p>
     <h4>Largest negative job contributors</h4>
     ${report.largestLosses.length ? `<ul>${report.largestLosses.map(row=>`<li>${jobName(row)} · ${esc(row.completionDate)} · <strong class="job-finance-negative">${money(row.profit.totalProfit)}</strong> = adjusted revenue ${money(row.profit.adjustedRevenue)} + runtime ${expense(row.profit.cuttingCost)} + material ${expense(row.profit.materialExpense)}; ${esc(row.profit.hours)} hr × ${money(row.profit.costRate)}/hr, charge ${money(row.profit.chargeRate)}/hr, failed cut ${esc(row.profit.failurePercent)}%.</li>`).join("")}</ul>` : '<p>No negative-profit jobs in this period.</p>'}
     <h4>Missing or defaulted financial fields</h4>
     ${report.warnings.length ? `<ul>${report.warnings.map(issue=>`<li>${issue.count} job(s): ${esc(issue.message)}</li>`).join("")}</ul><details><summary>Jobs with financial warnings</summary><ul>${report.rows.filter(row=>row.issues.length).map(row=>`<li>${jobName(row)}: ${row.issues.map(issue=>esc(issue.message)).join(" ")}</li>`).join("")}</ul></details>` : '<p>No missing/defaulted inputs detected.</p>'}
-    <p class="small">Canonical defaults are preserved for reconciliation and disclosed above. Missing failed-cut information is unknown even when the calculation uses 0%. No source records are edited.</p>
+    <p class="small">Missing failed-cut information remains unknown when the calculation uses 0%. No source records are edited.</p></details>
+    <details data-financial-advanced="coverage"><summary>Other costs, projections and financial coverage</summary>
+    <p>These categories are shown separately and are not deducted again from job profit.</p>
     <h4>Expenses and projections — shown separately</h4>
     <dl class="financial-metrics">
       ${metric("Recorded purchases (all purchased items)",expense(p.total))}${metric("Purchase rows included / incomplete",`${p.count} / ${p.incomplete}`)}
@@ -1439,20 +1449,21 @@ function renderFinancialBreakdown(report){
       ${metric("Modeled maintenance labor within event subtotals",expense(m.modeledLabor))}${metric("Incomplete maintenance events (excluded from subtotals)",m.incomplete)}
       ${metric(`Annual maintenance forecast (${report.forecast.year}, projected expense)`,expense(report.forecast.annual))}${metric("Remaining-year projected maintenance expense",expense(report.forecast.remaining))}
     </dl>
-    <p class="small">Purchases and maintenance event subtotals use ${esc(report.window.description)}. Purchase History totals are recorded spending, not proof of payment or maintenance-only expense; ${p.invalidDates} purchase row(s) have invalid/missing dates. Maintenance event costs include modeled labor at $30/hr; recorded inputs do not establish actual cash paid. Incomplete events have no complete expense total. Forecast source: ${esc(report.forecast.sourceWindow)}; ${esc(report.forecast.method)}. Forecasts describe the current year, separately from the selected historical period.</p>
+    <p class="small">Recorded purchases and maintenance events use ${esc(report.window.description)}. Purchases are spending records, not verified payments or maintenance-only expenses; ${p.invalidDates} purchase row(s) have invalid/missing dates. Event costs include modeled labor at $30/hr. Incomplete events have no complete expense total.</p>
+    <p class="small">Forecasts are current-year projections, separate from this historical period. Forecast source: ${esc(report.forecast.sourceWindow)}; ${esc(report.forecast.method)}.</p>
     <h4>Net Waterjet Financial Impact: ${money(report.netWaterjetImpact)}</h4>
     <p><strong>Interim modeled Cutting Job Net Profit: ${money(report.coverage.interimNet)}</strong> · ${esc(report.window.description)}. This subtotal already deducts saved runtime rates and material expense.</p>
     <p>Current CCR estimate = (maintenance event parts + modeled labor) ÷ measured machine hours + modeled garnet consumption at delivered price per pound. Garnet refill material is excluded from CCR event parts to avoid counting it twice; refill labor remains included. Electricity, water and disposal are not explicit CCR components. This current estimate is not evidence of any historical job rate's composition.</p>
     ${ccr ? `<p data-financial-ccr>Current saved CCR window: ${esc(ccr.startDate)} to ${esc(ccr.endDate)}; observed meter span ${esc(ccr.measurementStartDate)} to ${esc(ccr.measurementEndDate)}, ${esc(ccr.hours ?? "unavailable")} hours. Maintenance ${money(ccr.maintenance)}/hr + garnet ${money(ccr.garnet)}/hr = ${money(ccr.total)}/hr (${ccr.valid ? "modeled operating-cost estimate" : "incomplete estimate"}). ${(ccr.warnings || []).map(esc).join(" ")}</p>` : '<p>Current CCR components are unavailable in this report.</p>'}
     <ul>${report.coverage.blockers.map(reason=>`<li>${esc(reason)}</li>`).join("")}</ul>
-    <p>${esc(report.coverage.resolution)} No maintenance, purchase subtotal or annual forecast is subtracted again from canonical job profit. Forecasts remain separate projections. Unused machine capacity is not an expense in this report.</p>
+    <p>${esc(report.coverage.resolution)} No maintenance, purchase subtotal or annual forecast is subtracted again from canonical job profit. Forecasts remain separate projections. Unused machine capacity is not an expense in this report.</p></details>
     <details><summary>Excluded jobs and changes from the previous all-time card</summary>
       <p>Previous card eligibility applied to these same loaded records: ${report.previousAllTime.count} jobs, ${money(report.previousAllTime.net)}. That comparison uses the original estimateHours-only calculation. Current selection: ${t.count} jobs, ${money(t.net)}. The Cutting Jobs audit explains modeled changes from supported actual durations. Differences below identify population/period/date/settings-link changes; this is not a reproduction of an earlier production screenshot.</p>
       <div class="financial-table-scroll"><table class="cost-table"><thead><tr><th>Job / ID</th><th>Completion date supplied</th><th>Canonical net</th><th>Population change</th></tr></thead><tbody>
       ${report.populationChanges.map(row=>`<tr><td>${jobName(row)}</td><td>${esc(row.job.completedAtISO || "Missing")}</td><td>${money(row.profit.totalProfit)}</td><td>${esc(row.change)}</td></tr>`).join("") || '<tr><td colspan="4">No changes to the previous card population.</td></tr>'}</tbody></table></div>
       <p>${report.excluded.length} total excluded row(s).</p><ul>${report.excluded.map(row=>`<li>${jobName(row)}: ${esc(row.reason)}</li>`).join("")}</ul>
     </details>
-  </details>`;
+  </div>`;
 }
 
 function viewCosts(model){
@@ -2215,7 +2226,7 @@ function viewCosts(model){
           <div class="cost-summary-grid">
             ${summaryCardsHTML}
           </div>
-          ${data.financialReconciliation ? renderFinancialBreakdown(data.financialReconciliation) : ""}
+          ${data.financialReconciliation ? '<button type="button" class="btn" data-open-financial-breakdown aria-haspopup="dialog" aria-controls="financialBreakdownModal">View Financial Breakdown</button>' : ""}
           <div class="cost-window-insight">
             <div class="chart-info">
               <button type="button" class="chart-info-button" aria-describedby="costOverviewInsight" aria-label="Explain Cost Overview metrics">

@@ -100,9 +100,11 @@ test("actual final Cost cards use shared report and withhold combined result; na
   c.report.rows[0].name='<img src=x onerror=alert(1)>';
   c.report.rateAnalysis.rows[0].name=c.report.rows[0].name;
   const before=JSON.stringify(c.report);const html=c.renderFinancialBreakdown(c.report);
-  assert.match(html,/Financial Breakdown/);assert.match(html,/\$539\.00/);assert.match(html,/-\$50\.00/);assert.match(html,/Runtime cost rates can already include maintenance/);
+  assert.match(html,/Modeled Cutting Job Net Profit/);assert.match(html,/\$539\.00/);assert.match(html,/-\$50\.00/);assert.match(html,/Runtime cost rates can already include maintenance/);
   assert.ok(!html.includes('<img'));assert.match(html,/&lt;img/);assert.equal(JSON.stringify(c.report),before);
-  assert.match(c.viewCosts({financialReconciliation:c.report,summaryCards:c.summaryCards}),/data-financial-period/);
+  const overview=c.viewCosts({financialReconciliation:c.report,summaryCards:c.summaryCards});
+  assert.match(overview,/data-financial-period/);assert.match(overview,/data-open-financial-breakdown/);
+  assert.ok(!overview.includes('data-financial-job-id'),'record-level breakdown is mounted outside the dashboard');
 });
 
 test("period control only changes a transient shared view preference, without saving",()=>{
@@ -163,6 +165,9 @@ test("expense presentation is negative once, projections stay separate and a tru
   vm.runInContext(section(views,"function renderFinancialPeriodControl(","function cuttingJobFinancialTone("),c);
   const html=c.renderFinancialBreakdown(c.report);assert.match(html,/-\$30\.00/);assert.match(html,/-\$55\.00/);assert.match(html,/-\$9,000\.00/);
   assert.match(html,/Interim modeled Cutting Job Net Profit: -\$135\.00/);assert.match(html,/No maintenance, purchase subtotal or annual forecast is subtracted again/);
+  assert.match(html,/class="financial-profit job-finance-negative" data-financial-metric="net">-\$135\.00/);
+  const empty=c.renderFinancialBreakdown(build({completedJobs:[]}));
+  assert.match(empty,/data-financial-metric="runtime">\$0\.00/);assert.match(empty,/data-financial-metric="material">\$0\.00/);
 });
 
 test("combined coverage reports actual evidence and current CCR components without retroactively allocating costs",()=>{

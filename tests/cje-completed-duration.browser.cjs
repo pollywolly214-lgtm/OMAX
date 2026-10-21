@@ -41,10 +41,12 @@ test("CJE-01G: existing audit and all financial views agree on 172 synthetic rec
   assert.deepEqual(expected.audit,{resolved:155,conflicts:0,groups:38,pairs:39});assert.equal(expected.c074.hours,12.3);
   const money=new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(expected.net);
   assert.equal((await page.locator('[data-card-key="cuttingJobs"] .cost-card-value').textContent()).replace(/^\+/,""),money);
-  await page.locator('[data-financial-breakdown] > summary').click();assert.match(await page.locator('[data-financial-breakdown]').textContent(),/38 possible CUTPDF \/ 616-CUT duplicate groups/);
+  await page.locator('[data-open-financial-breakdown]').click();assert.match(await page.locator('[data-financial-breakdown]').textContent(),/38 possible CUTPDF \/ 616-CUT duplicate groups/);
   assert.match(await page.locator('[data-financial-breakdown]').textContent(),/155 supported zero\/missing durations resolved/);
   assert.equal(await page.locator('[data-financial-job-id]').count(),172);
-  await page.evaluate(()=>{location.hash="#/jobs";});await page.waitForSelector("#jobsFinancialPeriod");
+  await page.locator('[data-financial-advanced="warnings"] > summary').click();
+  await page.locator('[data-financial-advanced="warnings"] a[href="#/jobs"]').click();await page.waitForSelector("#jobsFinancialPeriod");
+  await page.waitForFunction(()=>!document.getElementById('financialBreakdownModal').open&&!document.body.classList.contains('financial-breakdown-open'));
   assert.equal(await page.locator('.past-jobs-summary-wrap + table > tbody > tr[data-history-row]').count(),172);
   assert.ok((await page.locator('.past-jobs-summary').textContent()).includes(money));
   const c074=await page.evaluate(()=>completedCuttingJobs.find(job=>job.cutNumber==="C074").id);
