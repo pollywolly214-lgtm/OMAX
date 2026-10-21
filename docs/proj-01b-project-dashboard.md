@@ -1,6 +1,6 @@
 # PROJ-01B — Project cutting performance
 
-Updated by **PROJ-01B-ACC04**: see [failure display consistency](proj-01b-acc04.md) for provisional net after recorded deductions and individual-job failure status. [ACC03](proj-01b-acc03.md) documents the unadjusted/adjusted basis and [ACC02](proj-01b-acc02.md) the unchanged duration and cross-ID retention rules. The original assumption that every historical duration lived in `estimateHours` was incorrect.
+Updated by **PROJ-01B-ACC05**: see [zero persistence and reporting populations](proj-01b-acc05.md) for explicit zero saves, completed-only success coverage and completed/active financial scope. [ACC04](proj-01b-acc04.md) covers provisional deductions, [ACC03](proj-01b-acc03.md) the financial basis and [ACC02](proj-01b-acc02.md) the unchanged duration/cross-ID rules. The original assumption that every historical duration lived in `estimateHours` was incorrect.
 
 Base: `origin/main` at `14b467d6a8b017915a9f5f1c60aec6aa08b5918b` (fetched October 20, 2026).
 The initial checkout contained unrelated style/artifact changes. Implementation began in a clean isolated worktree on `codex/proj-01b-project-dashboard`; those original changes were preserved.

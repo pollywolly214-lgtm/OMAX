@@ -43,7 +43,7 @@ test("ACC03 missing and invalid financial inputs stay unavailable; no new rates 
 test("ACC03 one successful tracked job out of seven never presents a project-wide 100% success value",()=>{
   const p=project(state(Array.from({length:7},(_,i)=>job(String(i),i===0?{failurePercent:0}:{}))));
   assert.equal(p.success.value,null);assert.equal(p.success.observedValue,100);assert.equal(p.success.known,1);assert.equal(p.metrics.unadjustedNet.known,7);
-  const html=api.summary(p);assert.match(html,/>Limited data<\/strong>/);assert.match(html,/Observed subset: 100.0%/);assert.doesNotMatch(html,/>100.0%<\/strong>/);
+  const html=api.summary(p);assert.match(html,/>Limited data<\/strong>/);assert.match(html,/Observed completed subset: 100.0%/);assert.doesNotMatch(html,/>100.0%<\/strong>/);
   const known=project(state([job("a",{failurePercent:0}),job("b",{failurePercent:50})]));assert.equal(known.success.value,50);assert.match(api.summary(known),/>50.0%<\/strong>/);
 });
 test("ACC03 no failure coverage, including an empty project, never displays zero known reduction",()=>{
@@ -80,7 +80,7 @@ test("ACC04 10% of a $1680 charge deducts $168, leaving unadjusted net unchanged
   const records=Array.from({length:7},(_,i)=>job(String(i),{actualHours:i===1?7:1,chargeRate:i===1?240:100,costRate:i===1?45:20,materialCost:i===1?20:10,materialQty:1,...(i===0?{failurePercent:0}:{})}));
   const before=structuredClone(records),initial=project(state(records));assert.equal(initial.metrics.unadjustedNet.value,1765);assert.equal(initial.provisional.value,1765);assert.equal(initial.success.known,1);
   const changed=records.map((r,i)=>i===1?{...r,failurePercent:10}:r),p=project(state(changed));assert.equal(p.metrics.reduction.value,168);assert.equal(p.provisional.deduction.value,168);assert.equal(p.provisional.value,1597);assert.equal(p.metrics.unadjustedNet.value,1765);assert.equal(p.success.known,2);assert.equal(p.success.value,null);
-  const html=api.summary(p);assert.match(html,/Failure information recorded for 2\/7 jobs/);assert.match(html,/job-finance-negative">-\$168.00/);assert.match(html,/>Limited data<\/strong>/);assert.match(html,/coverage, not a failed-job count/);assert.deepEqual(records,before);
+  const html=api.summary(p);assert.match(html,/2 of 7 completed jobs with recorded outcomes/);assert.match(html,/job-finance-negative">-\$168.00/);assert.match(html,/>Limited data<\/strong>/);assert.match(html,/coverage, not a failed-job count/);assert.deepEqual(records,before);
   assert.equal(c.formatCuttingJobFinancialValue(profit({...changed[1],estimateHours:7}),"revenueLost"),"-$168.00");
 });
 test("ACC04 provisional deductions use the same financially eligible jobs as unadjusted net",()=>{
@@ -91,4 +91,21 @@ test("ACC04 provisional deductions use the same financially eligible jobs as una
 test("ACC04 absent failures leave provisional net unadjusted with an explicit no-deduction explanation",()=>{
   const p=project(state([job("unknown")]));assert.equal(p.provisional.value,140);assert.equal(p.provisional.deduction.known,0);assert.match(api.summary(p),/No verified failure deduction is available/);assert.equal(p.success.value,null);
   const missing=project(state([job("missing",{chargeRate:undefined})]));assert.equal(missing.provisional.value,null);
+});
+test("ACC05 success uses completed outcomes only; active projections remain financially included",()=>{
+  const completed=Array.from({length:6},(_,i)=>job(String(i),i<2?{failurePercent:0}:{}));
+  for(const failurePercent of [undefined,0,100]){
+    const active=job("active",{estimateHours:3,completedAtISO:undefined,failurePercent}),p=project(state(completed,[active]));
+    assert.equal(p.rows.length,7);assert.equal(p.success.total,6);assert.equal(p.success.known,2);assert.equal(p.success.value,null);assert.equal(p.success.observedValue,100);
+    assert.equal(p.financialScope.completed.value,840);assert.equal(p.financialScope.active.value,220);assert.equal(p.metrics.unadjustedNet.value,1060);assert.equal(p.financialScope.completed.value+p.financialScope.active.value,p.metrics.unadjustedNet.value);
+    const html=api.summary(p);assert.match(html,/2 of 6 completed jobs with recorded outcomes/);assert.match(html,/>Limited data<\/strong>/);assert.match(html,/active plans; they are not completed production performance/);assert.match(html,/Completed-only unadjusted modeled net: <strong>\$840.00/);assert.match(html,/Active-job projected unadjusted net: <strong>\$220.00/);
+  }
+});
+test("ACC05 active-only jobs never have completed-cut success or missing-outcome warnings",()=>{
+  const p=project(state([],[job("active",{estimateHours:2,failurePercent:100})]));assert.equal(p.success.total,0);assert.equal(p.success.known,0);assert.equal(p.success.value,null);assert.equal(p.metrics.unadjustedNet.value,140);
+  assert.doesNotMatch(api.summary(p),/Completed-cut failure information is incomplete/);assert.match(api.summary(p),/0 of 0 completed jobs with recorded outcomes/);
+});
+test("ACC05 display dates normalize timestamps without changing source timestamps or duration basis",()=>{
+  const s=state([job("recorded",{completedAtISO:"2026-06-26T23:10:00.000Z"})],[job("plan",{estimateHours:3,completedAtISO:undefined,startISO:"2026-06-25T11:00:00.000Z"})]),before=structuredClone(s),p=project(s),html=api.summary(p);
+  assert.match(html,/<td>2026-06-26<\/td>/);assert.match(html,/<td>2026-06-25<\/td>/);assert.doesNotMatch(html,/<td>[^<]*T\d/);assert.match(html,/estimateHours \(active plan\)/);assert.match(html,/not independently verified machine runtime/);assert.deepEqual(s,before);assert.equal(p.rows.find(row=>row.id==="recorded").hours,2);
 });

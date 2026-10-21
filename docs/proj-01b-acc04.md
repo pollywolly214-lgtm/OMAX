@@ -1,5 +1,7 @@
 # PROJ-01B-ACC04 — Failure tracking and financial display consistency
 
+[ACC05](proj-01b-acc05.md) supersedes the previous missing-to-zero no-op behavior, changes success coverage to completed jobs only, and labels completed/active financial populations. The ACC04 deduction formula and missing-versus-zero display distinction remain unchanged.
+
 Updates open PR #517 from `9efc62a9377012e9645816be5ece6c11662c6bda`. No production records were accessed or modified. No shared financial formula, duration resolver, overlap detector, save operation, CAS/readback, or recovery code was changed.
 
 ## Changes and verified behavior

@@ -74,13 +74,14 @@
     if(operation.type==="failure"){
       const percent=operation.failurePercent;
       if(!wasCompleted||typeof percent!=="number"||!Number.isFinite(percent)||percent<0||percent>100)return fail("Enter a failure percentage from 0 to 100 for a completed cutting job.");
-      const before=target.failurePercent??0;
+      const before=target.failurePercent;
       if(before===percent)return{ok:true,nextState,hasChanges:false,renumbering:{ok:true,changed:[]},chronologyChanges:[]};
       if(!audit||typeof audit.operationId!=="string"||!audit.operationId.trim()||!audit.actorUid||!dateKey(audit.atISO))return fail("Cutting-job audit identity is unavailable.");
       if(target.cutChronologyHistory!==undefined&&!Array.isArray(target.cutChronologyHistory))return fail("Invalid cutting-job audit history.");
       if((target.cutChronologyHistory||[]).some(entry=>entry?.operationId===audit.operationId))return fail("This cutting-job operation was already recorded.");
+      const beforeFields=Object.hasOwn(target,"failurePercent")?{failurePercent:before}:{};
       target.failurePercent=percent;
-      target.cutChronologyHistory=[...(target.cutChronologyHistory||[]),{...clone(audit),jobId:target.id,kind:"failure",before:{failurePercent:before},after:{failurePercent:percent}}];
+      target.cutChronologyHistory=[...(target.cutChronologyHistory||[]),{...clone(audit),jobId:target.id,kind:"failure",before:beforeFields,after:{failurePercent:percent}}];
       // A financial adjustment must never invoke date ordering or renumbering.
       return{ok:true,nextState:JSON.parse(JSON.stringify(nextState)),hasChanges:true,renumbering:{ok:true,changed:[]},chronologyChanges:[]};
     }

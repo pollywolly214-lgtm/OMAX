@@ -137,10 +137,10 @@
       project.rows.sort((a,b)=>String(b.date).localeCompare(String(a.date)) || a.id.localeCompare(b.id));
       const rows = project.rows;
       project.potentialOverlap = potentialOverlap(rows);
-      const sum = key => {
-        const known = rows.filter(row=>row[key] !== null);
+      const sum = (key,population=rows) => {
+        const known = population.filter(row=>row[key] !== null);
         const total = known.reduce((value,row)=>value + row[key],0);
-        return {value:Number.isFinite(total) ? total : null,known:known.length,total:rows.length};
+        return {value:Number.isFinite(total) ? total : null,known:known.length,total:population.length};
       };
       const applicable = rows.filter(row=>row.unadjustedNet !== null);
       const applicableNet = sum("unadjustedNet"), applicableHours = applicable.reduce((value,row)=>value + row.hours,0);
@@ -150,10 +150,12 @@
       const provisionalValue = applicableNet.value !== null ? applicableNet.value - deduction : null;
       project.provisional = {value:applicable.length && Number.isFinite(provisionalValue) ? provisionalValue : null,
         deduction:{value:Number.isFinite(deduction) ? deduction : null,known:deducted.length,total:applicable.length}};
-      const knownFailures = rows.filter(row=>row.failurePercent !== null);
+      const completedRows = rows.filter(row=>row.completed);
+      project.financialScope = {completed:sum("unadjustedNet",completedRows),active:sum("unadjustedNet",rows.filter(row=>!row.completed))};
+      const knownFailures = completedRows.filter(row=>row.failurePercent !== null);
       const observedSuccess = knownFailures.length ? 100 * knownFailures.filter(row=>row.failurePercent === 0).length / knownFailures.length : null;
-      project.success = {value:knownFailures.length === rows.length ? observedSuccess : null,observedValue:observedSuccess,
-        known:knownFailures.length,total:rows.length};
+      project.success = {value:knownFailures.length === completedRows.length ? observedSuccess : null,observedValue:observedSuccess,
+        known:knownFailures.length,total:completedRows.length};
       project.averageJob = applicable.length && applicableNet.value !== null ? applicableNet.value / applicable.length : null;
       project.averageHour = applicableHours > 0 && Number.isFinite(applicableHours) && applicableNet.value !== null ? applicableNet.value / applicableHours : null;
       project.applicableHours = Number.isFinite(applicableHours) ? applicableHours : null;
@@ -169,14 +171,17 @@
     if (!project) return '<p class="small muted">Select an existing project to view its cutting performance.</p>';
     const m = project.metrics, count = project.rows.length;
     const card = (label,value,note,tone="") => `<article class="project-metric"><h3>${esc(label)}</h3><strong class="${tone}">${esc(value)}</strong><p class="small muted">${esc(note)}</p></article>`;
-    const metric = (label,key,format=money) => card(label,m[key].known || (!count && key !== "reduction") ? format(m[key].value) : "Unavailable",coverage(m[key]));
+    const metric = (label,key,format=money) => card(label,m[key].known || (!count && key !== "reduction") ? format(m[key].value) : "Unavailable",`${coverage(m[key])}; all jobs, including active projections`);
     const netTone = value => value === null || value === 0 ? "" : value > 0 ? "job-finance-positive" : "job-finance-negative";
     const known = m.unadjustedNet.known;
     const deduction = project.provisional.deduction;
+    const scope = project.financialScope;
+    const scopeValue = metric => metric.known || !metric.total ? money(metric.value) : "Unavailable";
+    const outcomeCoverage = `${project.success.known} of ${project.success.total} completed jobs with recorded outcomes`;
     const notices = [];
     if (project.potentialOverlap) notices.push("Some historical Cutting Jobs may overlap across imports. All distinct records are currently included in these totals; matching details do not prove the same physical cut.");
     if (m.hours.known < count) notices.push("Some cutting durations are missing or unreliable. Hours and processing costs have incomplete coverage.");
-    if (project.success.known < count) notices.push("Failure information is incomplete. Unadjusted net is before failure adjustments and does not account for unknown failed cuts. Failure-adjusted net and failure-related reduction are unavailable for undocumented failures.");
+    if (project.success.known < project.success.total) notices.push("Completed-cut failure information is incomplete. Unadjusted net is before failure adjustments and does not account for unknown failed cuts. Failure-adjusted net and failure-related reduction are unavailable for undocumented failures.");
     if (project.rows.some(row=>row.hoursBasis === "estimated")) notices.push("Some historical jobs use estimated duration because recorded cutting time is unavailable.");
     const blankRates = project.rows.filter(row=>row.blankImportRates).length;
     const fallbackRates = project.rows.filter(row=>row.storedRateFallback).length;
@@ -187,23 +192,24 @@
       .filter(item=>item.count).map(({basis,count})=>`${count} ${basis === "stored" ? "stored Hours Taken" : basis === "estimated" ? "historical estimates" : "recorded"}`).join(" · ");
     return `${notices.length ? `<div class="project-coverage-notice" role="note">${notices.map(note=>`<p class="small">${esc(note)}</p>`).join("")}</div>` : ""}<div class="project-summary-grid">
       ${card("Cutting Jobs",String(count),`${project.rows.filter(row=>row.completed).length} completed · ${project.rows.filter(row=>!row.completed).length} active; distinct records`)}
-      ${card("Total Cutting Hours",m.hours.known || !count ? hours(m.hours.value) : "Unavailable",`${coverage(m.hours)}.${bases ? ` ${bases}.` : ""}`)}
-      ${card("Cut Success Rate",project.success.value !== null ? `${project.success.value.toFixed(1)}%` : !count ? "Unavailable" : project.success.known ? "Limited data" : "Insufficient coverage",`${coverage(project.success)}.${project.success.value === null && project.success.observedValue !== null ? ` Observed subset: ${project.success.observedValue.toFixed(1)}% without recorded failure; project-wide success is unknown.` : ""} Partial failures count as failure-affected.`)}
+      ${card("Total Cutting Hours",m.hours.known || !count ? hours(m.hours.value) : "Unavailable",`${coverage(m.hours)}; reported/planned across all jobs.${bases ? ` ${bases}.` : ""} Stored Hours Taken and estimates are not independently verified machine runtime.`)}
+      ${card("Cut Success Rate",project.success.value !== null ? `${project.success.value.toFixed(1)}%` : !project.success.total ? "Unavailable" : project.success.known ? "Limited data" : "Insufficient coverage",`${outcomeCoverage}.${project.success.value === null && project.success.observedValue !== null ? ` Observed completed subset: ${project.success.observedValue.toFixed(1)}% without recorded failure; completed-cut success is unknown.` : ""} Active jobs are excluded. Partial failures count as failure-affected.`)}
       ${metric("Machine Processing Cost","processing")}${metric("Estimated Material Cost","material")}${metric("Total Cutting Cost","totalCost")}
     </div><section class="project-performance" aria-labelledby="projectPerformanceTitle"><h2 id="projectPerformanceTitle">Cutting Financial Performance</h2>
-      <p class="small muted">Unadjusted modeled charges less processing and estimated material expenses, BEFORE failure adjustments. Stored/imported rates may include importer defaults and do not establish actual sales or company profit. Material estimates do not verify inventory consumption or Purchase History expenditure. Partial totals include only jobs with usable financial inputs.</p>
+      <p class="small muted">All-job modeled/projected totals include completed work and active plans; they are not completed production performance. Unadjusted modeled charges less processing and estimated material expenses, BEFORE failure adjustments. Stored/imported rates may include importer defaults and do not establish actual sales or company profit. Material estimates do not verify inventory consumption or Purchase History expenditure. Partial totals include only jobs with usable financial inputs.</p>
       <div class="project-finance-grid">
         ${card("Total Unadjusted Modeled Cut Net",known || !count ? money(m.unadjustedNet.value) : "Unavailable",coverage(m.unadjustedNet),netTone(known ? m.unadjustedNet.value : null))}
         ${card("Average Unadjusted Net per Job",money(project.averageJob),`${known}/${count} jobs eligible for unadjusted net`,netTone(project.averageJob))}
         ${card("Average Unadjusted Net per Hour",money(project.averageHour),`${hours(project.applicableHours)} across ${known}/${count} eligible jobs`,netTone(project.averageHour))}
         ${card("Known Failure-Related Reduction",deduction.known && deduction.value !== null ? money(-deduction.value || 0) : "Unavailable",`${coverage(deduction)} among unadjusted-net-eligible jobs; shown as a deduction`,deduction.value > 0 ? "job-finance-negative" : "")}
-      </div><p data-project-provisional-net>Provisional Modeled Cut Net After Recorded Failure Deductions: <strong class="${netTone(project.provisional.value)}">${esc(money(project.provisional.value))}</strong></p>
-      <p class="small muted">${known}/${count} jobs eligible for this provisional result. Failure information recorded for ${project.success.known}/${count} jobs (including recorded 0%; this is coverage, not a failed-job count). Only known deductions from the same ${known} financially eligible jobs are subtracted. Unknown failures remain unadjusted, not assumed successful.${!deduction.known ? " No verified failure deduction is available for these eligible jobs." : ""} This is a provisional modeled result, not verified company profit or a fully failure-adjusted project net.</p>
-      <p class="small muted">Known failure-adjusted modeled net: ${esc(m.net.known ? money(m.net.value) : "Unavailable")} (${esc(coverage(m.net))}).${m.net.known < count ? " This is a tracked subset, not the whole project's adjusted result." : ""} It is separate from the unadjusted figures above.</p></section>
+      </div><p class="small" data-project-financial-scope>Completed-only unadjusted modeled net: <strong>${esc(scopeValue(scope.completed))}</strong> (${scope.completed.known}/${scope.completed.total} completed jobs eligible).${scope.active.total ? ` Active-job projected unadjusted net: <strong>${esc(scopeValue(scope.active))}</strong> (${scope.active.known}/${scope.active.total} active jobs eligible).` : ""} These subtotals reconcile to the combined eligible total above.</p>
+      <p data-project-provisional-net>Provisional Modeled/Projected Cut Net After Recorded Failure Deductions (all jobs): <strong class="${netTone(project.provisional.value)}">${esc(money(project.provisional.value))}</strong></p>
+      <p class="small muted">${known}/${count} jobs eligible for this provisional result. ${outcomeCoverage} (including recorded 0%; this is coverage, not a failed-job count). Only known deductions from the same ${known} financially eligible jobs are subtracted. Unknown failures remain unadjusted, not assumed successful.${!deduction.known ? " No verified failure deduction is available for these eligible jobs." : ""} This is a provisional modeled/projected result, not verified company profit or a fully failure-adjusted completed-work net.</p>
+      <p class="small muted">Known failure-adjusted modeled net: ${esc(m.net.known ? money(m.net.value) : "Unavailable")} (${esc(coverage(m.net))}; all-job scope may include active projections).${m.net.known < count ? " This is a tracked subset, not the whole project's adjusted result." : ""} It is separate from the unadjusted figures above.</p></section>
       <p class="small muted">Reporting duration uses recorded historical hours where supported; current jobs retain stored Hours Taken. Historical estimate fallbacks are labeled. Material cost is material cost × quantity. Total Cutting Cost includes processing plus estimated material for jobs with both expenses known; it excludes Purchase History and other project expenditure. Missing failure data is not treated as success. Different IDs are never excluded for matching import details.</p>
       <details class="project-jobs"><summary>View Project Cutting Jobs (${count})</summary><div class="project-table-scroll" tabindex="0" role="region" aria-label="Project Cutting Jobs"><table>
         <thead><tr>${["Cut Number","Cutting Job Name","Date (completed / start)","Hours Taken","Processing Cost","Estimated Material Cost","Failure %","Unadjusted Modeled Cut Net"].map(label=>`<th scope="col">${label}</th>`).join("")}</tr></thead>
-        <tbody>${project.rows.map(row=>`<tr><td>${esc(row.cut)}</td><td>${row.navigable ? `<button type="button" data-project-job="${esc(row.id)}">${esc(row.name)}</button>` : `${esc(row.name)} <span class="small muted">(ID review required)</span>`}</td><td>${esc(row.date)}</td><td title="${esc(row.durationNote || row.hoursSource)}">${esc(hours(row.hours))}<br><span class="small muted">${esc(row.hoursSource)}</span></td><td>${esc(money(row.processing))}</td><td>${esc(money(row.material))}</td><td>${row.failurePercent === null ? "Unavailable" : `${esc(row.failurePercent)}%`}</td><td><span class="${netTone(row.unadjustedNet)}">${esc(money(row.unadjustedNet))}</span><br><span class="small ${netTone(row.net)}">Failure-adjusted: ${esc(money(row.net))}</span></td></tr>`).join("") || '<tr><td colspan="8">No Cutting Jobs are associated with this project.</td></tr>'}</tbody>
+        <tbody>${project.rows.map(row=>`<tr><td>${esc(row.cut)}</td><td>${row.navigable ? `<button type="button" data-project-job="${esc(row.id)}">${esc(row.name)}</button>` : `${esc(row.name)} <span class="small muted">(ID review required)</span>`}</td><td>${esc(dateKey(row.date) || "—")}</td><td title="${esc(row.durationNote || row.hoursSource)}">${esc(hours(row.hours))}<br><span class="small muted">${esc(row.hoursSource)}${row.completed ? "" : " (active plan)"}</span></td><td>${esc(money(row.processing))}</td><td>${esc(money(row.material))}</td><td>${row.failurePercent === null ? "Unavailable" : `${esc(row.failurePercent)}%`}</td><td><span class="${netTone(row.unadjustedNet)}">${esc(money(row.unadjustedNet))}</span><br><span class="small ${netTone(row.net)}">Failure-adjusted: ${esc(money(row.net))}</span></td></tr>`).join("") || '<tr><td colspan="8">No Cutting Jobs are associated with this project.</td></tr>'}</tbody>
       </table></div></details>`;
   }
   root.ProjectDashboard = Object.freeze({build,duration,financials,summary});

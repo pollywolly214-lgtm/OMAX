@@ -20,7 +20,7 @@ test("same visible names retain separate job IDs; active and completed jobs both
 });
 test("project totals agree with CJPROFIT for zero, partial and complete failures and both rate signs",()=>{
   for(const sign of [-1,1]){
-    const jobs=[0,50,100].map((failurePercent,i)=>job(String(i),{failurePercent,costRate:25*sign}));const p=project(state(jobs));
+    const jobs=[0,50,100].map((failurePercent,i)=>job(String(i),{failurePercent,costRate:25*sign}));const p=project(state([],jobs));
     const calculations=jobs.map(j=>profit(j));assert.equal(p.metrics.processing.value,150);assert.equal(p.metrics.material.value,75);assert.equal(p.metrics.totalCost.value,225);
     assert.equal(p.metrics.net.value,calculations.reduce((n,x)=>n+x.totalProfit,0));assert.equal(p.metrics.reduction.value,450);assert.equal(p.success.value,100/3);
   }
@@ -31,7 +31,7 @@ test("weighted average net/hour uses applicable total hours and net/job uses app
 });
 test("missing failure data never becomes success or adjusted net; unadjusted financials remain available",()=>{
   const unknown=job("unknown");delete unknown.failurePercent;
-  const p=project(state([unknown,job("known")]));assert.equal(p.success.known,1);assert.equal(p.success.value,null);assert.equal(p.success.observedValue,100);assert.equal(p.metrics.net.known,1);assert.equal(p.metrics.unadjustedNet.known,2);assert.equal(p.averageJob,225);assert.equal(p.averageHour,112.5);assert.equal(p.metrics.processing.known,2);
+  const p=project(state([],[unknown,job("known")]));assert.equal(p.success.known,1);assert.equal(p.success.value,null);assert.equal(p.success.observedValue,100);assert.equal(p.metrics.net.known,1);assert.equal(p.metrics.unadjustedNet.known,2);assert.equal(p.averageJob,225);assert.equal(p.averageHour,112.5);assert.equal(p.metrics.processing.known,2);
   const html=api.summary(p);assert.match(html,/1\/2 jobs with reliable data; partial coverage/);assert.match(html,/Missing failure data is not treated as success/);
 });
 test("absent and invalid costs do not fall back to false zero totals or global default rates",()=>{
@@ -48,7 +48,7 @@ test("stored efficiency rates reuse helper fallback without confusing whitespace
   assert.equal(row.processing,40);assert.equal(row.net,175);
 });
 test("zero hours and empty projects have safe denominators; explicit zero costs and failures are known",()=>{
-  const p=project(state([job("j",{estimateHours:0,materialCost:0,materialQty:0,costRate:0,chargeRate:0})]));assert.equal(p.metrics.net.value,0);assert.equal(p.success.value,100);assert.equal(p.averageJob,0);assert.equal(p.averageHour,null);
+  const p=project(state([job("j",{estimateHours:0,materialCost:0,materialQty:0,costRate:0,chargeRate:0})]));assert.equal(p.metrics.net.value,0);assert.equal(p.success.value,null);assert.equal(p.success.total,0);assert.equal(p.averageJob,0);assert.equal(p.averageHour,null);
   const empty=project(state());assert.equal(empty.metrics.net.value,0);assert.equal(empty.averageJob,null);assert.equal(empty.success.value,null);
 });
 test("identical lifecycle copies count once and conflicting copies never invent metrics or navigation",()=>{

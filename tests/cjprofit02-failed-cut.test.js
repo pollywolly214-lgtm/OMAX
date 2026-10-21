@@ -42,7 +42,17 @@ test("verified Firebase-shaped CAS save/reload edits and resets only one job and
   }
   assert.equal(h.remote.commits,3);assert.equal(h.calls.suspensions,0);
 });
-test("unchanged missing/zero percentage performs no write",async()=>{const h=persistence(),before=h.live,result=await h.save(0);assert.equal(result.noOp,true);assert.equal(h.calls.writes,0);assert.deepEqual(h.live,before);});
+test("ACC05 missing -> zero persists through verified CAS, while explicit zero -> zero is a genuine no-op",async()=>{
+  const h=persistence(),before=h.live,result=await h.save(0);assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);assert.equal(h.calls.writes,1);
+  const saved=h.remote.state,record=saved.completedCuttingJobs[0];assert.equal(record.failurePercent,0);assert.deepEqual(record.cutChronologyHistory.at(-1).before,{});assert.deepEqual(record.cutChronologyHistory.at(-1).after,{failurePercent:0});
+  const expected=structuredClone(before);expected.syncMeta=saved.syncMeta;expected.completedCuttingJobs[0].failurePercent=0;expected.completedCuttingJobs[0].cutChronologyHistory=record.cutChronologyHistory;assert.deepEqual(saved,expected);assert.deepEqual(h.live,saved);
+  const repeated=await h.save(0);assert.equal(repeated.noOp,true);assert.equal(h.calls.writes,1);assert.deepEqual(h.remote.state,saved);assert.deepEqual(h.live,saved);
+});
+test("ACC05 null -> zero preserves null audit evidence and prior history",async()=>{
+  const h=persistence(),initial=h.live;initial.completedCuttingJobs[0].failurePercent=null;initial.completedCuttingJobs[0].cutChronologyHistory=[{operationId:"old-audit",kind:"failure",before:{failurePercent:10},after:{failurePercent:null}}];
+  h.remote.replace(initial);h.env.adoptVerifiedState(initial);const result=await h.save(0);assert.equal(result.saved,true,result.error);assert.equal(result.verified,true);
+  const saved=h.remote.state.completedCuttingJobs[0];assert.equal(saved.failurePercent,0);assert.deepEqual(saved.cutChronologyHistory[0],initial.completedCuttingJobs[0].cutChronologyHistory[0]);assert.deepEqual(saved.cutChronologyHistory.at(-1).before,{failurePercent:null});assert.deepEqual(saved.cutChronologyHistory.at(-1).after,{failurePercent:0});
+});
 for(const [name,flags] of [["preflight",{preflightBlocked:true}],["permission",{writeError:Object.assign(Error("denied"),{code:"permission-denied"})}],["readback mismatch",{readBackMismatch:true}],["stale revision",{beforeRead:({remote})=>{const state=remote.state;state.syncMeta.rev++;remote.replace(state);}}]])
   test(`failure adjustment retains existing ${name} protection`,async()=>{const h=persistence(flags),before=h.live,r=await h.save(50);assert.equal(r.saved,false);assert.deepEqual(h.live,before);if(name==="readback mismatch"){assert.equal(r.requiresReload,true);assert.equal(h.calls.suspensions,1);}else assert.equal(h.remote.commits,0);});
 test("invalid percentages, active jobs and duplicate audit identities are blocked without changes",()=>{
