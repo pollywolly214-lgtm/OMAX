@@ -61,43 +61,70 @@
     if(endReading&&endReading.dateISO<endDate)warnings.push(`Hours measured through ${endReading.dateISO}.`);
     return {hours,complete:!blocked&&hours>0,startReading,endReading,measurementStartDate:startReading?.dateISO||null,measurementEndDate:endReading?.dateISO||null,missingDays:0,missingDates:[],issues,warnings:[...warnings,...issues.map(item=>item.message)]};
   }
-  function maintenanceRows(rows,state,compatibility=[]){
+  function maintenanceRows(rows,state,compatibility=[],decisions=[]){
     const legacy=[...(state.tasksInterval||[]),...(state.tasksAsReq||[]),...(state.deletedItems||[]).filter(item=>item.type==='task'&&item.payload).map(item=>item.payload)],v2=state.maintenanceTasksV2||[];
     const canonical=id=>String(legacy.find(task=>String(task.id)===String(id))?.templateId||id);
     const aliases=new Map(v2.map(task=>[String(task.id),canonical(task.legacyTaskId||task.id)]));
     const streams=new Map(compatibility.filter(row=>row.sourceSystem==='v2').map(row=>[row.rootOccurrenceId,row]));
-    const shadows=new Set(),shadowEventIds=new Set(),importedShadows=new Set();
+    const shadows=new Map(),shadowEventIds=new Set(),importedShadows=new Set(),roots=new Map();
     for(const event of state.maintenanceOccurrencesV2||[]){
-      const alias=aliases.get(String(event.taskId))||canonical(event.legacyTaskId||event.taskId);
-      if(event.import_event_id)shadowEventIds.add(alias+'|'+String(event.import_event_id));
-      for(const key of [event.originalDateISO,event.effectiveDateISO,event.displayDateISO,event.payload?.toDateISO])if(date(key)){
-        shadows.add(alias+'|'+key);
-        if(event.import_event_id)importedShadows.add(alias+'|'+key);
+      const root=event.rootOccurrenceId||(event.eventType==='scheduled'?event.id:event.supersedesEventId);
+      if(!root)continue;
+      const group=roots.get(String(root))||[];group.push(event);roots.set(String(root),group);
+    }
+    for(const [root,events] of roots){
+      // Scheduling an independent reminder must not erase an older completion.
+      if(!events.some(event=>['completed','uncompleted'].includes(event.eventType)))continue;
+      const taskIds=new Set(events.map(event=>String(event.taskId||'')).filter(Boolean));
+      const instanceIds=new Set(events.map(event=>String(event.instanceId||'')).filter(Boolean));
+      if(taskIds.size!==1||instanceIds.size>1)continue;
+      const alias=aliases.get([...taskIds][0])||canonical(events.find(event=>event.legacyTaskId)?.legacyTaskId||[...taskIds][0]);
+      for(const event of events){
+        const importId=event.import_event_id||event.importEventId;
+        if(importId)shadowEventIds.add(alias+'|'+String(importId));
+        for(const key of [event.originalDateISO,event.effectiveDateISO,event.displayDateISO,event.payload?.toDateISO])if(date(key)){
+          const identity=alias+'|'+key,matched=shadows.get(identity)||new Set();matched.add(root);shadows.set(identity,matched);
+          if(importId)importedShadows.add(identity);
+        }
       }
     }
     const legacyPeersByDate=new Map();
     for(const row of rows)if(row.sourceSystem!=='v2'){
       const key=canonical(row.taskId)+'|'+row.dateISO,identities=legacyPeersByDate.get(key)||new Set();
-      identities.add(row.historyEventId||'day');legacyPeersByDate.set(key,identities);
+      identities.add(row.historyEventId||row.sourceEventKey||'day');legacyPeersByDate.set(key,identities);
     }
     const seen=new Set(),out=[];
     for(const row of rows){
       const isV2=row.sourceSystem==='v2',stream=streams.get(row.rootOccurrenceId),alias=aliases.get(String(row.taskId))||canonical(row.taskId);
       const task=legacy.find(task=>String(task.id)===alias)||v2.find(task=>String(task.id)===String(row.taskId));
-      const key=date(row.dateISO);if(!key)continue;
-      const unambiguousMirror=legacyPeersByDate.get(alias+'|'+key)?.size===1&&!importedShadows.has(alias+'|'+key);
-      if(!isV2&&(row.historyEventId?(shadowEventIds.has(alias+'|'+String(row.historyEventId))||unambiguousMirror&&shadows.has(alias+'|'+key)):shadows.has(alias+'|'+key)))continue;
-      const identity=isV2?'v2:'+row.rootOccurrenceId:alias+'|'+key+(row.historyEventId?'|'+row.historyEventId:'');
-      if(seen.has(identity))continue;seen.add(identity);
+      const key=date(row.dateISO);
+      const sourceEventKey=row.sourceEventKey||(isV2?'v2:'+row.rootOccurrenceId:JSON.stringify(['legacy',String(row.taskId),row.dateISO,row.historyEventId||'day']));
+      const audit=(reason,result=null)=>decisions.push({sourceEventKey,sourceSystem:isV2?'v2':'legacy',taskId:row.taskId,
+        historySourceTaskId:row.historySourceTaskId,historyField:row.historyField,historyIndex:row.historyIndex,historyEventId:row.historyEventId,
+        rootOccurrenceId:row.rootOccurrenceId,instanceId:row.instanceId,dateISO:row.dateISO,taskName:row.taskName,
+        completionStatus:row.lifecycleStatus||'completed',normalizationIncluded:!!result,exclusionReason:reason,
+        parts:result?.costFields.parts,duration:result?.costFields.duration,totalCost:result&&!result.costIncomplete?result.totalCost:null,
+        costClassification:result?.costIncomplete?'incomplete':result?.costEstimated?'estimated/default':result?'recorded inputs; modeled labor':'not_costed',costIncomplete:result?.costIncomplete});
+      if(!key){audit('Invalid or missing business date');continue;}
+      const unambiguousMirror=legacyPeersByDate.get(alias+'|'+key)?.size===1&&shadows.get(alias+'|'+key)?.size===1
+        &&!row.historyImportEventId&&(!row.historyEventId||!importedShadows.has(alias+'|'+key));
+      if(!isV2&&(shadowEventIds.has(alias+'|'+String(row.historyEventId||''))||unambiguousMirror)){
+        audit('Mirrored legacy/V2 occurrence (explicit import identity or unique task/day lifecycle)');continue;
+      }
+      const identity=isV2?'v2:'+row.rootOccurrenceId:row.historyEventId?alias+'|'+key+'|'+row.historyEventId:sourceEventKey;
+      if(seen.has(identity)){audit('Duplicate stable occurrence identity');continue;}seen.add(identity);
       const family=legacy.filter(member=>String(member.id)===alias||String(member.templateId||'')===alias);
-      const allHistory=family.flatMap(member=>member.manualHistory||[]).filter(entry=>date(entry?.dateISO||entry?.date||entry?.doneDateISO)===key);
-      const removed=family.some(member=>(Array.isArray(member.removedOccurrences)?member.removedOccurrences:Object.keys(member.removedOccurrences||{})).some(value=>date(value?.dateISO||value)===key));
-      if(!isV2&&(removed||['removed','uncompleted','canceled','cancelled'].includes(String(allHistory.at(-1)?.status||'').toLowerCase())))continue;
+      const sourceTask=legacy.find(member=>String(member.id)===String(row.historySourceTaskId||''));
+      const sourceFamily=sourceTask?[sourceTask]:family;
+      const allHistory=sourceFamily.flatMap(member=>member.manualHistory||[]).filter(entry=>date(entry?.dateISO||entry?.date||entry?.doneDateISO)===key);
+      const sourceOccurrence=sourceTask&&row.historyField==='manualHistory'?sourceTask.manualHistory?.[row.historyIndex]:null;
+      const removed=sourceFamily.some(member=>(Array.isArray(member.removedOccurrences)?member.removedOccurrences:Object.keys(member.removedOccurrences||{})).some(value=>date(value?.dateISO||value)===key));
+      if(!isV2&&(removed||['removed','uncompleted','canceled','cancelled'].includes(String((sourceOccurrence||allHistory.at(-1))?.status||'').toLowerCase()))){audit('Legacy occurrence removed or reopened');continue;}
       const history=allHistory.filter(entry=>!['scheduled','removed','uncompleted','canceled','cancelled'].includes(String(entry.status||'').toLowerCase()));
-      const occurrence=history.filter(entry=>entry.source==='cut_cost_correction').sort((a,b)=>String(a.recordedAtISO||'').localeCompare(String(b.recordedAtISO||''))).at(-1)||history.find(entry=>row.historyEventId&&String(entry.import_event_id||entry.id)===String(row.historyEventId))||history.at(-1)||{};
-      const durationTask=family.find(member=>number(member.occurrenceHours?.[key])!==null)||task;
+      const occurrence=history.filter(entry=>entry.source==='cut_cost_correction').sort((a,b)=>String(a.recordedAtISO||'').localeCompare(String(b.recordedAtISO||''))).at(-1)||history.find(entry=>row.historyEventId&&String(entry.import_event_id||entry.id)===String(row.historyEventId))||(sourceOccurrence&&date(sourceOccurrence.dateISO||sourceOccurrence.date||sourceOccurrence.doneDateISO)===key?sourceOccurrence:null)||history.at(-1)||{};
+      const durationTask=sourceFamily.find(member=>number(member.occurrenceHours?.[key])!==null)||task;
       const rawParts=isV2?stream?.partsCostSnapshot:occurrence.partsCostSnapshot??occurrence.partsCost??occurrence.calendarPrice;
-      const configuredTasks=[task,v2.find(member=>String(member.id)===String(row.taskId))].filter(Boolean);
+      const configuredTasks=[sourceTask,task,v2.find(member=>String(member.id)===String(row.taskId))].filter(Boolean);
       const configuredParts=configuredTasks.flatMap(member=>[member.price,member.cost,member.calendarPrice]).map(number).find(value=>value!==null);
       const parts=number(rawParts)??number(configuredParts)??number(stream?.costRef);
       const occurrenceHours=isV2?stream?.loggedHours:durationTask?.occurrenceHours?.[key]??occurrence.loggedHours??occurrence.timeHours??occurrence.hours;
@@ -105,11 +132,13 @@
       const garnetMaterial=!/\b(?:valve|tube|nozzle|liner|hose|seal|inspection|repair|replacement|replace)\b/i.test(row.taskName||task?.name||'')&&/\b(?:garnet|abrasive)\b/i.test(row.taskName||task?.name||'')&&(/\b(?:refill|replenish|purchase|load|add|consumption|fill)\b/i.test(row.taskName||task?.name||'')||/^(?:garnet|abrasive)(?: material)?$/i.test(row.taskName||task?.name||''));
       const partCost=garnetMaterial?0:parts;
       const incomplete=partCost===null||hours===null;
-      const repairTask=family.find(member=>number(member.occurrenceHours?.[key])!==null)||family.find(member=>(member.manualHistory||[]).includes(occurrence))||family.find(member=>(member.completedDates||[]).includes(key))||task;
+      const repairTask=sourceFamily.find(member=>number(member.occurrenceHours?.[key])!==null)||sourceFamily.find(member=>(member.manualHistory||[]).includes(occurrence))||sourceFamily.find(member=>(member.completedDates||[]).includes(key))||task;
       const costFields={parts:{value:partCost,source:garnetMaterial?'Hourly garnet formula':number(rawParts)!==null?'Occurrence-specific':'Configured default'},duration:{value:hours,source:number(occurrenceHours)!==null?'Occurrence-specific':'Configured default'}};
       const importedSource=stream?.provenance?.importProvenance?.sourceRecord;
       const estimated=number(rawParts)===null||number(occurrenceHours)===null||(importedSource&&number(importedSource.parts_cost_snapshot)===null&&!(state.maintenanceOccurrencesV2||[]).some(event=>event.rootOccurrenceId===row.rootOccurrenceId&&event.source==='cut_cost_correction'));
-      out.push({...row,maintenanceHrs:hours??0,partCost:partCost??0,chargeRate:30,laborCost:(hours??0)*30,totalCost:(partCost??0)+(hours??0)*30,costIncomplete:incomplete,costEstimated:Boolean(estimated),costFields,repairTaskId:repairTask?.id??row.taskId,garnetMaterialExcluded:garnetMaterial});
+      const costExclusionReason=incomplete?`Missing ${[partCost===null?'parts price':null,hours===null?'labor duration':null].filter(Boolean).join(' and ')}`:'';
+      const result={...row,sourceEventKey,costExclusionReason,maintenanceHrs:hours??0,partCost:partCost??0,chargeRate:30,laborCost:(hours??0)*30,totalCost:(partCost??0)+(hours??0)*30,costIncomplete:incomplete,costEstimated:Boolean(estimated),costFields,repairTaskId:repairTask?.id??row.taskId,garnetMaterialExcluded:garnetMaterial};
+      out.push(result);audit(costExclusionReason,result);
     }
     return out;
   }

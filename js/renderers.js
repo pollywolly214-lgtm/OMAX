@@ -18106,6 +18106,17 @@ function computeCostModel(){
   });
 
   const taskEventsByDate = new Map();
+  const maintenanceCostReconciliation = [];
+  const legacySource = (task, field, index, entry, dateISO)=>{
+    const eventId = entry && (entry.import_event_id || entry.importEventId || entry.id) || null;
+    return { historySourceTaskId: String(task.id), historyField: field, historyIndex: index,
+      historyEventId: eventId, historyImportEventId: entry?.import_event_id || entry?.importEventId || null,
+      sourceEventKey: JSON.stringify(['legacy', String(task.id), field, eventId ? ['id', String(eventId)] : ['index', index]]),
+      dateISO, lifecycleStatus: entry?.status || 'completed' };
+  };
+  const excludedLegacy = (source, taskId, reason)=>maintenanceCostReconciliation.push({ ...source,
+    taskId: String(taskId), sourceSystem:'legacy', completionStatus:source.lifecycleStatus,
+    costClassification:'not_costed', normalizationIncluded:false, exclusionReason:reason });
   const shouldIncludeManualHistoryEntry = (entry, completedDateKeys = null)=> {
     if (!entry) return false;
     const status = typeof entry.status === "string" ? entry.status.trim().toLowerCase() : "";
@@ -18187,49 +18198,6 @@ function computeCostModel(){
   const deletedList = typeof listDeletedItems === "function"
     ? listDeletedItems()
     : (Array.isArray(window.deletedItems) ? window.deletedItems : []);
-  if (Array.isArray(deletedList)){
-    deletedList.forEach(entry => {
-      if (!entry || entry.type !== "task") return;
-      const payload = entry.payload || {};
-      const meta = entry.meta || {};
-      const payloadId = payload.id != null ? String(payload.id) : null;
-      if (!payloadId) return;
-      const mode = payload.mode === "asreq" || meta.list === "asreq" ? "asreq" : "interval";
-      const name = payload.name || entry.label || "Maintenance task";
-      const baseInfo = {
-        id: payloadId,
-        originalId: payloadId,
-        mode,
-        name,
-        exists: false,
-        trashId: entry.id != null ? String(entry.id) : null
-      };
-      const completedDates = Array.isArray(payload.completedDates) ? payload.completedDates : [];
-      const completedDateKeys = new Set();
-      completedDates.forEach((dateVal, index) => {
-        const key = toHistoryDateKey(dateVal);
-        if (!key) return;
-        completedDateKeys.add(key);
-        addTaskEventForDate(key, {
-          ...baseInfo,
-          occurrenceId: `completed:${key}:${index}`
-        });
-      });
-      const manualHistory = Array.isArray(payload.manualHistory) ? payload.manualHistory : [];
-      manualHistory.forEach((item, index) => {
-        if (!shouldIncludeManualHistoryEntry(item, completedDateKeys)) return;
-        const key = toHistoryDateKey(item.dateISO || item.date || item.doneDateISO);
-        if (key){
-          const status = typeof item?.status === "string" ? item.status.trim().toLowerCase() : "logged";
-          const marker = item?.recordedAtISO || item?.recordedAt || item?.timeISO || "";
-          addTaskEventForDate(key, {
-            ...baseInfo,
-            occurrenceId: `manual:${status}:${key}:${marker}:${index}`
-          });
-        }
-      });
-    });
-  }
   const captureTaskHistory = (task, { exists = true, trashId = null } = {})=>{
     if (!task) return;
     const rawId = task.id != null ? String(task.id) : null;
@@ -18301,29 +18269,23 @@ function computeCostModel(){
       const completedDateKeys = new Set();
       completedDates.forEach((dateVal, index) => {
         const key = toHistoryDateKey(dateVal);
-        if (!key) return;
+        const source = legacySource(sourceTask, 'completedDates', index, null, key);
+        if (!key){ excludedLegacy(source, targetId, 'Invalid or missing business date'); return; }
         completedDateKeys.add(key);
-        if (manualDates.has(key)) return; // completedDates mirrors the manual event.
-        addTaskEventForDate(key, {
-          ...baseInfo,
-          occurrenceId: `completed:${key}:${index}`
-        });
+        if (manualDates.has(key)){ excludedLegacy(source, targetId, 'completedDates mirrors manualHistory for this source task/date'); return; }
+        addTaskEventForDate(key, { ...baseInfo, ...source, occurrenceId: source.sourceEventKey });
       });
       manualHistory.forEach((entry, index) => {
-        if (!shouldIncludeManualHistoryEntry(entry, completedDateKeys)) return;
-        if (String(entry.status || "").toLowerCase() === "scheduled") return;
-        if (entry.source === "cut_cost_correction" && manualHistory.some(other=>other !== entry && other.source !== "cut_cost_correction" && toHistoryDateKey(other.dateISO || other.date || other.doneDateISO) === toHistoryDateKey(entry.dateISO || entry.date || entry.doneDateISO))) return;
-        const key = toHistoryDateKey(entry.dateISO || entry.date || entry.doneDateISO);
-        if (key){
-          const status = typeof entry?.status === "string" ? entry.status.trim().toLowerCase() : "logged";
-          const marker = entry?.recordedAtISO || entry?.recordedAt || entry?.timeISO || "";
-          const eventId = entry.import_event_id || entry.id || null;
-          addTaskEventForDate(key, {
-            ...baseInfo,
-            historyEventId: eventId,
-            occurrenceId: eventId ? `manual:${eventId}` : `manual:${status}:${key}:${marker}:${index}`
-          });
+        const key = toHistoryDateKey(entry?.dateISO || entry?.date || entry?.doneDateISO);
+        const source = legacySource(sourceTask, 'manualHistory', index, entry, key);
+        if (!key){ excludedLegacy(source, targetId, 'Invalid or missing business date'); return; }
+        if (!shouldIncludeManualHistoryEntry(entry, completedDateKeys) || String(entry.status || '').toLowerCase() === 'scheduled'){
+          excludedLegacy(source, targetId, `Not an eligible completion: ${entry?.status || 'unrecognized history'}`); return;
         }
+        if (entry.source === 'cut_cost_correction' && manualHistory.some(other=>other !== entry && other.source !== 'cut_cost_correction' && toHistoryDateKey(other.dateISO || other.date || other.doneDateISO) === key)){
+          excludedLegacy(source, targetId, 'Cost correction supplements an existing occurrence'); return;
+        }
+        addTaskEventForDate(key, { ...baseInfo, ...source, occurrenceId: source.sourceEventKey });
       });
     };
 
@@ -18337,6 +18299,11 @@ function computeCostModel(){
     }
   };
 
+  if (Array.isArray(deletedList)) deletedList.forEach(entry => {
+    if (entry?.type !== 'task' || !entry.payload?.id) return;
+    captureTaskHistory({ ...entry.payload, mode: entry.payload.mode === 'asreq' || entry.meta?.list === 'asreq' ? 'asreq' : 'interval' },
+      { exists:false, trashId:entry.id });
+  });
   if (Array.isArray(intervalTasksAll)){
     intervalTasksAll.forEach(task => captureTaskHistory(task, { exists: true }));
   }
@@ -20013,6 +19980,12 @@ function computeCostModel(){
       maintenanceDataTableRows.push({
         taskId: originalId,
         historyEventId: taskMeta.historyEventId || null,
+        historyImportEventId: taskMeta.historyImportEventId || null,
+        historySourceTaskId: taskMeta.historySourceTaskId,
+        historyField: taskMeta.historyField,
+        historyIndex: taskMeta.historyIndex,
+        sourceEventKey: taskMeta.sourceEventKey,
+        lifecycleStatus: taskMeta.lifecycleStatus,
         taskName: task?.name || taskMeta.name || "Maintenance task",
         maintenanceHrs,
         partCost: partCostValue,
@@ -20055,7 +20028,8 @@ function computeCostModel(){
       if (resolvedStatus && resolvedStatus !== "completed") invalidReason = `resolver_status_${resolvedStatus}`;
       else if (!resolvedDate || resolvedDate !== dateISO) invalidReason = "resolver_date_mismatch";
     }
-    if (invalidReason){ if (window.DEBUG_MODE){ console.debug('[maintenance-v2-row-skip]', { idx, invalidReason, taskId, instanceId, rootOccurrenceId, lifecycleStatus, resolvedStatus, resolvedDate, row }); } return; }
+    if (invalidReason){ maintenanceCostReconciliation.push({ sourceEventKey:`v2:${rootOccurrenceId}`, sourceSystem:'v2', taskId, instanceId, rootOccurrenceId, dateISO,
+      completionStatus:lifecycleStatus, costClassification:'not_costed', normalizationIncluded:false, exclusionReason:invalidReason }); if (window.DEBUG_MODE){ console.debug('[maintenance-v2-row-skip]', { idx, invalidReason, taskId, instanceId, rootOccurrenceId, lifecycleStatus, resolvedStatus, resolvedDate, row }); } return; }
     if (maintenanceDataTableRows.some(entry => String(entry.sourceSystem || "")==="v2" && String(entry.rootOccurrenceId||"")===rootOccurrenceId)) return;
     const repeatBasis = String(row.repeatBasis || "").trim();
     const modeTag = String(row.instanceMode || "").toLowerCase() === "repeat" ? "interval" : "asreq";
@@ -20115,7 +20089,7 @@ function computeCostModel(){
   });
 
   if (window.OMAXCutCostFeedback){
-    const corrected = window.OMAXCutCostFeedback.maintenanceRows(maintenanceDataTableRows, window, compatibilityRows);
+    const corrected = window.OMAXCutCostFeedback.maintenanceRows(maintenanceDataTableRows, window, compatibilityRows, maintenanceCostReconciliation);
     maintenanceDataTableRows.splice(0, maintenanceDataTableRows.length, ...corrected);
   }
 
@@ -20465,6 +20439,8 @@ function computeCostModel(){
   const maintenanceDataTable = centralMaintenanceRows.map((row, idx) => ({
     id: `${row.taskId}_${row.dateISO}_${idx}`,
     taskId: row.taskId,
+    sourceEventKey: row.sourceEventKey,
+    costExclusionReason: row.costExclusionReason || '',
     taskName: row.taskName,
     maintenanceHrsLabel: row.costFields?.duration.value === null ? "Unknown" : (formatHoursValue(row.maintenanceHrs) || "0"),
     partCostLabel: row.costFields?.parts.value === null ? "Unknown" : formatterCurrency(row.partCost, { decimals: row.partCost < 1000 ? 2 : 0 }),
@@ -20626,6 +20602,19 @@ function computeCostModel(){
     return date && date <= financialPeriod.endISO && (!financialPeriod.startISO || date >= financialPeriod.startISO);
   };
   const selectedMaintenanceSeries = maintenanceSeriesFromDataTable.filter(inFinancialPeriod);
+  maintenanceCostReconciliation.forEach(entry => {
+    const row = entry.normalizationIncluded && maintenanceDataTableRows.find(row=>row.sourceEventKey === entry.sourceEventKey);
+    entry.historicalTableIncluded = !!row && centralMaintenanceRows.some(item=>item.sourceEventKey===row.sourceEventKey);
+    entry.inSelectedPeriod = Boolean(inFinancialPeriod(entry));
+    entry.centralTableIncluded = entry.historicalTableIncluded && entry.inSelectedPeriod;
+    entry.chartIncluded = !!row && maintenanceTrendRows.includes(row) && entry.inSelectedPeriod;
+    if (entry.normalizationIncluded && !entry.chartIncluded) entry.exclusionReason = entry.costIncomplete ? row.costExclusionReason
+      : !row.taskId ? 'Missing stable task ID'
+      : !row.settingsLink && row.sourceSystem !== 'v2' ? 'Missing Settings link for legacy task'
+      : !toHistoryDateKey(row.dateISO) || !parseDateLocal(row.dateISO) ? 'Invalid or missing business date'
+      : !Number.isFinite(Number(row.totalCost)) || Number(row.totalCost) < 0 ? 'Invalid maintenance expense amount'
+      : !entry.inSelectedPeriod ? 'Outside selected financial period' : 'Not eligible for maintenance trends';
+  });
   const selectedSpendSeries = totalSpendSeries.filter(inFinancialPeriod);
   const selectedJobSeries = jobSeries.filter(inFinancialPeriod);
   const maintenanceAverageValue = selectedMaintenanceSeries.length
@@ -20702,6 +20691,7 @@ function computeCostModel(){
     maintenanceDataTable: maintenanceDataTable.filter(inFinancialPeriod),
     allMaintenanceDataTable: maintenanceDataTable,
     maintenanceCostRows: maintenanceDataTableRows,
+    maintenanceCostReconciliation,
     purchaseDataTable: purchaseDataTable.filter(inFinancialPeriod),
     cuttingJobsDataTable: cuttingJobsDataTable.filter(row=>inFinancialPeriod({dateISO:row.completedDateISO})),
     efficiencySnapshot,
@@ -20882,6 +20872,7 @@ function drawWeeklyReportChart(canvas, report){
 
 function drawCostChart(canvas, model, show){
   if (!canvas) return;
+  canvas.__maintenanceCostReconciliation = model.maintenanceCostReconciliation || [];
   const ctx = canvas.getContext("2d");
   const hitTargets = [];
   canvas.__costChartTargets = hitTargets;
