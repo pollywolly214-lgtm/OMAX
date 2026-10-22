@@ -4806,16 +4806,28 @@ async function readInventoryMaterialAuthoritativeState(){
 }
 
 // Task deletion writes one exact archive transfer through the shared CAS writer.
+async function readMaintenanceTaskAuthoritativeState(target){
+  if(!cuttingJobSaveTargetIsCurrent(target)||typeof target.db?.runTransaction!=="function")
+    throw Error("Task deletion requires an independent backend transaction read for the captured workspace.");
+  // Firebase v8 server-get can still return a stale listener view after commit.
+  // Read only through the captured backend; never fall back to document.get.
+  const state=await target.db.runTransaction(async transaction=>{
+    if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Task deletion workspace/backend changed before verification.");
+    const snapshot=await transaction.get(target.docRef);
+    if((snapshot?.ref?.path && snapshot.ref.path!==target.path)
+      ||(snapshot?.ref?.firestore && snapshot.ref.firestore!==target.db))throw Error("Task deletion verification returned another document/backend.");
+    return snapshot?.exists ? snapshot.data() : null;
+  });
+  if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Task deletion workspace/backend changed during verification.");
+  return state;
+}
+
 window.maintenanceTaskDeletionApi=window.OMAXMaintenanceTaskArchive?.createApi({
   canWrite:()=>canWriteCloud("maintenance task deletion")&&FB.ready&&Boolean(FB.user)&&!isVercelPreviewRuntime()&&!window.__lastIndeterminateSave,
   settle:async()=>{await cloudSaveQueue;if(hasPendingLocalChanges)throw Error("Other changes are still pending. Wait for their save before deleting a task.");},
   captureTarget:captureCuttingJobSaveTarget,targetIsCurrent:cuttingJobSaveTargetIsCurrent,
   version:()=>({revision:window.__loadedCloudRevisionForSaveGuard,mutation:lastLocalMutationAt}),
-  read:async target=>{
-    const snapshot=await readCuttingJobAuthoritativeSnapshot(target);
-    if(snapshot.fromCache!==false||snapshot.hasPendingWrites!==false||snapshot.path!==target.path||snapshot.backendMatches===false)throw Error("Task deletion requires confirmed server evidence.");
-    return snapshot.state;
-  },
+  read:readMaintenanceTaskAuthoritativeState,
   matches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)&&stableStringify(source)===stableStringify(getCuttingJobChronologyLocalState()),
   newId:()=>genId("trash_task"),
   validate:state=>window.OMAXGlobalIdentityRepair?.integrity(state).valid===true&&!scanAuthoritativeCutFileContent(state).contaminated,
@@ -4824,7 +4836,7 @@ window.maintenanceTaskDeletionApi=window.OMAXMaintenanceTaskArchive?.createApi({
     cloudSaveQueue=queued.catch(()=>{});return queued;
   },
   adopt:state=>adoptIdentityCheckedAuthoritativeState(state)?.recovery===false,
-  suspend:result=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastIndeterminateSave=result;renderRecoveryDiagnosticsPanel();}
+  suspend:result=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastIndeterminateSave=window.__lastIndeterminateSave||result;renderRecoveryDiagnosticsPanel();}
 });
 
 let inventoryMaterialOwnedSuspension = null;

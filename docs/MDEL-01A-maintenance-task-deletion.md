@@ -166,3 +166,75 @@ exact-ID restoration workflow remains future work.
 
 Recommendation: **SAFE TO MERGE** for the requested read-only archive version.
 The ten independently reproduced baseline test failures remain separate issues.
+
+## MDEL-01B: Post-commit verification correction
+
+The reported live deletion had already committed safely; no repair of the
+archived production task is needed. This follow-up changes verification only.
+
+Targeted tests reproduce the old false-Recovery path: the atomic writer
+acknowledges the exact deletion, but Firebase v8
+`docRef.get({source:"server"})` returns the pre-commit listener snapshot, even
+with `fromCache:false` and `hasPendingWrites:false`. The old comparison rejects
+that snapshot against `committedState` and suspends saves. With a fresh snapshot,
+the original full-state, local-version, and adoption comparisons succeed. Separate
+negative tests confirm that actual local/version changes and different backend
+state must still be rejected. The generic live error did not record which
+comparison failed, so the original live read response cannot be reconstructed
+retrospectively; the stale-read failure is reproduced using the real core adapter,
+atomic writer, protected gates, and authoritative adopter.
+
+The correction is limited to:
+
+- `js/core.js`: maintenance deletion now reads its source and verification state
+  through a read-only Firestore transaction on the captured backend/document.
+  Target identity is checked before, during, and after the read. There is no
+  fallback to listener-backed server-get and no write queued by verification.
+  An existing unrelated indeterminate-save record is preserved on suspension.
+- `js/maintenanceTaskArchive.js`: recheck write eligibility immediately before
+  adoption so an intervening read-only/recovery blocker cannot be cleared by a
+  successful adoption. Exact committed-state, expected-deletion, local-version,
+  revision, FK, and protected-data checks are retained.
+- `tests/mdel01b-verification.test.js`: 20 regressions covering fresh/stale
+  listeners, real backend reads/adoption/reload, original IDs and relationships,
+  write failures/uncertainty, revision conflicts, concurrent changes, backend
+  switching, unrelated blockers, adoption failure, and unavailable backend reads.
+- `tests/mdel01-task-deletion.browser.cjs`: run the existing disposable browser
+  workflow with both fresh and deliberately stale server-get responses; check
+  immediate autosave/recovery flags and browser revision before any reload.
+- This report records the follow-up investigation and verification.
+
+`js/atomicPersistence.js` was reviewed and remains unchanged: its CAS transaction,
+acknowledged committed state, and uncertainty classification were functioning.
+No committed deletion is retried. No production Firebase data was accessed or
+altered, and no task, inventory, calendar, or history schema was changed.
+
+Follow-up verification on the existing PR branch:
+
+```powershell
+node --test tests/mdel01b-verification.test.js tests/mdel01-task-deletion.test.js
+# PASS: 45 tests (20 new, 25 existing).
+
+node --test tests/mdel01b-verification.test.js tests/mdel01-task-deletion.test.js tests/atomic-persistence.test.js tests/inventory-material-persistence.test.js tests/inventory-identity.test.js tests/inventory-identity-repair.test.js tests/global-identity-repair.test.js tests/production-hardening.test.js tests/maintenance-task-setup.test.js tests/maintenance-history-import.test.js tests/maintenance-new-one-time.test.js tests/mcf-01-maintenance-calendar.test.js tests/recovery-import.test.js tests/cjo06-archived-identity.test.js tests/purchase-orders.test.js tests/purchase-financials.test.js tests/purchase-history-navigation.test.js
+# PASS: 516 tests, zero failures.
+
+$env:OMAX_PLAYWRIGHT_PATH='C:\Users\Ryder\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright'
+node --test tests/mdel01-task-deletion.browser.cjs
+# PASS: 2 disposable Edge workflows; all external requests blocked.
+
+node --check js/core.js
+node --check js/maintenanceTaskArchive.js
+node --check js/atomicPersistence.js
+node --check tests/mdel01b-verification.test.js
+node --check tests/mdel01-task-deletion.browser.cjs
+git diff --check
+# PASS.
+```
+
+The full suite was not rerun for this narrow follow-up; the earlier full-suite
+baseline above remains separate. Authenticated Firebase and the original live
+incident were not replayed. Native context-menu pointer positioning remains
+outside the disposable browser assertion, as documented above.
+
+Successful, independently verified deletion is now acknowledged and adopted
+without refresh in both regression workflows. Recommendation: **SAFE TO MERGE**.

@@ -70,6 +70,7 @@
         const actual=await env.read(target);
         if(!unchanged()||!result.committedState||key(actual)!==key(result.committedState)
           ||key({...actual,syncMeta:source.syncMeta})!==key(next)||actual.syncMeta?.rev<=source.syncMeta.rev||!env.validate(actual))throw Error("Task deletion server verification failed; review before further saves.");
+        if(!env.canWrite())throw Error("Task deletion committed, but a separate write blocker prevents adoption; review before further saves.");
         if(!env.adopt(actual))throw Error("Verified deletion could not be adopted safely.");
         return {...result,verified:true};
       }catch(error){

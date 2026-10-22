@@ -2,7 +2,7 @@
 // All non-local requests are blocked. Only the disposable IndexedDB backend is used.
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs/promises"),path=require("node:path"),http=require("node:http");
 const {chromium}=require(process.env.OMAX_PLAYWRIGHT_PATH||"playwright"),{fixture}=require("./fixtures/mdel01-maintenance-task");
-test("Settings deletion preserves same-name task, archived history and inventory after browser reload",{timeout:60000},async t=>{
+for(const staleServerGet of [false,true])test("Settings deletion preserves same-name task, archived history and inventory after browser reload"+(staleServerGet?" with stale Firebase server-get view":""),{timeout:60000},async t=>{
   const root=path.resolve(__dirname,".."),server=http.createServer(async(req,res)=>{
     const pathname=new URL(req.url,"http://localhost").pathname,file=path.resolve(root,"."+pathname+(pathname.endsWith("/")?"index.html":""));
     if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
@@ -30,6 +30,12 @@ test("Settings deletion preserves same-name task, archived history and inventory
   assert.equal((await page.evaluate(()=>saveCloudNow())).saved,true);
   await load();
   const before=await page.evaluate(async()=>(await FB.docRef.get()).data());
+  if(staleServerGet)await page.evaluate(async()=>{
+    const ref=FB.docRef,get=ref.get.bind(ref),snapshot=await get(),state=snapshot.data();
+    // Devsafe transaction.get calls ref.get() without options, so backend reads
+    // stay fresh while the v8 server-get listener retains its pre-commit view.
+    ref.get=options=>options?.source==="server" ? Promise.resolve({...snapshot,data:()=>structuredClone(state)}) : get(options);
+  });
   assert.equal(await page.evaluate(()=>isRecoveryMode()),false);
   const card=page.locator('details[data-task-id="fixture-task-A"]');
   assert.ok(await card.count(),JSON.stringify(await page.evaluate(()=>({hash:location.hash,text:document.getElementById("content")?.innerText.slice(0,300),tasks:window.tasksInterval.map(t=>t.id),loaded:window.__lastLoadedCloudState?.tasksInterval.map(t=>t.id),errors:window.__globalIdentityIssues}))));
@@ -44,6 +50,8 @@ test("Settings deletion preserves same-name task, archived history and inventory
   assert.deepEqual(after.deletedItems[0].payload,before.tasksInterval[0]);
   for(const field of Object.keys(before).filter(name=>!["syncMeta","tasksInterval","deletedItems"].includes(name)))assert.deepEqual(after[field],before[field],field);
   assert.equal(await page.evaluate(()=>isRecoveryMode()),false);assert.deepEqual(dialogs,[]);
+  assert.deepEqual(await page.evaluate(()=>({autosaveDisabled:window.__autosaveDisabled,pending:!!window.__lastIndeterminateSave,revision:window.__loadedCloudRevisionForSaveGuard})),{autosaveDisabled:false,pending:false,revision:after.syncMeta.rev});
+  if(staleServerGet)assert.equal(await page.evaluate(async()=>(await FB.docRef.get({source:"server"})).data().syncMeta.rev),before.syncMeta.rev);
   await load();assert.equal(await page.locator('details[data-task-id="fixture-task-A"]').count(),0);assert.equal(await page.locator('details[data-task-id="fixture-task-B"]').count(),1);
   assert.equal(await page.evaluate(()=>isRecoveryMode()),false);
   const views=await page.evaluate(()=>{
