@@ -10528,27 +10528,61 @@ function openMaintenanceTaskHistory(t){
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
   modal.setAttribute('data-maintenance-history', String(t.id));
-  modal.innerHTML = `<div class="modal-card" style="max-width:min(96vw,1600px);width:min(96vw,1600px);max-height:90vh;overflow:auto"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: maintenance calendar + recorded legacy history • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Next scheduled: ${escapeHtml(predicted)}</p><p class="small muted">Recurring dates use the calendar’s existing projection limits. Legacy history labels mark recorded entries outside the current calendar display.</p><table class="cost-table"><thead><tr><th>Date</th><th>Interval</th><th>Status</th><th>Last serviced</th><th>Remain</th><th>Cost</th><th>Time to complete</th><th>Links</th><th>Scheduled</th><th>Completed</th><th>Since prior completion</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+  modal.innerHTML = `<div class="modal-card" style="max-width:min(96vw,1600px);width:min(96vw,1600px);max-height:90vh;overflow:auto"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: maintenance calendar + recorded legacy history • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Next scheduled: ${escapeHtml(predicted)}</p><p class="small muted">Recurring dates use the calendar’s existing projection limits. Legacy history labels mark recorded entries outside the current calendar display.</p><p class="small muted" data-history-navigation-status role="status" hidden></p><table class="cost-table"><thead><tr><th>Date</th><th>Interval</th><th>Status</th><th>Last serviced</th><th>Remain</th><th>Cost</th><th>Time to complete</th><th>Links</th><th>Scheduled</th><th>Completed</th><th>Since prior completion</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
   document.body.appendChild(modal);
+  let navigationPending = false;
+  const navigationFeedback = message => {
+    const status = modal.querySelector('[data-history-navigation-status]');
+    status.textContent = message;
+    status.hidden = false;
+    status.scrollIntoView({ block:'nearest' });
+  };
   modal.addEventListener('click', (ev)=>{
     const jump = ev.target instanceof HTMLElement ? ev.target.closest('[data-history-jump]') : null;
     if (jump){
+      if (navigationPending) return;
       const dateISO = jump.getAttribute('data-history-jump');
       const row = rows[Number(jump.getAttribute('data-history-row'))];
       const date = parseDateLocal(dateISO);
-      if (!date || Number.isNaN(date.getTime())) return;
-      modal.remove();
+      if (!date || Number.isNaN(date.getTime())){
+        navigationFeedback('This history date cannot be opened in the calendar. History remains available here.');
+        return;
+      }
       const today = new Date();
       const diffMonths = (date.getFullYear() - today.getFullYear()) * 12 + date.getMonth() - today.getMonth();
-      window.__calendarMonthOffset = Math.max(-12, Math.min(12, Math.round(diffMonths)));
+      const monthOffset = Math.max(-12, Math.min(12, diffMonths));
+      const monthsNeeded = diffMonths - monthOffset + 1;
+      // Existing navigation permits ±12 starting months and a 12-month expanded view.
+      if (diffMonths < -12 || monthsNeeded > 12){
+        navigationFeedback(`${dateISO} is outside the calendar's navigation range. History remains available here.`);
+        return;
+      }
+      if (!row?.calendarEvent){
+        navigationFeedback('This recorded history entry has no event in the current calendar display. History remains available here.');
+        return;
+      }
+      navigationPending = true;
+      navigationFeedback('Opening calendar event…');
+      window.__calendarMonthOffset = monthOffset;
+      if (monthsNeeded > 3) window.__calendarShowAllMonths = true;
       location.hash = '#/';
       const focusCalendarDay = (attempt = 0)=>{
+        if (!modal.isConnected) return;
         if (typeof renderCalendar === 'function') renderCalendar();
         const cell = document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`);
-        if (!cell){
+        const selector = row.sourceSystem === 'v2'
+          ? `[data-v2-root-occurrence-id="${CSS.escape(row.rootOccurrenceId)}"]`
+          : `[data-cal-task="${CSS.escape(String(row.taskId))}"][data-cal-start="${CSS.escape(dateISO)}"]`;
+        const anchor = cell?.querySelector(selector);
+        if (!anchor){
           if (attempt < 8) setTimeout(()=>focusCalendarDay(attempt + 1), 120);
+          else {
+            navigationPending = false;
+            navigationFeedback(`The calendar event for ${dateISO} could not be reached. History remains available here.`);
+          }
           return;
         }
+        modal.remove();
         cell.scrollIntoView({ behavior:'smooth', block:'center' });
         if (typeof highlightCalendarDayCell === 'function') highlightCalendarDayCell(cell);
         if (row?.calendarEvent?.type === 'v2task'){
@@ -10557,7 +10591,6 @@ function openMaintenanceTaskHistory(t){
           openV2RepeatPanel(row.calendarEvent.repeatView);
         }else{
           const taskId = row?.taskId || t.id;
-          const anchor = cell.querySelector(`[data-cal-task="${CSS.escape(String(taskId))}"]`) || cell;
           if (typeof showTaskBubble === 'function') showTaskBubble(String(taskId), anchor, { dateISO });
         }
       };

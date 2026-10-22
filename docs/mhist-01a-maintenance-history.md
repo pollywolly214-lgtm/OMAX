@@ -203,3 +203,40 @@ change, or save/recovery/protection change. The independent pre-change builder
 comparison confirms ordinary legacy, one-time, calendar-repeat, and machine-hour
 calendar output remains equal; the two intentional identity/dedup display fixes
 have separate focused regressions. Assessment: **READY FOR REVIEW**.
+
+## MHIST-01B targeted navigation review
+
+Reviewed 2026-10-22 before PR creation. The old date-jump handler removed the
+popup immediately, clamped the starting month to ±12, and silently exhausted
+its retries when no target cell existed. Calendar itself renders three months
+or twelve expanded months from that bounded start. Therefore dates earlier
+than -12 months are unreachable, while future dates through +23 months are
+reachable using the existing expanded view; +24 months is outside the limit.
+
+The correction is limited to `openMaintenanceTaskHistory` and browser coverage:
+
+- Preflight the actual navigation bounds. Out-of-range dates keep history open
+  and display an inline status message without changing the route or range.
+- Use the existing expanded view when the requested future date needs it.
+- Keep history open until the exact occurrence/root chip is found, rather than
+  treating an empty date cell as success. Legacy history-only records receive
+  clear feedback. Exhausted retries also retain the popup and explain failure.
+- Ignore repeated jump clicks while navigation is pending, and cancel delayed
+  work if the user closes the popup.
+
+The real disposable browser test verifies -13/-12/+12/+13/+15/+23/+24 month
+boundaries relative to its fixed October 2026 clock, exact root navigation,
+history-only feedback, and a deliberately missing chip at a reachable date.
+The full disposable backend remains identical before and after navigation.
+Initial expanded-test setup reintroduced incomplete legacy fixture fields,
+which triggered Settings' existing bootstrap save during the longer run; the
+fixture now retains its already-initialized native schema before provisioning
+the extra test events. No application save guard or assertion was weakened.
+
+Verification reruns: the same 317 unit/integration checks, focused browser test,
+JavaScript syntax checks, binary verification, and full branch diff whitespace
+check all pass. Production code added in MHIST-01B does not change calendar
+navigation limits, recurrence/scheduling calculations, event dates, stored
+maintenance records, Firebase persistence, or Recovery Mode. Browser limitations
+remain authenticated production data, other engines, and an exhaustive device
+matrix. No production migration or Firebase modification was performed.

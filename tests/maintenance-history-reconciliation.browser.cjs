@@ -98,5 +98,54 @@ test("actual Settings history reconciles calendar, opens/closes/jumps, reloads a
   const card = modal.locator(".modal-card"), box = await card.boundingBox(); assert.ok(box.width <= 390);
   if (process.env.OMAX_MHIST_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.OMAX_MHIST_SCREENSHOTS, "mobile.png") });
   await modal.locator("[data-close]").click(); assert.equal(await modal.count(), 0);
+  // MHIST-01B: verify actual navigation boundaries, including expanded months.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  // Retain the already-rendered native fixture schema rather than reintroducing
+  // missing legacy fields that Settings' existing bootstrap would normalize.
+  const navigationState = await page.evaluate(() => compactStateForStorage(snapshotState({ skipLocalFileCacheSync: true })));
+  for (const [id, date] of [["too-old", "2025-09-15"], ["oldest", "2025-10-15"], ["plus12", "2027-10-15"],
+    ["plus13", "2027-11-15"], ["plus15", "2028-01-15"], ["plus23", "2028-09-15"], ["too-far", "2028-10-15"]]) {
+    fixture.oneTime(navigationState, id, { date });
+  }
+  navigationState.tasksInterval[0].manualHistory = [{ dateISO: "2026-09-15", status: "logged" }];
+  await page.evaluate(async state => {
+    if (!OMAXDevSafe.active || typeof firebase !== "undefined") throw Error("Disposable backend required");
+    const ref = OMAXDevSafe.db.doc(FB.docRef.path), source = (await ref.get()).data();
+    await ref.set({ ...source, ...state });
+  }, navigationState);
+  await load("#/settings");
+  const navigationBefore = await cloud();
+  await open("task-a");
+  const rangeBefore = await page.evaluate(() => ({ offset: window.__calendarMonthOffset, expanded: window.__calendarShowAllMonths, hash: location.hash }));
+  for (const date of ["2025-09-15", "2028-10-15"]){
+    await modal.locator(`[data-history-jump="${date}"]`).click();
+    assert.equal(await modal.isVisible(), true);
+    assert.match(await modal.locator("[data-history-navigation-status]").innerText(), /outside the calendar's navigation range/);
+    assert.deepEqual(await page.evaluate(() => ({ offset: window.__calendarMonthOffset, expanded: window.__calendarShowAllMonths, hash: location.hash })), rangeBefore);
+  }
+  await modal.locator('[data-history-jump="2026-09-15"]').click();
+  assert.match(await modal.locator("[data-history-navigation-status]").innerText(), /no event in the current calendar display/);
+  for (const [id, date] of [["oldest", "2025-10-15"], ["plus12", "2027-10-15"], ["plus13", "2027-11-15"],
+    ["plus15", "2028-01-15"], ["plus23", "2028-09-15"]]){
+    if (!await modal.count()){ await page.evaluate(() => { location.hash = "#/settings"; }); await open("task-a"); }
+    await modal.locator(`[data-history-jump="${date}"]`).click();
+    await page.locator("#v2OneTimePanel").waitFor({ state: "visible" });
+    assert.equal(await modal.count(), 0);
+    assert.match(await page.locator("#v2OneTimePanel").innerText(), new RegExp(id));
+    assert.equal(await page.locator(`#months [data-date-iso="${date}"] [data-v2-root-occurrence-id="${id}"]`).count(), 1);
+    await page.locator("[data-v2-panel-close]").click();
+  }
+  // A reachable date alone is insufficient: retain history if its root is absent.
+  await page.evaluate(() => { location.hash = "#/settings"; }); await open("task-a");
+  await page.evaluate(() => {
+    window.__mhistOriginalCalendar = renderCalendar;
+    window.renderCalendar = () => { __mhistOriginalCalendar(); document.querySelectorAll('[data-v2-root-occurrence-id="scheduled"]').forEach(node => node.remove()); };
+  });
+  await modal.locator('[data-history-jump="2026-10-21"]').nth(1).click();
+  await page.waitForFunction(() => document.querySelector('[data-history-navigation-status]')?.textContent.includes("could not be reached"));
+  assert.equal(await modal.isVisible(), true); assert.equal(await page.locator("#v2OneTimePanel").count(), 0);
+  await page.evaluate(() => { window.renderCalendar = window.__mhistOriginalCalendar; delete window.__mhistOriginalCalendar; });
+  await modal.locator("[data-close]").click();
+  assert.deepEqual(await cloud(), navigationBefore);
   assert.deepEqual(pageErrors, []); assert.deepEqual(consoleErrors, []);
 });
