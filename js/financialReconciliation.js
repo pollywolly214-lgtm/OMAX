@@ -1,13 +1,13 @@
 (function(root, factory){
-  const api = factory(root?.OMAXCuttingJobSourceEvidence || (typeof require === "function" ? require("./cuttingJobSourceEvidence") : null));
+  const api = factory(root?.OMAXCuttingJobSourceEvidence || (typeof require === "function" ? require("./cuttingJobSourceEvidence") : null), root?.normalizePurchaseHistory || (typeof require === "function" ? require("./purchaseFinancials").normalizePurchaseHistory : null));
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.OMAXFinancialReconciliation = api;
-})(typeof window === "undefined" ? null : window, function(sourceVerifier){
+})(typeof window === "undefined" ? null : window, function(sourceVerifier, normalizePurchases){
   "use strict";
   const ranges = Object.freeze([
     {key:"7d", label:"1W", days:7}, {key:"30d", label:"1M", days:30},
     {key:"90d", label:"3M", days:90}, {key:"182d", label:"6M", days:182},
-    {key:"365d", label:"1Y", days:365}, {key:"all", label:"All-Time", days:null}
+    {key:"365d", label:"1Y", days:365}, {key:"ytd", label:"YTD", days:null}, {key:"all", label:"All-Time", days:null}
   ].map(Object.freeze));
   function dateKey(value){
     if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}(?:$|T)/.test(value)) return null;
@@ -21,6 +21,7 @@
     const endISO = dateKey(today);
     if (!endISO) throw new Error("A valid financial analysis date is required.");
     let startISO = null;
+    if (option.key === "ytd") startISO = endISO.slice(0,4) + "-01-01";
     if (option.days){
       const start = new Date(endISO + "T00:00:00Z");
       start.setUTCDate(start.getUTCDate() - option.days + 1);
@@ -262,12 +263,13 @@
     }
     maintenance.knownSubtotal = maintenance.recordedInputs + maintenance.estimated;
     const purchases = {count:0,total:0,incomplete:0,invalidDates:0};
-    for (const week of purchaseWeeks) for (const row of Array.isArray(week?.rows) ? week.rows : []){
+    for (const entry of normalizePurchases(purchaseWeeks)){
+      const {row} = entry;
       if (!row || !String(row.purchased || "").trim()) continue;
       const key = dateKey(row.date);
       if (!key){purchases.invalidDates++;continue;}
       if (!inPeriod(key,window)) continue;
-      if (typeof purchaseFinancials !== "function" || !valid(row.cost,true) || !valid(row.qty,true)
+      if (entry.identityConflict || entry.costIncomplete || typeof purchaseFinancials !== "function" || !valid(row.cost,true) || !valid(row.qty,true)
         || [row.shipping,row.tax].some(value=>present(value) && !valid(value,true))){purchases.incomplete++;continue;}
       const value = purchaseFinancials(row).totalSpend;
       if (!Number.isFinite(value)){purchases.incomplete++;continue;}
@@ -306,6 +308,32 @@
       comparison:{rate:45,runtimeExpense:hours==null ? null : hours*45,
         net:finiteSum(rows,row=>profit({...row.job,costRate:45}).totalProfit)}};
   }
+  // Evidence subsets overlap. They describe the unchanged selected population,
+  // never an exclusion, a replacement rate, or proof of realized revenue.
+  function modelEvidence(report){
+    const rows=report.rows, sum=list=>({count:list.length,grossRevenue:finiteSum(list,row=>row.profit.revenue),
+      adjustedRevenue:finiteSum(list,row=>row.profit.adjustedRevenue),runtimeExpense:finiteSum(list,row=>row.profit.cuttingCost),
+      materialExpense:finiteSum(list,row=>row.profit.materialExpense),net:finiteSum(list,row=>row.profit.totalProfit)});
+    const has=(row,...codes)=>row.issues.some(issue=>codes.includes(issue.code));
+    const ranked=rows.slice().sort((a,b)=>b.profit.totalProfit-a.profit.totalProfit || a.index-b.index);
+    const top=ranked.slice(0,5),topIndexes=new Set(top.map(row=>row.index));
+    const shoes=ranked.filter(row=>/shoes?/i.test(row.name)).slice(0,5),shoeIndexes=new Set(shoes.map(row=>row.index));
+    const bridge=report.totals.revenue==null || report.totals.runtimeExpense==null || report.totals.materialExpense==null
+      ? null : report.totals.revenue-report.totals.runtimeExpense-report.totals.materialExpense;
+    return {readOnly:true,overlappingSubsets:true,
+      reconciliation:{summedNet:report.totals.net,componentNet:bridge,difference:bridge==null || report.totals.net==null ? null : report.totals.net-bridge},
+      topContributors:top,topFive:sum(top),remaining:sum(rows.filter(row=>!topIndexes.has(row.index))),
+      topShoeJobs:shoes,topShoes:sum(shoes),remainingAfterShoes:sum(rows.filter(row=>!shoeIndexes.has(row.index))),
+      subsets:{potentialDuplicates:sum(rows.filter(row=>has(row,"possible_cross_import_duplicate"))),
+        imported:sum(rows.filter(row=>row.job.import_event_id || row.job.importProvenance)),
+        sourceBlankRates:sum(rows.filter(row=>has(row,"import_charge_rate_per_hr","import_cost_rate_per_hr"))),
+        canonicalFallbackRates:sum(rows.filter(row=>has(row,"default_chargeRate","default_costRate"))),
+        missingFailure:sum(rows.filter(row=>has(row,"missing_failure"))),
+        missingMaterial:sum(rows.filter(row=>has(row,"missing_material_cost","missing_material_qty"))),
+        zeroMaterial:sum(rows.filter(row=>row.profit.materialExpense===0)),
+        durationDifference:sum(rows.filter(row=>row.profit.duration?.estimateActualDifference)),
+        warnings:sum(rows.filter(row=>row.issues.length))}};
+  }
   function coverage(jobs,costs,currentRate){
     const blockers = [];
     const ratedJobs = jobs.rows.filter(row=>row.profit.costRate>0).length;
@@ -326,7 +354,7 @@
     const jobs = selectJobs(completedJobs,{profit,range,today});
     const costs = expenses(jobs.window,maintenanceRows,purchaseWeeks,purchaseFinancials);
     const financialCoverage = coverage(jobs,costs,currentRate);
-    return {...jobs,...costs,rateAnalysis:rateAnalysis(jobs.rows,profit,jobs.totals),coverage:financialCoverage,
+    return {...jobs,...costs,rateAnalysis:rateAnalysis(jobs.rows,profit,jobs.totals),modelEvidence:modelEvidence(jobs),coverage:financialCoverage,
       forecast:{annual:Number.isFinite(forecast.annual)?forecast.annual:null,
       remaining:Number.isFinite(forecast.remaining)?forecast.remaining:null,year:forecast.year,
       method:forecast.method,sourceWindow:forecast.sourceWindow},
@@ -334,5 +362,5 @@
       netWaterjetImpact:null,coverageReason:financialCoverage.blockers.join(" ")};
   }
   const verifySources=async report=>({...report,sourceVerification:await sourceVerifier.verify(report)});
-  return Object.freeze({ranges,dateKey,localToday,period,selectJobs,expenses,build,audit,sourceStatuses,pairKey,sourceReview,reviewSourcePairs,previewExclusions,verifySources});
+  return Object.freeze({ranges,dateKey,localToday,period,selectJobs,expenses,build,modelEvidence,audit,sourceStatuses,pairKey,sourceReview,reviewSourcePairs,previewExclusions,verifySources});
 });

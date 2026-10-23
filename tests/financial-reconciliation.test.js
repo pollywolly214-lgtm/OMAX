@@ -100,7 +100,7 @@ test("actual final Cost cards use shared report and withhold combined result; na
   c.report.rows[0].name='<img src=x onerror=alert(1)>';
   c.report.rateAnalysis.rows[0].name=c.report.rows[0].name;
   const before=JSON.stringify(c.report);const html=c.renderFinancialBreakdown(c.report);
-  assert.match(html,/Modeled Cutting Job Net Profit/);assert.match(html,/\$539\.00/);assert.match(html,/-\$50\.00/);assert.match(html,/Runtime cost rates can already include maintenance/);
+  assert.match(html,/Modeled Cutting Job Contribution/);assert.match(html,/\$539\.00/);assert.match(html,/-\$50\.00/);assert.match(html,/Runtime cost rates can already include maintenance/);
   assert.ok(!html.includes('<img'));assert.match(html,/&lt;img/);assert.equal(JSON.stringify(c.report),before);
   const overview=c.viewCosts({financialReconciliation:c.report,summaryCards:c.summaryCards});
   assert.match(overview,/data-financial-period/);assert.match(overview,/data-open-financial-breakdown/);
@@ -161,10 +161,10 @@ test("expense presentation is negative once, projections stay separate and a tru
   assert.equal(card("recordedPurchases").value,"-30");assert.equal(card("maintenanceExpenses").value,"-55");assert.equal(card("maintenanceForecast").value,"-9000");
   assert.match(card("maintenanceForecast").hint,/projected expense -2000/);assert.equal(c.report.purchases.total,30);assert.equal(c.report.maintenance.knownSubtotal,55);
   near(c.report.totals.net,-135);assert.equal(c.report.netWaterjetImpact,null);assert.equal(c.report.coverage.interimNet,-135);
-  assert.match(card("combinedImpact").hint,/Interim modeled Cutting Job Net Profit: -135/);
+  assert.match(card("combinedImpact").hint,/Interim modeled Cutting Job Contribution: -135/);
   vm.runInContext(section(views,"function renderFinancialPeriodControl(","function cuttingJobFinancialTone("),c);
   const html=c.renderFinancialBreakdown(c.report);assert.match(html,/-\$30\.00/);assert.match(html,/-\$55\.00/);assert.match(html,/-\$9,000\.00/);
-  assert.match(html,/Interim modeled Cutting Job Net Profit: -\$135\.00/);assert.match(html,/No maintenance, purchase subtotal or annual forecast is subtracted again/);
+  assert.match(html,/Interim modeled Cutting Job Contribution: -\$135\.00/);assert.match(html,/No maintenance, purchase subtotal or annual forecast is subtracted again/);
   assert.match(html,/class="financial-profit job-finance-negative" data-financial-metric="net">-\$135\.00/);
   const empty=c.renderFinancialBreakdown(build({completedJobs:[]}));
   assert.match(empty,/data-financial-metric="runtime">\$0\.00/);assert.match(empty,/data-financial-metric="material">\$0\.00/);
@@ -187,7 +187,7 @@ test("maintenance forecast uses calendar days across Chicago DST rather than cou
   try{
     class FixedDate extends Date{constructor(...args){super(...(args.length?args:[2026,9,20,12]));}}
     const c=vm.createContext({Date:FixedDate,window:{costForecastProjectionMethod:"run_rate",costForecastProjectionWindow:"ytd"},
-      centralMaintenanceRows:[{occurredAt:new FixedDate(2026,9,1),totalCost:300}],JOB_DAY_MS:86400000});
+      completeCentralMaintenanceRows:[{occurredAt:new FixedDate(2026,9,1),totalCost:300}],JOB_DAY_MS:86400000});
     vm.runInContext(computations,c);
     vm.runInContext(section(renderers,"  const today = new Date();\n  today.setHours(0, 0, 0, 0);\n  const currentYear =","  const timeframeDefsCentral =")+
       ";this.result={elapsedDays,daysRemaining,projectionWindowDays,annualForecastFromCentral};",c);
@@ -233,7 +233,7 @@ test("previous card preserves the original descending-date summation order",()=>
 
 test("expense/hour numerator and denominator both use financial-period series, preserving separate cuts",()=>{
   const c=vm.createContext({window:{OMAXFinancialReconciliation:api},financialJobSelection:{window:api.period("7d","2026-10-20")},
-    maintenanceSeriesFromDataTable:[],maintenanceSeries:[],totalSpendSeries:[{dateISO:"2026-10-20",value:-36},{dateISO:"2025-01-01",value:-10000}],
+    maintenanceCostReconciliation:[],maintenanceSeriesFromDataTable:[],maintenanceSeries:[],totalSpendSeries:[{dateISO:"2026-10-20",value:-36},{dateISO:"2025-01-01",value:-10000}],
     jobSeries:[{dateISO:"2026-10-20",jobId:"one",cutHours:2,value:165},{dateISO:"2026-10-20",jobId:"two",cutHours:2,value:165},
       {dateISO:"2025-01-01",jobId:"old",cutHours:1000,value:1}],ymd:()=>"2026-10-20"});
   vm.runInContext(section(renderers,"  const financialPeriod =","  // Read the loaded source records,")+

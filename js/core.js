@@ -329,7 +329,9 @@ function normalizeDateISO(value){
     if (!trimmed) return null;
     if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)){
       const parsed = parseDateLocal(trimmed);
-      return parsed ? ymd(parsed) : null;
+      // A validated business-date string is already canonical. Re-parsing its
+      // local midnight through ymd's UTC Date path shifts it in positive zones.
+      return parsed ? trimmed : null;
     }
     const parsed = parseDateLocal(trimmed);
     if (parsed) return ymd(parsed);
@@ -2741,7 +2743,9 @@ function startWorkspaceStateListener(){
   const hasActiveBlockingOverlay = ()=>{
     if (typeof document === "undefined") return false;
     const activeEl = document.activeElement;
-    if (isEditableTarget(activeEl)) return true;
+    // The financial period is a read-only view preference. Leaving its SELECT
+    // focused must not indefinitely hide already-adopted historical snapshots.
+    if (isEditableTarget(activeEl) && !activeEl.matches?.("[data-financial-period]")) return true;
     const body = document.body;
     if (body?.classList?.contains("modal-open")) return true;
     if (body?.classList?.contains("forecast-modal-open")) return true;

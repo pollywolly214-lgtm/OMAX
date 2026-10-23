@@ -175,7 +175,7 @@ test("verified save/reload retains PO and tax metadata and rejects corrupted rea
 });
 test("Central Data Table and chart/average source include mixed lines exactly once without multiplying shipping",()=>{
   const newRows=orders.plan({...draft([item("a",10,3),item("b",70)],20),tax:"5",poNumber:"0012-AB"}).rows;
-  const context=vm.createContext({...financials,window:{receiptTrackerWeeks:[{key:"2026-W42",rows:[{date:"2026-10-15",purchased:"Legacy",cost:2,qty:1,shipping:1},...newRows]}]},toHistoryDateKey:value=>value,parseDateLocal:value=>new Date(value+"T00:00:00")});
+  const context=vm.createContext({...financials,window:{OMAXFinancialReconciliation:require("../js/financialReconciliation"),receiptTrackerWeeks:[{key:"2026-W42",rows:[{date:"2026-10-15",purchased:"Legacy",cost:2,qty:1,shipping:1},...newRows]}]},toHistoryDateKey:value=>value,parseDateLocal:value=>new Date(value+"T00:00:00")});
   const formatter=renderers.slice(renderers.indexOf("  const formatterCurrency ="),renderers.indexOf("  const formatHours",renderers.indexOf("  const formatterCurrency =")));
   const a=renderers.indexOf("  const purchaseDataTableRows ="),b=renderers.indexOf("  const maintenanceTrendRows",a);
   vm.runInContext(formatter+renderers.slice(a,b)+";this.table=purchaseDataTable;this.series=totalSpendSeries",context);
