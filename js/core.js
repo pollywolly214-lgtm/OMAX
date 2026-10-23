@@ -104,6 +104,7 @@ function canWriteCloud(reason = "cloud save"){
   if (typeof window === "undefined") return false;
   if (isRecoveryMode()) return blockCloudSave(`${reason}; Recovery Mode is read-only, cloud saves disabled.`);
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
+  if (window.maintenanceTaskDeletionApi?.isBusy() && reason !== "maintenance task deletion") return blockCloudSave(`${reason}; a maintenance task archive transfer is being verified.`);
   if (window.__pumpBaselineMutationPending && reason !== "pump baseline commit") return blockCloudSave(`${reason}; a pump baseline is being verified.`);
   if (window.__pumpLogMutationPending && reason !== "pump log commit") return blockCloudSave(`${reason}; a pump log is being verified.`);
   if (window.__waterQualityMutationPending && reason !== "water quality commit") return blockCloudSave(`${reason}; a water-quality check is being verified.`);
@@ -897,7 +898,7 @@ function compactStateForStorage(raw, { forBackup = false } = {}){
   snap.totalHistory = Array.isArray(snap.totalHistory) ? snap.totalHistory.slice() : [];
   snap.dailyCutHours = Array.isArray(snap.dailyCutHours) ? snap.dailyCutHours.slice(-365) : [];
   if (forBackup){
-    delete snap.deletedItems;
+    snap.deletedItems = (snap.deletedItems || []).filter(entry=>entry?.type === "task");
     delete snap.opportunityRollups;
   }
   return sanitizeValueForStorage(snap, { dropHeavyHistory: forBackup });
@@ -911,6 +912,7 @@ function buildEmergencyBackup(snapshot){
     totalHistory: Array.isArray(src.totalHistory) ? src.totalHistory : [],
     tasksInterval: Array.isArray(src.tasksInterval) ? src.tasksInterval : [],
     tasksAsReq: Array.isArray(src.tasksAsReq) ? src.tasksAsReq : [],
+    deletedItems: (src.deletedItems || []).filter(entry=>entry?.type === "task"),
     maintenanceTasksV2: Array.isArray(src.maintenanceTasksV2) ? src.maintenanceTasksV2 : [],
     maintenanceCalendarInstancesV2: Array.isArray(src.maintenanceCalendarInstancesV2) ? src.maintenanceCalendarInstancesV2 : [],
     maintenanceOccurrencesV2: Array.isArray(src.maintenanceOccurrencesV2) ? src.maintenanceOccurrencesV2 : [],
@@ -944,6 +946,7 @@ function buildTinyCriticalBackup(snapshot, { quiet = false } = {}){
     schema: src.schema || APP_SCHEMA,
     tasksInterval: src.tasksInterval || [],
     tasksAsReq: src.tasksAsReq || [],
+    deletedItems: (src.deletedItems || []).filter(entry=>entry?.type === "task"),
     maintenanceTasksV2: src.maintenanceTasksV2 || [],
     maintenanceOccurrencesV2: src.maintenanceOccurrencesV2 || [],
     maintenanceCalendarInstancesV2: src.maintenanceCalendarInstancesV2 || [],
@@ -2776,7 +2779,7 @@ function startWorkspaceStateListener(){
     if (!snap || !snap.exists){ enterMissingStateRecovery(); return; }
     if (isRecoveryMode()) return;
     // The isolated material writer owns adoption until SERVER verification.
-    if (window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending || window.__pumpLogMutationPending || window.__waterQualityMutationPending) return;
+    if (window.maintenanceTaskDeletionApi?.isBusy() || window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending || window.__pumpLogMutationPending || window.__waterQualityMutationPending) return;
     if (snap.metadata && snap.metadata.hasPendingWrites) return;
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
@@ -2984,7 +2987,7 @@ function normalizeDeletedItem(raw){
   const deletedDate = deletedISO ? new Date(deletedISO) : new Date();
   const deletedMs = deletedDate.getTime();
   if (!Number.isFinite(deletedMs)) return null;
-  if ((Date.now() - deletedMs) > TRASH_RETENTION_MS) return null;
+  if (type !== "task" && (Date.now() - deletedMs) > TRASH_RETENTION_MS) return null;
   const payload = cloneStructured(raw.payload);
   const meta = raw.meta && typeof raw.meta === "object" ? { ...raw.meta } : {};
   const label = typeof raw.label === "string" && raw.label ? raw.label : buildTrashLabel(type, payload, meta);
@@ -3069,7 +3072,7 @@ function restoreLinkedDeletedEntry(predicate, options = {}){
     }
     if (!matches) continue;
     const result = applyRestoreByType(entry, i);
-    if (!result) return null;
+    if (!result || result.blocked) return null;
     if (!result.handledRemoval){
       deletedItems.splice(i, 1);
       window.deletedItems = deletedItems;
@@ -3103,7 +3106,7 @@ function listDeletedItems(){
   purgeExpiredDeletedItems();
   return deletedItems.map(entry => ({
     ...entry,
-    expiresAt: computeTrashExpiresAt(entry.deletedAt)
+    expiresAt: entry.type === "task" ? null : computeTrashExpiresAt(entry.deletedAt)
   }));
 }
 
@@ -3130,6 +3133,7 @@ function removeDeletedItem(id){
   purgeExpiredDeletedItems();
   const idx = deletedItems.findIndex(entry => entry && entry.id === id);
   if (idx < 0) return false;
+  if (deletedItems[idx].type === "task") return false; // Historical identity and evidence are retained indefinitely.
   deletedItems.splice(idx, 1);
   window.deletedItems = deletedItems;
   try { saveCloudDebounced(); }
@@ -3142,78 +3146,8 @@ function applyRestoreByType(entry, index){
   const { type, payload, meta } = entry;
   const clone = cloneStructured(payload) || {};
   switch (type) {
-    case "task": {
-      const mode = meta && meta.list === "asreq" ? "asreq" : "interval";
-      let targetList = mode === "asreq" ? tasksAsReq : tasksInterval;
-      if (!Array.isArray(targetList)) targetList = [];
-      if (!clone.id) clone.id = genId(clone.name || "task");
-      const existing = new Set(targetList.filter(Boolean).map(item => String(item.id)));
-      while (existing.has(String(clone.id))){
-        clone.id = genId(clone.name || "task");
-      }
-      clone.mode = mode;
-      if (clone.parentTask == null) clone.parentTask = null;
-      if (clone.cat === undefined) clone.cat = clone.cat ?? null;
-      if (typeof window._maintOrderCounter !== "number" || !Number.isFinite(window._maintOrderCounter)){
-        window._maintOrderCounter = 0;
-      }
-      const orderVal = Number(clone.order);
-      if (Number.isFinite(orderVal)){
-        if (orderVal > window._maintOrderCounter) window._maintOrderCounter = orderVal;
-      } else {
-        clone.order = ++window._maintOrderCounter;
-      }
-      targetList.push(clone);
-      if (mode === "asreq"){ tasksAsReq = targetList; window.tasksAsReq = tasksAsReq; }
-      else { tasksInterval = targetList; window.tasksInterval = tasksInterval; }
-
-      const taskIdStr = String(clone.id);
-      const candidateInventoryIds = [];
-      if (clone.inventoryId != null) candidateInventoryIds.push(clone.inventoryId);
-      if (meta && meta.inventoryId != null) candidateInventoryIds.push(meta.inventoryId);
-      if (meta && meta.linkedInventoryId != null) candidateInventoryIds.push(meta.linkedInventoryId);
-      if (meta && meta.inventoryIdOriginal != null) candidateInventoryIds.push(meta.inventoryIdOriginal);
-
-      let linkedItem = null;
-      for (const candidate of candidateInventoryIds){
-        if (candidate == null) continue;
-        linkedItem = findInventoryByIdLocal(candidate);
-        if (linkedItem) break;
-      }
-      if (!linkedItem && Array.isArray(inventory)){
-        linkedItem = inventory.find(item => item && String(item.linkedTaskId || "") === taskIdStr) || null;
-      }
-      if (!linkedItem){
-        const restored = restoreLinkedDeletedEntry(entryCandidate => {
-          if (!entryCandidate || entryCandidate.type !== "inventory") return false;
-          const payload = entryCandidate.payload || {};
-          const metaInfo = entryCandidate.meta || {};
-          const payloadId = payload.id != null ? String(payload.id) : "";
-          const metaId = metaInfo.originalId != null ? String(metaInfo.originalId) : "";
-          const metaLinked = metaInfo.linkedTaskId != null ? String(metaInfo.linkedTaskId) : "";
-          const payloadLinked = payload.linkedTaskId != null ? String(payload.linkedTaskId) : "";
-          for (const candidate of candidateInventoryIds){
-            const candidateId = candidate != null ? String(candidate) : "";
-            if (candidateId && (payloadId === candidateId || metaId === candidateId)) return true;
-          }
-          if (metaLinked && metaLinked === taskIdStr) return true;
-          if (payloadLinked && payloadLinked === taskIdStr) return true;
-          return false;
-        }, { skipId: entry.id });
-        if (restored && restored.result && restored.result.value && restored.result.value.type === "inventory"){
-          linkedItem = findInventoryByIdLocal(restored.result.value.id) || null;
-          if (!linkedItem && Array.isArray(inventory)){
-            linkedItem = inventory.find(item => item && String(item.linkedTaskId || "") === taskIdStr) || null;
-          }
-        }
-      }
-      if (linkedItem){
-        ensureTaskInventoryLink(clone, linkedItem);
-      }else{
-        clone.inventoryId = null;
-      }
-      return { handledRemoval: false, value: { type: "task", id: clone.id } };
-    }
+    case "task":
+      return { blocked:true, error:"Use the confirmed Restore action in Deleted History to restore this task with its exact original ID and verified history." };
     case "inventory": {
       if (!Array.isArray(inventory)) inventory = [];
       if (!clone.id) clone.id = genId(clone.name || "item");
@@ -3405,7 +3339,15 @@ function applyRestoreByType(entry, index){
   }
 }
 
-function restoreDeletedItem(id){
+function restoreDeletedItem(id, confirmedArchiveKey){
+  // Task restoration never enters the local, ID-regenerating generic path or
+  // its linked-entry helper. Confirmation is bound to the exact archived entry.
+  if(window.deletedItems?.some(entry=>entry?.id===id&&entry.type==="task")){
+    const api=window.maintenanceTaskDeletionApi;
+    if(!api?.restore)return Promise.resolve({ok:false,error:"Verified task restoration is unavailable."});
+    return api.restore(id,confirmedArchiveKey).then(result=>({...result,ok:result.saved===true&&result.verified===true,
+      value:result.verified?{type:"task",id:result.archiveEvidence.payload.id}:undefined}));
+  }
   refreshGlobalCollections();
   const candidate = deletedItems.find(entry=>entry && entry.id === id);
   if (candidate && ["job","completed-job"].includes(candidate.type)){
@@ -4635,7 +4577,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
   const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
     &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
-  if (!identityAuthorized && !canWriteCloud(options.waterQualityMutation ? "water quality commit" : options.pumpLogMutation ? "pump log commit" : options.pumpBaselineMutation ? "pump baseline commit" : "authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
+  if (!identityAuthorized && !canWriteCloud(options.maintenanceTaskDeletionProof ? "maintenance task deletion" : options.waterQualityMutation ? "water quality commit" : options.pumpLogMutation ? "pump log commit" : options.pumpBaselineMutation ? "pump baseline commit" : "authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
   const deletionProof = options.cuttingJobDeletionProof;
   if (deletionProof){
     if (!cuttingJobDeletionProofs.has(deletionProof) || cuttingJobDeletionTransactions.has(deletionProof)) return cuttingJobDeletionFailure("Cutting-job deletion transaction authorization is invalid or already used.");
@@ -4694,10 +4636,16 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
           ||!window.CuttingJobDateEditing?.dateKey(after[0]?.completedAtISO)||typeof options.validatePreparedState!=="function"||options.validatePreparedState(JSON.parse(JSON.stringify(pending)))!==true)
           throw Object.assign(new Error("Completion must preserve the exact job in completed history."),{definite:true,code:"cutting_job_completion_rejected"});
       }
-      const safetyRemote = completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote, pending, deletionProof));
-      const safetyBaseline = completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...window.__lastLoadedCloudState, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : window.__lastLoadedCloudState, pending, deletionProof));
+      const taskDeletionSafety=baseline=>options.maintenanceTaskDeletionProof ? window.OMAXMaintenanceTaskArchive.safetyBaseline(baseline,pending,options.maintenanceTaskDeletionProof) : baseline;
+      const safetyRemote = taskDeletionSafety(completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote, pending, deletionProof)));
+      const safetyBaseline = taskDeletionSafety(completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...window.__lastLoadedCloudState, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : window.__lastLoadedCloudState, pending, deletionProof)));
       const backup = readLocalStateBackup();
-      const safetyBackup = completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup, pending, deletionProof));
+      const matchingTaskBackup=options.maintenanceTaskDeletionProof && backup
+        && Number(backup.syncMeta?.rev || 0)<=Number(remote.syncMeta?.rev || 0)
+        && ["tasksInterval","tasksAsReq","deletedItems"].every(field=>stableStringifyForIntegrity(backup[field])===stableStringifyForIntegrity(remote[field]));
+      const safetyBackup = matchingTaskBackup
+        ? {...backup,tasksInterval:pending.tasksInterval,tasksAsReq:pending.tasksAsReq,deletedItems:pending.deletedItems}
+        : completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup, pending, deletionProof));
       const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:completionSafetyBaseline(buildWindowProtectedStateForCoverage()), coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
       if (preflight.blocked || detectDangerousProtectedFieldReduction(safetyRemote, pending).blocked) throw Object.assign(new Error("Protected-state transaction preflight blocked the write."), { definite:true, code:"protected_preflight_blocked" });
       if (remote.pumpEff?.baselineHistory !== undefined || pending.pumpEff?.baselineHistory !== undefined){
@@ -4864,6 +4812,51 @@ async function readInventoryMaterialAuthoritativeState(){
     return {revision:state?.syncMeta?.rev ?? null, state, path:docRef.path, readSource:"backend_transaction"};
   });
 }
+
+// Task deletion/restoration writes one exact archive transfer through the CAS writer.
+async function readMaintenanceTaskAuthoritativeState(target){
+  if(!cuttingJobSaveTargetIsCurrent(target)||typeof target.db?.runTransaction!=="function")
+    throw Error("Task archive transfer requires an independent backend transaction read for the captured workspace.");
+  // Firebase v8 server-get can still return a stale listener view after commit.
+  // Read only through the captured backend; never fall back to document.get.
+  const state=await target.db.runTransaction(async transaction=>{
+    if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Task archive transfer workspace/backend changed before verification.");
+    const snapshot=await transaction.get(target.docRef);
+    if((snapshot?.ref?.path && snapshot.ref.path!==target.path)
+      ||(snapshot?.ref?.firestore && snapshot.ref.firestore!==target.db))throw Error("Task archive transfer verification returned another document/backend.");
+    return snapshot?.exists ? snapshot.data() : null;
+  });
+  if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Task archive transfer workspace/backend changed during verification.");
+  return state;
+}
+
+window.maintenanceTaskDeletionApi=window.OMAXMaintenanceTaskArchive?.createApi({
+  canWrite:()=>FB.ready&&Boolean(FB.user)&&!hasPendingLocalChanges&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete
+    &&!isRecoveryMode()&&!window.__autosaveDisabled&&!window.__localBackupOnlyMode&&!isVercelPreviewRuntime()
+    &&!window.__lastIndeterminateSave&&!window.__globalIdentityVerificationPending&&!window.__lastImportVerificationError&&!window.__lastInventoryIdentityRepairError
+    &&!window.__inventoryMaterialMutationPending&&!window.inventoryMaterialMutationApi?.isBusy()&&!window.isCuttingJobChronologySaving?.()
+    &&!window.__pumpBaselineMutationPending&&!window.__pumpLogMutationPending&&!window.__waterQualityMutationPending,
+  settle:async()=>{await cloudSaveQueue;if(hasPendingLocalChanges)throw Error("Other changes are still pending. Wait for their save before moving a task.");},
+  captureTarget:captureCuttingJobSaveTarget,targetIsCurrent:cuttingJobSaveTargetIsCurrent,
+  version:()=>({revision:window.__loadedCloudRevisionForSaveGuard,mutation:lastLocalMutationAt}),
+  read:readMaintenanceTaskAuthoritativeState,
+  matches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)&&stableStringify(source)===stableStringify(getCuttingJobChronologyLocalState()),
+  newId:()=>genId("trash_task"),
+  validate:state=>checkAuthoritativeIdentityIntegrity(state).valid===true,
+  write:(next,expectedRevision,validateSourceState,validatePreparedState,maintenanceTaskDeletionProof,target)=>{
+    const queued=cloudSaveQueue.then(()=>writeAuthoritativeStateSnapshot(next,{merge:true},{expectedRevision,validateSourceState,validatePreparedState,maintenanceTaskDeletionProof,authoritativeTarget:target}));
+    cloudSaveQueue=queued.catch(()=>{});return queued;
+  },
+  adopt:(state,proof)=>{
+    const adopted=adoptIdentityCheckedAuthoritativeState(state)?.recovery===false;
+    if(adopted){
+      // Existing local Data Flow log only; no second save or owning archive.
+      try{recordDataFlowEvent(`maintenance task ${proof.operation==="restore"?"restore":"delete"}: ${proof.id}; archive: ${proof.trash.id}`,state);}catch(error){console.warn("Task transfer log unavailable",error);}
+    }
+    return adopted;
+  },
+  suspend:result=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastIndeterminateSave=window.__lastIndeterminateSave||result;renderRecoveryDiagnosticsPanel();}
+});
 
 let inventoryMaterialOwnedSuspension = null;
 const inventoryMaterialMutationApi = window.OMAXInventoryMaterialMutations?.createApi({
@@ -5668,8 +5661,8 @@ function buildMaintenanceCompatibilityStream(){
       });
     });
   };
-  const intervalList = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
-  const asReqList = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  const intervalList = window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"interval") || window.tasksInterval || [];
+  const asReqList = window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"asreq") || window.tasksAsReq || [];
   intervalList.forEach(task => {
     const row = normalizeLegacyMaintenanceTask(task, "interval");
     if (row) out.push(row);
@@ -5689,7 +5682,7 @@ function buildMaintenanceCompatibilityStream(){
     if (!task || typeof task !== "object") return;
     const id = task.id != null ? String(task.id) : "";
     if (!id) return;
-    taskMap.set(id, task);
+    taskMap.set(id, window.OMAXMaintenanceTaskArchive?.displayTask(window,task) || task);
   });
   const instanceMap = new Map();
   v2Instances.forEach(instance => {
@@ -5819,7 +5812,7 @@ function buildMaintenanceCompatibilityStream(){
       streamId: `v2-occurrence:${rootOccurrenceId}`,
       sourceSystem: "v2",
       taskId: taskId || null,
-      taskName: String(firstEvent.taskName || (task && task.name) || "").trim(),
+      taskName: String((window.OMAXMaintenanceTaskArchive?.deletedFor(window,task) && task.name) || firstEvent.taskName || (task && task.name) || "").trim(),
       instanceId: instanceId || null,
       occurrenceId: rootOccurrenceId,
       rootOccurrenceId,

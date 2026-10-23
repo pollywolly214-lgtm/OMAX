@@ -8413,6 +8413,10 @@ function openJobsEditor(jobId){
 
 function openSettingsAndReveal(target){
   if (target == null) return;
+  const archivedId=typeof target === "object" ? String(target.id ?? target.taskId ?? target.targetId ?? target.primary ?? "") : String(target);
+  if(window.OMAXMaintenanceTaskArchive?.resolve(window,archivedId).status === "archived"){
+    alert("This task was removed from Maintenance Settings. Its archived definition is read-only; history and linked records are preserved.");return;
+  }
   let primaryId = "";
   const fallbackIds = [];
   const addFallback = (value)=>{
@@ -10516,6 +10520,7 @@ function renderSettings(){
       const params = new URLSearchParams(query);
       const taskId = (params.get("taskId") || "").trim();
       if (taskId){
+        if(window.OMAXMaintenanceTaskArchive?.resolve(window,taskId).status === "archived") toast("This task was removed from Maintenance Settings. Its archived definition is read-only; history and linked records are preserved.");
         window.pendingMaintenanceFocus = { taskIds: [taskId] };
       }
     }
@@ -10527,7 +10532,7 @@ function renderSettings(){
   // Previously this only ran if BOTH lists were empty. That prevented legacy
   // tasks from ever loading when just one list was non-empty. This version
   // hydrates each list independently: Firestore → old localStorage → defaults.
-  if (!window.__hydratedTasksOnce && (window.tasksInterval.length === 0 || window.tasksAsReq.length === 0)){
+  if (!window.__initialAdoptComplete && !window.__hydratedTasksOnce && (window.tasksInterval.length === 0 || window.tasksAsReq.length === 0)){
     window.__hydratedTasksOnce = true;
 
     (async ()=>{
@@ -11691,112 +11696,13 @@ function renderSettings(){
     updateTaskFieldRelevance(details);
   });
 
-  const promptRemoveLinkedInventory = async (task, matches)=>{
-    const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
-    const taskLabel = task && task.name ? `"${task.name}"` : "this task";
-    if (!list.length){
-      const confirmed = await showConfirmModal({
-        title: "Remove maintenance task?",
-        message: `Delete ${taskLabel}? This will remove it from every page.`,
-        cancelText: "Cancel",
-        confirmText: "Delete task",
-        confirmVariant: "danger"
-      });
-      return confirmed ? "task" : "cancel";
-    }
-
-    const count = list.length;
-    const baseMessage = count === 1
-      ? `Delete ${taskLabel}? It's linked to the inventory item below.`
-      : `Delete ${taskLabel}? It's linked to these ${count} inventory items.`;
-    const choice = await showConfirmChoices({
-      title: "Remove maintenance task?",
-      message: `${baseMessage} Choose what to delete.`,
-      items: list.map(item => item && item.name ? item.name : "Unnamed inventory item"),
-      cancelText: "Cancel",
-      confirmText: "Delete task & inventory",
-      confirmVariant: "danger",
-      secondaryText: "Delete task only",
-      secondaryVariant: "secondary"
-    });
-    if (choice === "confirm") return "both";
-    if (choice === "secondary") return "task";
-    return "cancel";
-  };
-
   async function deleteMaintenanceTaskMeta(meta, options){
-    if (!meta) return false;
-    const opts = options || {};
-    const task = meta.task;
-    const presetMatches = Array.isArray(opts.matches) ? opts.matches : null;
-    const matches = presetMatches ? presetMatches : findInventoryMatchesForTask(task);
-    let removeInventoryAlso = opts.deleteInventory === true;
-    if (!opts.skipPrompt){
-      const decision = await promptRemoveLinkedInventory(task, matches);
-      if (decision === "cancel") return false;
-      removeInventoryAlso = decision === "both";
-    }
-    try {
-      if (typeof recordDeletedItem === "function"){
-        const deletionMeta = {
-          list: meta.mode,
-          cat: task?.cat ?? null,
-          parentTask: task?.parentTask ?? null,
-          inventoryId: task?.inventoryId ?? null,
-          linkedInventoryId: task?.inventoryId ?? null,
-          inventoryIdOriginal: task?.inventoryId ?? null
-        };
-        recordDeletedItem("task", task, deletionMeta);
-      }
-    } catch (err) {
-      console.warn("Failed to record deleted task", err);
-    }
-
-    const id = meta.task?.id != null ? String(meta.task.id) : null;
-    window.tasksInterval.forEach(t => { if (String(t?.parentTask) === String(id)) t.parentTask = null; });
-    window.tasksAsReq.forEach(t => { if (String(t?.parentTask) === String(id)) t.parentTask = null; });
-    if (meta.mode === 'interval'){
-      window.tasksInterval = window.tasksInterval.filter(t => {
-        if (!t) return true;
-        if (String(t.id) === String(id)) return false;
-        if (isInstanceTask(t) && String(t.templateId) === String(id)) return false;
-        return true;
-      });
-    }else{
-      window.tasksAsReq = window.tasksAsReq.filter(t => {
-        if (!t) return true;
-        if (String(t.id) === String(id)) return false;
-        if (isInstanceTask(t) && String(t.templateId) === String(id)) return false;
-        return true;
-      });
-    }
-    persist();
-
-    let inventoryChanged = false;
-    if (removeInventoryAlso && matches.length){
-      const processed = new Set();
-      for (const item of matches){
-        if (!item || item.id == null) continue;
-        const key = String(item.id);
-        if (processed.has(key)) continue;
-        processed.add(key);
-        const deleted = await deleteInventoryItem(item.id, {
-          skipConfirm: true,
-          linkedTaskId: task?.id ?? null,
-          suppressRender: true,
-          suppressToast: true
-        });
-        if (deleted) inventoryChanged = true;
-      }
-    }
-
-    if (!opts.suppressRender){
-      renderSettings();
-    }
-    if (inventoryChanged){
-      const hash = (location.hash || "#").toLowerCase();
-      if (hash === "#/inventory" || hash === "#inventory"){ renderInventory(); }
-    }
+    if (!meta?.task?.id) return false;
+    const confirmed=await showConfirmModal({title:"Remove maintenance task?",message:'Remove "'+(meta.task.name||"Maintenance task")+'" from Maintenance Settings? Its history, existing calendar entries, purchases, and linked inventory will be preserved. New repeat projections stop while archived. You can restore its exact original identity from Deleted History.',confirmText:"Delete task",confirmVariant:"danger"});
+    if (!confirmed) return false;
+    const result=await window.maintenanceTaskDeletionApi?.remove(meta.task.id);
+    if (!result?.saved || !result.verified){alert(result?.error || "Unable to verify maintenance task deletion.");return false;}
+    if (!options?.suppressRender) renderSettings();
     return true;
   }
 
@@ -13648,7 +13554,7 @@ function getPurchaseOrderApi(){
     validate:(source, order)=>{
       for (const row of order.rows){
         if (row.inventoryItemId && (source.inventory || []).filter(item=> item.id === row.inventoryItemId).length !== 1) throw Error("An inventory link changed. Review the item before saving.");
-        if (row.taskId && [...(source.tasksInterval || []), ...(source.tasksAsReq || [])].filter(item=> item.id === row.taskId).length !== 1) throw Error("An item task link changed. Review before saving.");
+        if (row.taskId && !["active","archived"].includes(window.OMAXMaintenanceTaskArchive?.resolve(source,row.taskId).status)) throw Error("An item task link changed. Review before saving.");
       }
       if (scanAuthoritativeCutFileContent(order).contaminated) throw Error("The order contains unsupported file content.");
     },
@@ -15107,7 +15013,8 @@ function renderCosts(){
         const key = String(name || "").trim().toLowerCase();
         if (!key) return null;
         const tasks = (Array.isArray(window.tasksInterval) ? window.tasksInterval : []).concat(Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []);
-        return tasks.find(task => String(task?.name || "").trim().toLowerCase() === key) || null;
+        const matches=tasks.filter(task => String(task?.name || "").trim().toLowerCase() === key);
+        return matches.length===1 ? matches[0] : null;
       }
       // Shared with the legacy editor: task PN/price take precedence over inventory.
       function purchaseSelection(name){
@@ -16059,7 +15966,7 @@ const appendEmptyRow = (focusFirst = false)=>{
               tr.querySelector('[data-order-field="partNumber"]').value = String(inv.pn || "");
               if (Number.isFinite(Number(inv.price))) tr.querySelector('[data-order-field="cost"]').value = String(inv.price);
             }
-            const item = draft.items.find(item=> item.lineId === tr.dataset.orderLine), task = inv && (findTaskByNameExact(inv.name) || [...(window.tasksInterval || []), ...(window.tasksAsReq || [])].find(task=> String(task.id) === String(inv.linkedTaskId)));
+            const item = draft.items.find(item=> item.lineId === tr.dataset.orderLine), task = inv && (inv.linkedTaskId ? window.OMAXMaintenanceTaskArchive?.resolve(window,String(inv.linkedTaskId)).task : findTaskByNameExact(inv.name));
             if (task) item.taskId = String(task.id); else delete item.taskId;
           }
           updatePreview();
@@ -16988,6 +16895,10 @@ const appendEmptyRow = (focusFirst = false)=>{
 
   const handleHistoryItemActivation = async (element)=>{
     if (!(element instanceof HTMLElement)) return;
+    const archivedId=element.getAttribute("data-original-task-id") || element.getAttribute("data-task-id");
+    if(window.OMAXMaintenanceTaskArchive?.resolve(window,archivedId).status === "archived"){
+      notifyHistoryMessage(element,"This task was removed from Maintenance Settings. Its archived definition is read-only; history and linked records are preserved.");return;
+    }
     const taskId = element.getAttribute("data-task-id");
     const originalTaskId = element.getAttribute("data-original-task-id");
     const taskMode = element.getAttribute("data-task-mode") || "interval";
@@ -17785,8 +17696,8 @@ function computeCostModel(){
 
   // Legacy read helpers normalize occurrence maps in place. Report on shallow
   // task copies so calculating a rate cannot alter the new-job save baseline.
-  const intervalTasksAll = Array.isArray(tasksInterval) ? tasksInterval.map(task=>task && ({...task})) : [];
-  const asReqTasksAll = Array.isArray(tasksAsReq) ? tasksAsReq.map(task=>task && ({...task})) : [];
+  const intervalTasksAll = (window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"interval") || tasksInterval || []).map(task=>task && ({...task}));
+  const asReqTasksAll = (window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"asreq") || tasksAsReq || []).map(task=>task && ({...task}));
   const { calendarCostByTemplateId } = buildCalendarMaintenanceHistory({
     intervalTasks: intervalTasksAll,
     asReqTasks: asReqTasksAll
@@ -17861,9 +17772,7 @@ function computeCostModel(){
   const dedupeEquivalentTasks = list => {
     const seen = new Set();
     return list.filter(task => {
-      const identity = typeof window.normalizeMaintenanceTaskIdentity === "function"
-        ? window.normalizeMaintenanceTaskIdentity(task).equivalentKey
-        : String(task?.id || "");
+      const identity = String(task?.id || "");
       if (seen.has(identity)) return false;
       seen.add(identity);
       return true;
@@ -19166,7 +19075,7 @@ function computeCostModel(){
     let taskLabel = null;
     if (fallbackTask){
       if (missingTask){
-        taskLabel = `Restore deleted task: ${fallbackTask.name}`;
+        taskLabel = `Deleted task (read-only): ${fallbackTask.name}`;
       }else if (extraCount > 0){
         taskLabel = `Linked task: ${fallbackTask.name} (+${extraCount} more)`;
       }
@@ -26873,7 +26782,7 @@ function computeDeletedItemsModel(){
     typeLabel: describeDeletedType(entry.type),
     deletedAt: formatTrashDate(entry.deletedAt),
     deletedAtISO: entry.deletedAt || null,
-    expiresAt: entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
+    expiresAt: entry.type === "task" ? "Retained for history" : entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
     expiresAtISO: entry.expiresAt || null
   }));
   const filtered = searchTerm
@@ -26901,21 +26810,45 @@ function renderDeletedItems(options){
   const model = computeDeletedItemsModel();
   content.innerHTML = viewDeletedItems(model);
 
+  content.querySelectorAll("[data-trash-delete]").forEach(btn=>{
+    if(window.deletedItems?.some(entry=>entry.id===btn.getAttribute("data-trash-delete")&&entry.type==="task")){
+      btn.disabled=true;btn.title="Maintenance history cannot be permanently deleted.";
+    }
+  });
+  content.querySelectorAll("[data-trash-restore]").forEach(btn=>{
+    const entry=window.deletedItems?.find(entry=>entry.id===btn.getAttribute("data-trash-restore")&&entry.type==="task");
+    if(!entry)return;
+    try{
+      window.OMAXMaintenanceTaskArchive.planRestore(window.__lastLoadedCloudState,entry.id);
+      const blocked=!window.maintenanceTaskDeletionApi?.isAvailable();
+      btn.disabled=Boolean(blocked);btn.title=blocked?"Restoration is unavailable while writes are blocked or a task transfer is saving.":"Restore the original task and its history using the same ID.";
+    }catch(error){btn.disabled=true;btn.title=String(error.message||error);}
+  });
   content.querySelectorAll("[data-trash-restore]").forEach(btn => {
-    btn.addEventListener("click", ()=>{
+    btn.addEventListener("click", async ()=>{
       const id = btn.getAttribute("data-trash-restore");
       if (!id) return;
       try {
-        const result = typeof restoreDeletedItem === "function" ? restoreDeletedItem(id) : { ok:false };
+        const entry=window.deletedItems?.find(entry=>entry.id===id&&entry.type==="task");
+        let confirmedArchiveKey;
+        if(entry){
+          confirmedArchiveKey=window.OMAXMaintenanceTaskArchive.key(entry);
+          const confirmed=await showConfirmModal({title:"Restore maintenance task?",message:'Restore "'+(entry.payload?.name||"Maintenance task")+'" to Maintenance Settings with its original ID, history, and inventory links? Existing repeat schedules will resume projecting from their saved rules. Stored event dates and recurrence rules will stay unchanged.',confirmText:"Restore task"});
+          if(!confirmed)return;
+          btn.disabled=true;btn.textContent="Verifying…";
+        }
+        const result = typeof restoreDeletedItem === "function" ? await restoreDeletedItem(id,confirmedArchiveKey) : { ok:false };
         if (result && result.ok){
-          toast("Item restored");
+          toast(entry?"Maintenance task restored and verified":"Item restored");
           renderDeletedItems();
         } else {
           alert(result?.error || "Unable to restore this item.");
+          if(entry)renderDeletedItems();
         }
       } catch (err) {
         console.error("Restore failed", err);
         alert("Unable to restore this item.");
+        renderDeletedItems();
       }
     });
   });
