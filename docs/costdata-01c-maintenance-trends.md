@@ -1,5 +1,10 @@
 # COSTDATA-01C maintenance source reconciliation
 
+Follow-up: [COSTDATA-01D main integration](costdata-01d-main-integration.md)
+brings main's archive-aware identity validation and MDEL protections into this
+branch and verifies the combined paths. The findings below describe the 01C
+baseline; the follow-up records current integration results and live limits.
+
 Investigation baseline: PR #519, `codex/costdata-01a`, commit `bbf7e4e`.
 Read-only investigation completed before implementation, 2026-10-22.
 No authenticated production tab or Firebase data source is available. The

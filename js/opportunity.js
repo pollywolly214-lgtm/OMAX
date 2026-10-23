@@ -246,7 +246,7 @@
 
   function buildTaskLookup(){
     const lookup = new Map();
-    const lists = [window.tasksInterval, window.tasksAsReq];
+    const lists = [window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"interval") || window.tasksInterval, window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"asreq") || window.tasksAsReq];
     lists.forEach(list => {
       if (!Array.isArray(list)) return;
       list.forEach(task => {
@@ -338,8 +338,8 @@
     const events = [];
     const seen = new Set();
     const templateLookup = buildTaskLookup();
-    collectTaskEvents(window.tasksInterval, events, seen, templateLookup);
-    collectTaskEvents(window.tasksAsReq, events, seen, templateLookup);
+    collectTaskEvents(window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"interval") || window.tasksInterval, events, seen, templateLookup);
+    collectTaskEvents(window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"asreq") || window.tasksAsReq, events, seen, templateLookup);
     const fromISO = toISODate(from);
     const toISO = toISODate(to);
     return events.filter(event => {

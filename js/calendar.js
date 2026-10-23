@@ -429,6 +429,8 @@ function makeV2RepeatOccurrenceSlotKey(instanceId, occurrenceIndex){
 }
 
 function projectV2RepeatDates(instance, maxCount = 3){
+  const definition=(window.maintenanceTasksV2 || []).find(task=>task?.id===instance?.taskId);
+  if(window.OMAXMaintenanceTaskArchive?.deletedFor(window,definition || instance)) return [];
   const rule = instance && instance.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : null;
   if (!rule || !rule.enabled) return [];
   const basis = String(rule.basis || "").toLowerCase();
@@ -1960,6 +1962,12 @@ function completeTask(taskId){
 }
 
 function showTaskBubble(taskId, anchor, options = {}){
+  const archived=window.OMAXMaintenanceTaskArchive?.resolve(window,String(taskId));
+  if(archived?.status === "archived"){
+    const bubble=makeBubble(anchor);
+    bubble.textContent=(archived.task.name || "Maintenance task")+" — Deleted. This task was removed from Maintenance Settings. Its archived definition is read-only; history and linked records are preserved.";
+    return;
+  }
   const statusHint = options.status || anchor?.getAttribute("data-cal-status") || null;
   const modeHint = options.mode || anchor?.getAttribute("data-cal-mode") || null;
   const dateHint = options.dateISO || anchor?.getAttribute("data-cal-date") || anchor?.closest(".day")?.dataset.dateIso || null;
@@ -2859,29 +2867,6 @@ function restoreCriticalIntervalTasks(){
   if (!tasks.length) return false;
   const targets = new Set(["mixing_tube_rotation", "jewel_nozzle_clean", "pump_rebuild", "pump_tube_noz_filter"]);
   let changed = false;
-  const deleted = Array.isArray(window.deletedItems) ? window.deletedItems : [];
-  const restoreFromTrash = (matchFn)=>{
-    if (typeof restoreDeletedItem !== "function") return false;
-    const entry = deleted.find(item => item && item.type === "task" && matchFn(String(item.payload?.id || "").toLowerCase(), String(item.payload?.name || "").toLowerCase()));
-    if (!entry || !entry.id) return false;
-    try {
-      const result = restoreDeletedItem(entry.id);
-      return Boolean(result && result.ok);
-    } catch (_err){
-      return false;
-    }
-  };
-  if (restoreFromTrash((id,name)=> id.includes("mixing_tube_rotation") || name.includes("mixing tube rotation"))) changed = true;
-  if (restoreFromTrash((id,name)=> id.includes("pump_tube_noz_filter") || (name.includes("mixing tube") && name.includes("replace")) || (name.includes("pump tube") && name.includes("nozzle filter")))) changed = true;
-  if (restoreFromTrash((id,name)=> id.includes("jewel_nozzle_clean") || (name.includes("jew") && name.includes("orifice") && name.includes("nozzle")))) changed = true;
-  const activePumpEquivalent = tasks.some(task => {
-    if (typeof window.normalizeMaintenanceTaskIdentity !== "function"){
-      return String(task?.name || "").trim().toLowerCase() === "pump rebuild" && String(task?.mode || "interval") === "interval" && Number(task?.interval) === 500;
-    }
-    return window.normalizeMaintenanceTaskIdentity(task).equivalentKey === "pump rebuild|interval|500";
-  });
-  // Recovery is by task identity/configuration, never by a deleted object's old ID.
-  if (!activePumpEquivalent && restoreFromTrash((id,name)=> id.includes("pump_rebuild") || (name.includes("pump") && name.includes("rebuild")))) changed = true;
   const matched = [];
   tasks.forEach(task => {
     if (!task) return;
@@ -3130,9 +3115,8 @@ function renderCalendar(){
     });
   }
 
-  const intervalTasks = Array.isArray(window.tasksInterval)
-    ? window.tasksInterval.filter(t => t && t.mode === "interval" && isInstanceTask(t))
-    : [];
+  const intervalTasks = (window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"interval") || window.tasksInterval || [])
+    .filter(t => t && t.mode === "interval" && (isInstanceTask(t) || t.archivedDefinition));
   const completedByTask = new Map();
   intervalTasks.forEach(t => {
     if (!t) return;
@@ -3191,6 +3175,7 @@ function renderCalendar(){
       // Checkpoint: hide legacy active calendar clutter; preserve task definitions and history data.
     });
 
+    if (t.archivedDefinition) return;
     const skipDates = new Set(completedKeys);
     manualDates.forEach(dateKey => skipDates.add(dateKey));
     removedSet.forEach(dateKey => skipDates.add(dateKey));
@@ -3219,7 +3204,7 @@ function renderCalendar(){
     }
   });
 
-  const asReqTasks = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  const asReqTasks = window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"asreq") || window.tasksAsReq || [];
   const hasLegacyHistoryEvidence = (task)=>{
     if (!task || typeof task !== "object") return false;
     if (Array.isArray(task.completedDates) && task.completedDates.some(Boolean)) return true;
@@ -3241,7 +3226,7 @@ function renderCalendar(){
     const recurrence = getTaskRecurrence(t);
     const templateLike = typeof isTemplateTask === "function" ? isTemplateTask(t) : (!t.templateId || String(t.templateId) === String(t.id));
     const shouldSuppressLegacySchedule = templateLike && !hasLegacyHistoryEvidence(t);
-    if (recurrence && recurrence.enabled && !shouldSuppressLegacySchedule){
+    if (!t.archivedDefinition && recurrence && recurrence.enabled && !shouldSuppressLegacySchedule){
       const skipDates = new Set(completedDates);
       if (manualKey) skipDates.add(manualKey);
       const projections = projectCalendarBasedOccurrences(t, recurrence, {
@@ -3262,7 +3247,7 @@ function renderCalendar(){
   const v2TaskLookup = new Map();
   (Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : []).forEach(entry => {
     if (!entry || entry.id == null) return;
-    v2TaskLookup.set(String(entry.id), entry);
+    v2TaskLookup.set(String(entry.id), window.OMAXMaintenanceTaskArchive?.displayTask(window,entry) || entry);
   });
   const v2InstanceLookup = new Map();
   (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []).forEach(entry => {
@@ -3397,7 +3382,7 @@ function renderCalendar(){
   });
   repeatHistoryLatest.forEach(({ entry }, rootId) => {
     const latestType = String(entry.eventType || "");
-    if (!["completed", "uncompleted", "note_set", "hours_set", "moved", "skipped", "removed"].includes(latestType)) return;
+    if (!["scheduled", "completed", "uncompleted", "note_set", "hours_set", "moved", "skipped", "removed"].includes(latestType)) return;
     const dateISO = normalizeDateKey(entry.effectiveDateISO || null) || String(rootId).split(":").slice(-1)[0];
     if (!dateISO) return;
     const instanceId = String(entry.instanceId || "");

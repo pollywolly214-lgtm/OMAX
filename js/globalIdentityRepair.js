@@ -48,6 +48,24 @@
     };
     for(const name of requiredIds)if(Object.hasOwn(state,name)&&!Array.isArray(state[name]))block(`${name} must be an array.`);
     discover(state);
+    // A task in existing Trash retains its exact historical identity. Admit
+    // only typed, dated, unambiguous archives, never a name or metadata-only ID.
+    for(const [index,entry]of (Array.isArray(state.deletedItems)?state.deletedItems:[]).entries()){
+      if(entry?.type!=="task")continue;
+      const payload=entry.payload,owner=byPath.get(pathText(["deletedItems",index,"payload"]));
+      const meta=entry.meta;
+      if(!valid(entry.id)||!payload||Array.isArray(payload)||!valid(payload.id)||!owner
+        ||typeof entry.deletedAt!=="string"||!Number.isFinite(Date.parse(entry.deletedAt))
+        ||(meta!==undefined&&(!meta||typeof meta!=="object"||Array.isArray(meta)))
+        ||(meta?.originalId!==undefined&&meta.originalId!==payload.id)
+        ||(meta?.list!==undefined&&!["interval","asreq"].includes(meta.list))
+        ||(meta?.list&&payload.mode&&meta.list!==payload.mode)){
+        block(`Invalid archived maintenance task at $.deletedItems[${index}].payload.`);continue;
+      }
+      owner.collection=meta?.list==="asreq"||payload.mode==="asreq"?"tasksAsReq":"tasksInterval";
+      owner.archived=true;
+      const legacy=byNamespace.get("legacyTasks")||[];legacy.push(owner);byNamespace.set("legacyTasks",legacy);
+    }
     plan.auditedCollections=Array.from(byNamespace,([collection,list])=>({collection,count:list.length,identityFields:[...new Set(list.map(record=>record.identityField))]}));
     for(const [ns,list]of byNamespace){
       const groups=new Map();for(const record of list)if(valid(record.id)){const group=groups.get(record.id)||[];group.push(record);groups.set(record.id,group);}
@@ -164,12 +182,12 @@
         supported.add(pathText(path));return;
       }
       if(value==null||value===""){if(required)block(`Required ${field} is absent at ${pathText(record.path)}.`);return;}
-      let options=lookup(name,value);
+      let options=name==="maintenanceTasks" ? [...lookup("legacyTasks",value),...lookup(taskCollection,value)] : lookup(name,value);
       if([taskCollection,instanceCollection,eventCollection].includes(name))options=options.filter(other=>other.logicalTask===record.logicalTask);
       if(name===instanceCollection&&record.instance)options=options.filter(other=>other===record.instance);
       if(name===eventCollection&&record.instance)options=options.filter(other=>other.instance===record.instance);
       if(options.length!==1){block(`Foreign key ${pathText(path)} has ${options.length} exact logical targets.`);return;}
-      const target=options[0];plan.references.push({path:pathText(path),target:pathText(target.path),value,proposedId:target.proposedId});supported.add(pathText(path));patch(path,value,target.proposedId);
+      const target=options[0];plan.references.push({path:pathText(path),target:pathText(target.path),value,proposedId:target.proposedId,...(target.archived?{resolution:"archived_task"}:{})});supported.add(pathText(path));patch(path,value,target.proposedId);
       if(name===eventCollection&&field==="rootOccurrenceId"&&target.row.rootOccurrenceId)block(`Occurrence root at ${pathText(path)} does not point to a base event.`);
       if(name===eventCollection&&field==="supersedesEventId"&&(!record.row.rootOccurrenceId||(target.row.rootOccurrenceId||target.id)!==record.row.rootOccurrenceId))block(`Supersedes event at ${pathText(path)} belongs to a different root chain.`);
       if(target.group)target.group.references.push(pathText(path));
@@ -193,6 +211,7 @@
       }
       if([taskCollection,instanceCollection,eventCollection].includes(collection))ref(record,"legacyTaskId","legacyTasks");
       if(collection==="inventory")ref(record,"linkedTaskId","legacyTasks");
+      if(![instanceCollection,eventCollection].includes(collection)&&Object.hasOwn(row,"taskId"))ref(record,"taskId","maintenanceTasks");
       if(["tasksInterval","tasksAsReq",taskCollection].includes(collection)){
         // Inventory duplicate references were proven by the PH-05 one-to-one
         // task/inventory correspondence; don't reinterpret them globally.
@@ -218,7 +237,7 @@
         else{supported.add(fieldPath);plan.references.push({path:fieldPath,target:pathText(ownerPath),value:canonical,proposedId:canonical});}
       }
       if(!Array.isArray(value)&&!byPath.has(pathText(path))){const record={row:value,path,collection:pathText(path)};
-        for(const [field,target]of [["inventoryId","inventory"],["inventoryItemId","inventory"],["linkedTaskId","legacyTasks"],["legacyTaskId","legacyTasks"],["jobId","jobs"],["requestId","orderRequests"]])if(Object.hasOwn(value,field))ref(record,field,target);
+        for(const [field,target]of [["inventoryId","inventory"],["inventoryItemId","inventory"],["linkedTaskId","legacyTasks"],["legacyTaskId","legacyTasks"],["taskId","maintenanceTasks"],["jobId","jobs"],["requestId","orderRequests"]])if(Object.hasOwn(value,field))ref(record,field,target);
       }
       for(const [name,child]of Object.entries(value))referenceWalk(child,[...path,Array.isArray(value)?Number(name):name]);
     };referenceWalk(state);
