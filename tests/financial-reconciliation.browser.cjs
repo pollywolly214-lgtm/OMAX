@@ -24,7 +24,7 @@ test(`CJE: financial UI reconciles periods without writes using only a disposabl
     const ref=FB.docRef,state=(await ref.get()).data();
     const base=(id,extra={})=>({id,cutNumber:`C${String(id).padStart(3,"0")}`,name:"Same project and cut",estimateHours:2,chargeRate:150,costRate:-60,
       materialCost:5,materialQty:3,failurePercent:0,cat:"project",projectNumber:"1254",completedAtISO:"2026-10-20",startISO:"2026-01-01",dueISO:"2026-10-20",priority:1,files:[],manualLogs:[],...extra});
-    state.cuttingJobs=[];state.completedCuttingJobs=[base("1"),base("2",{completedAtISO:"2026-10-01",estimateHours:2.8,chargeRate:200,costRate:-45,materialQty:2}),
+    state.cuttingJobs=[];state.completedCuttingJobs=[base("1",{actualHours:1}),base("2",{completedAtISO:"2026-10-01",estimateHours:2.8,chargeRate:200,costRate:-45,materialQty:2}),
       base("3",{completedAtISO:"2026-10-19",estimateHours:1,costRate:-25,materialQty:5,failurePercent:100}),base("4"),base("5",{completedAtISO:"2025-01-01",estimateHours:1000}),
       base("6",{completedAtISO:"2026-09-01",estimateHours:null,chargeRate:null,costRate:null,failurePercent:undefined}),base("7",{completedAtISO:"2026-10-21"})];
     state.jobFolders=[{id:"jobs_root",name:"All Jobs",parent:null,order:1},{id:"project",name:"1254 Project",projectNumber:"1254",parent:"jobs_root",order:2}];
@@ -60,6 +60,7 @@ test(`CJE: financial UI reconciles periods without writes using only a disposabl
   assert.equal(await popup.evaluate(el=>el.parentElement===document.body&&!el.closest('.dashboard-layout')),true);
   assert.equal(await page.locator('#costLayout [data-financial-breakdown]').count(),0);
   assert.equal(await card("combinedImpact").textContent(),"Unavailable");
+  assert.match(await page.locator('[data-card-key="cuttingJobs"]').textContent(),/Modeled Cutting Job Contribution/);
   for(const range of ["7d","30d","90d","182d","365d","all"]){
     await page.locator("#costFinancialPeriod").selectOption(range);
     const expected=await page.evaluate(()=>OMAXFinancialReconciliation.selectJobs(completedCuttingJobs,{profit:computeCuttingJobProfit,range:window.__cuttingFinancialRange,today:"2026-10-20"}).totals);
@@ -69,6 +70,10 @@ test(`CJE: financial UI reconciles periods without writes using only a disposabl
     assert.equal(await popup.evaluate(el=>el.matches(':modal')),true,'native top layer is above all cards');
     assert.equal(await popup.locator('[data-financial-metric="net"]').textContent(),formatted);
     assert.equal(await popup.locator('[data-financial-metric="count"]').textContent(),String(expected.count));
+    assert.match(await popup.locator('[data-financial-model-disclosure]').textContent(),/not verified sales, cash profit or total business profitability/);
+    assert.match(await popup.locator('[data-financial-model-contributors]').textContent(),/evidence subsets below overlap/);
+    assert.match(await popup.locator('[data-financial-model-contributors]').textContent(),/All records remain included/);
+    assert.doesNotMatch(await popup.locator('[data-financial-model-contributors]').textContent(),/-\$0\.00 difference/);
     assert.equal(await page.locator('#financialBreakdownPeriod').inputValue(),range);
     assert.equal(await page.locator('[data-close-financial-breakdown]:focus').count(),1);
     assert.match(await page.locator("[data-financial-breakdown]").textContent(),/Net Waterjet Financial Impact: Unavailable/);
@@ -122,8 +127,10 @@ test(`CJE: financial UI reconciles periods without writes using only a disposabl
   assert.equal(await popup.locator('[data-financial-metric="revenue"]').textContent(),'$600.00');
   assert.equal(await popup.locator('[data-financial-metric="runtime"]').textContent(),'-$265.00');
   assert.equal(await popup.locator('[data-financial-metric="material"]').textContent(),'-$55.00');
-  assert.match(breakdown,/Weighted runtime expense \/ job hour/);assert.match(breakdown,/Interim modeled Cutting Job Net Profit: \$280\.00/);
+  assert.match(breakdown,/Weighted runtime expense \/ job hour/);assert.match(breakdown,/Interim modeled Cutting Job Contribution: \$280\.00/);
   assert.match(breakdown,/Original import cells and current saved values can differ/);assert.match(breakdown,/Purchase spending is not allocated/);
+  assert.match(breakdown,/Recorded actual candidate: 1 hr; financial hours were not replaced/);
+  assert.equal(await page.evaluate(()=>computeCostModel().financialReconciliation.modelEvidence.subsets.durationDifference.count),1);
   const rate=await page.evaluate(()=>computeCostModel().cutCostFeedback);
   assert.equal(rate.valid,true);assert.equal(rate.actualCuttingHours,171);assert.ok(Math.abs(rate.cutCostPerHour-rate.maintenanceCostPerHour-rate.garnetCostPerHour)<1e-9);
   const bannerRate=await page.evaluate(()=>OMAXCutCostFeedbackUi.calculate());

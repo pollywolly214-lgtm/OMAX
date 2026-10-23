@@ -19645,8 +19645,8 @@ function computeCostModel(){
     : "No usage history yet. Log machine hours to estimate maintenance spend.";
   const jobEmpty = "Add cutting jobs with Hours Taken to build the efficiency tracker.";
 
-  const chartNote = "Historical tables, cards and series use the selected financial period; chart controls update that same period. Incomplete costs are excluded from chart amounts and known subtotals; missing history is not zero. Maintenance shows modeled event expense, purchases show recorded spending, and completed jobs show canonical net profit. These overlapping components are not added together. Weekly reports retain their own labeled week.";
-  const chartInfo = "Maintenance event expenses are drawn negative for comparison with job net profit. They may already be included in runtime cost rates. The chart does not establish a combined realized profit or loss.";
+  const chartNote = "Historical tables, cards and series use the selected financial period; chart controls update that same period. Incomplete costs are excluded from chart amounts and known subtotals; missing history is not zero. Maintenance shows modeled event expense, purchases show recorded spending, and completed jobs show modeled contribution from saved rates, not verified sales or business profit. These overlapping components are not added together. Weekly reports retain their own labeled week.";
+  const chartInfo = "Maintenance event expenses are drawn negative for comparison with modeled job contribution. They may already be included in runtime cost rates. The chart does not establish a combined realized profit or loss.";
 
   const orderSorted = orderHistory.slice().sort((a,b)=>{
     const aTime = new Date(a.resolvedAt || a.createdAt || 0).getTime();
@@ -19780,7 +19780,7 @@ function computeCostModel(){
       laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
       totalCostValue: Number(row?.totalCostValue) || 0,
       totalProfitValue: Number(row?.totalProfitValue) || 0,
-      formulaTitle: "Source: Central data table completed cutting jobs row. Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense.",
+      formulaTitle: "Source: Central data table completed cutting jobs row. Modeled contribution = Modeled job value × (1 - Failure % / 100) - Cutting cost - Material expense.",
       settingsLink: row?.settingsLink || ""
     }));
   const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
@@ -19808,12 +19808,12 @@ function computeCostModel(){
     totalNetGainLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
     averageNetGainLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
     sourceLabel: "Source: central data table completed cutting jobs rows.",
-    formulaLabel: "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense",
-    disclaimerLabel: "Uses central data table values only.",
+    formulaLabel: "Modeled contribution = Modeled job value × (1 - Failure % / 100) - Cutting cost - Material expense",
+    disclaimerLabel: "Uses central data table values only; rate-based estimate, not verified sales or business profit.",
     rows: efficiencyRows,
     emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
-  const efficiencyMathDetails = `Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
+  const efficiencyMathDetails = `Modeled contribution = Modeled job value × (1 - Failure % / 100) - Cutting cost - Material expense. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
   efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
   const totalCalcHours = efficiencyTotals.hours > 0 ? efficiencyTotals.hours : 0;
   const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.originalRevenue / totalCalcHours) : JOB_RATE_PER_HOUR;
@@ -20555,8 +20555,8 @@ function computeCostModel(){
   const financialTone = value => value == null || value === 0 ? "neutral" : value < 0 ? "negative" : "positive";
   const financialWindow = financialReconciliation.window.description;
   summaryCards.splice(0, summaryCards.length,
-    {key:"cuttingJobs",icon:"✂",title:"Cutting Job Net Profit",value:financialReconciliation.totals.count ? financialMoney(financialReconciliation.totals.net) : "No records",tone:financialTone(financialReconciliation.totals.net),
-      hint:`${financialReconciliation.totals.count} completed jobs · ${financialWindow}. Modeled using resolved financial hours and job rates. Loaded audit: ${financialReconciliation.audit.durationConflicts} duration reviews, ${financialReconciliation.audit.duplicateGroups.length} possible duplicate groups; all records retained. See Financial Breakdown.`},
+    {key:"cuttingJobs",icon:"✂",title:"Modeled Cutting Job Contribution",value:financialReconciliation.totals.count ? financialMoney(financialReconciliation.totals.net) : "No records",tone:financialTone(financialReconciliation.totals.net),
+      hint:`${financialReconciliation.totals.count} completed jobs · ${financialWindow}. Rate-based estimate, not verified sales or business profit. Missing failure/material inputs may use zero defaults; other operating costs are unallocated. Loaded audit: ${financialReconciliation.audit.durationConflicts} duration reviews, ${financialReconciliation.audit.duplicateGroups.length} possible duplicate groups; all records retained. See Financial Breakdown.`},
     {key:"recordedPurchases",icon:"$",title:"Recorded purchases",value:financialReconciliation.purchases.count ? financialExpense(financialReconciliation.purchases.total) : "Unavailable",tone:"negative",
       hint:`${financialWindow}. Purchase History spending; not all purchases are maintenance or verified payments. Shown separately.`},
     {key:"maintenanceExpenses",icon:"⚙",title:"Maintenance event costs",value:financialReconciliation.maintenance.count > financialReconciliation.maintenance.incomplete ? financialExpense(financialReconciliation.maintenance.knownSubtotal) : "Unavailable",tone:"negative",
@@ -20564,7 +20564,7 @@ function computeCostModel(){
     {key:"maintenanceForecast",icon:"↗",title:`Projected maintenance (${currentYear})`,value:financialExpense(annualForecastFromCentral),tone:"negative",
       hint:`Annual projected expense, not historical loss. Source: ${projectionWindowConfig.label}. Remaining-year projected expense ${financialExpense(remainderProjection)}.`},
     {key:"combinedImpact",icon:"Σ",title:"Net Waterjet Financial Impact",value:financialMoney(financialReconciliation.netWaterjetImpact),tone:"neutral",
-      hint:`Interim modeled Cutting Job Net Profit: ${financialMoney(financialReconciliation.coverage.interimNet)} · ${financialWindow}. Full net requires expense allocation and verified coverage; see Financial Breakdown.`}
+      hint:`Interim modeled Cutting Job Contribution: ${financialMoney(financialReconciliation.coverage.interimNet)} · ${financialWindow}. Full net requires expense allocation and verified coverage; see Financial Breakdown.`}
   );
   jobSummary.countLabel = `${financialReconciliation.totals.count} completed · ${financialWindow}`;
   jobSummary.totalLabel = financialMoney(financialReconciliation.totals.net);
