@@ -11698,7 +11698,7 @@ function renderSettings(){
 
   async function deleteMaintenanceTaskMeta(meta, options){
     if (!meta?.task?.id) return false;
-    const confirmed=await showConfirmModal({title:"Remove maintenance task?",message:'Remove "'+(meta.task.name||"Maintenance task")+'" from Maintenance Settings? Its history, existing calendar entries, purchases, and linked inventory will be preserved. The archived definition will be read-only.',confirmText:"Delete task",confirmVariant:"danger"});
+    const confirmed=await showConfirmModal({title:"Remove maintenance task?",message:'Remove "'+(meta.task.name||"Maintenance task")+'" from Maintenance Settings? Its history, existing calendar entries, purchases, and linked inventory will be preserved. New repeat projections stop while archived. You can restore its exact original identity from Deleted History.',confirmText:"Delete task",confirmVariant:"danger"});
     if (!confirmed) return false;
     const result=await window.maintenanceTaskDeletionApi?.remove(meta.task.id);
     if (!result?.saved || !result.verified){alert(result?.error || "Unable to verify maintenance task deletion.");return false;}
@@ -26810,27 +26810,45 @@ function renderDeletedItems(options){
   const model = computeDeletedItemsModel();
   content.innerHTML = viewDeletedItems(model);
 
-  content.querySelectorAll("[data-trash-restore], [data-trash-delete]").forEach(btn=>{
-    const id=btn.getAttribute("data-trash-restore") || btn.getAttribute("data-trash-delete");
-    if(window.deletedItems?.some(entry=>entry.id===id&&entry.type==="task")){
-      btn.disabled=true;btn.title="Read-only maintenance archive retained for historical identity and evidence.";
+  content.querySelectorAll("[data-trash-delete]").forEach(btn=>{
+    if(window.deletedItems?.some(entry=>entry.id===btn.getAttribute("data-trash-delete")&&entry.type==="task")){
+      btn.disabled=true;btn.title="Maintenance history cannot be permanently deleted.";
     }
   });
+  content.querySelectorAll("[data-trash-restore]").forEach(btn=>{
+    const entry=window.deletedItems?.find(entry=>entry.id===btn.getAttribute("data-trash-restore")&&entry.type==="task");
+    if(!entry)return;
+    try{
+      window.OMAXMaintenanceTaskArchive.planRestore(window.__lastLoadedCloudState,entry.id);
+      const blocked=!window.maintenanceTaskDeletionApi?.isAvailable();
+      btn.disabled=Boolean(blocked);btn.title=blocked?"Restoration is unavailable while writes are blocked or a task transfer is saving.":"Restore the original task and its history using the same ID.";
+    }catch(error){btn.disabled=true;btn.title=String(error.message||error);}
+  });
   content.querySelectorAll("[data-trash-restore]").forEach(btn => {
-    btn.addEventListener("click", ()=>{
+    btn.addEventListener("click", async ()=>{
       const id = btn.getAttribute("data-trash-restore");
       if (!id) return;
       try {
-        const result = typeof restoreDeletedItem === "function" ? restoreDeletedItem(id) : { ok:false };
+        const entry=window.deletedItems?.find(entry=>entry.id===id&&entry.type==="task");
+        let confirmedArchiveKey;
+        if(entry){
+          confirmedArchiveKey=window.OMAXMaintenanceTaskArchive.key(entry);
+          const confirmed=await showConfirmModal({title:"Restore maintenance task?",message:'Restore "'+(entry.payload?.name||"Maintenance task")+'" to Maintenance Settings with its original ID, history, and inventory links? Existing repeat schedules will resume projecting from their saved rules. Stored event dates and recurrence rules will stay unchanged.',confirmText:"Restore task"});
+          if(!confirmed)return;
+          btn.disabled=true;btn.textContent="Verifying…";
+        }
+        const result = typeof restoreDeletedItem === "function" ? await restoreDeletedItem(id,confirmedArchiveKey) : { ok:false };
         if (result && result.ok){
-          toast("Item restored");
+          toast(entry?"Maintenance task restored and verified":"Item restored");
           renderDeletedItems();
         } else {
           alert(result?.error || "Unable to restore this item.");
+          if(entry)renderDeletedItems();
         }
       } catch (err) {
         console.error("Restore failed", err);
         alert("Unable to restore this item.");
+        renderDeletedItems();
       }
     });
   });

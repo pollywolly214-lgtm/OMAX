@@ -1,5 +1,9 @@
 # MDEL-01A: Safe maintenance task deletion
 
+MDEL-01C follow-up: verified exact-ID restoration is now implemented. The
+read-only/deferred-restoration statements below describe the earlier 01A/01B
+scope. See [the current restoration audit and test report](MDEL-01C-exact-id-restoration.md).
+
 Maintenance Settings now moves exactly one task definition into the existing
 `deletedItems` collection while retaining its original ID and complete payload.
 Archived definitions are read-only in this version. Firebase remains authoritative.

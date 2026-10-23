@@ -104,7 +104,7 @@ function canWriteCloud(reason = "cloud save"){
   if (typeof window === "undefined") return false;
   if (isRecoveryMode()) return blockCloudSave(`${reason}; Recovery Mode is read-only, cloud saves disabled.`);
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
-  if (window.maintenanceTaskDeletionApi?.isBusy() && reason !== "maintenance task deletion") return blockCloudSave(`${reason}; a maintenance task deletion is being verified.`);
+  if (window.maintenanceTaskDeletionApi?.isBusy() && reason !== "maintenance task deletion") return blockCloudSave(`${reason}; a maintenance task archive transfer is being verified.`);
   if (window.__pumpBaselineMutationPending && reason !== "pump baseline commit") return blockCloudSave(`${reason}; a pump baseline is being verified.`);
   if (window.__pumpLogMutationPending && reason !== "pump log commit") return blockCloudSave(`${reason}; a pump log is being verified.`);
   if (window.__waterQualityMutationPending && reason !== "water quality commit") return blockCloudSave(`${reason}; a water-quality check is being verified.`);
@@ -3147,7 +3147,7 @@ function applyRestoreByType(entry, index){
   const clone = cloneStructured(payload) || {};
   switch (type) {
     case "task":
-      return { blocked:true, error:"This task was removed from Maintenance Settings. Its archived definition is read-only to preserve its original ID, history, and relationships." };
+      return { blocked:true, error:"Use the confirmed Restore action in Deleted History to restore this task with its exact original ID and verified history." };
     case "inventory": {
       if (!Array.isArray(inventory)) inventory = [];
       if (!clone.id) clone.id = genId(clone.name || "item");
@@ -3339,7 +3339,15 @@ function applyRestoreByType(entry, index){
   }
 }
 
-function restoreDeletedItem(id){
+function restoreDeletedItem(id, confirmedArchiveKey){
+  // Task restoration never enters the local, ID-regenerating generic path or
+  // its linked-entry helper. Confirmation is bound to the exact archived entry.
+  if(window.deletedItems?.some(entry=>entry?.id===id&&entry.type==="task")){
+    const api=window.maintenanceTaskDeletionApi;
+    if(!api?.restore)return Promise.resolve({ok:false,error:"Verified task restoration is unavailable."});
+    return api.restore(id,confirmedArchiveKey).then(result=>({...result,ok:result.saved===true&&result.verified===true,
+      value:result.verified?{type:"task",id:result.archiveEvidence.payload.id}:undefined}));
+  }
   refreshGlobalCollections();
   const candidate = deletedItems.find(entry=>entry && entry.id === id);
   if (candidate && ["job","completed-job"].includes(candidate.type)){
@@ -4805,37 +4813,48 @@ async function readInventoryMaterialAuthoritativeState(){
   });
 }
 
-// Task deletion writes one exact archive transfer through the shared CAS writer.
+// Task deletion/restoration writes one exact archive transfer through the CAS writer.
 async function readMaintenanceTaskAuthoritativeState(target){
   if(!cuttingJobSaveTargetIsCurrent(target)||typeof target.db?.runTransaction!=="function")
-    throw Error("Task deletion requires an independent backend transaction read for the captured workspace.");
+    throw Error("Task archive transfer requires an independent backend transaction read for the captured workspace.");
   // Firebase v8 server-get can still return a stale listener view after commit.
   // Read only through the captured backend; never fall back to document.get.
   const state=await target.db.runTransaction(async transaction=>{
-    if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Task deletion workspace/backend changed before verification.");
+    if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Task archive transfer workspace/backend changed before verification.");
     const snapshot=await transaction.get(target.docRef);
     if((snapshot?.ref?.path && snapshot.ref.path!==target.path)
-      ||(snapshot?.ref?.firestore && snapshot.ref.firestore!==target.db))throw Error("Task deletion verification returned another document/backend.");
+      ||(snapshot?.ref?.firestore && snapshot.ref.firestore!==target.db))throw Error("Task archive transfer verification returned another document/backend.");
     return snapshot?.exists ? snapshot.data() : null;
   });
-  if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Task deletion workspace/backend changed during verification.");
+  if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Task archive transfer workspace/backend changed during verification.");
   return state;
 }
 
 window.maintenanceTaskDeletionApi=window.OMAXMaintenanceTaskArchive?.createApi({
-  canWrite:()=>canWriteCloud("maintenance task deletion")&&FB.ready&&Boolean(FB.user)&&!isVercelPreviewRuntime()&&!window.__lastIndeterminateSave,
-  settle:async()=>{await cloudSaveQueue;if(hasPendingLocalChanges)throw Error("Other changes are still pending. Wait for their save before deleting a task.");},
+  canWrite:()=>FB.ready&&Boolean(FB.user)&&!hasPendingLocalChanges&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete
+    &&!isRecoveryMode()&&!window.__autosaveDisabled&&!window.__localBackupOnlyMode&&!isVercelPreviewRuntime()
+    &&!window.__lastIndeterminateSave&&!window.__globalIdentityVerificationPending&&!window.__lastImportVerificationError&&!window.__lastInventoryIdentityRepairError
+    &&!window.__inventoryMaterialMutationPending&&!window.inventoryMaterialMutationApi?.isBusy()&&!window.isCuttingJobChronologySaving?.()
+    &&!window.__pumpBaselineMutationPending&&!window.__pumpLogMutationPending&&!window.__waterQualityMutationPending,
+  settle:async()=>{await cloudSaveQueue;if(hasPendingLocalChanges)throw Error("Other changes are still pending. Wait for their save before moving a task.");},
   captureTarget:captureCuttingJobSaveTarget,targetIsCurrent:cuttingJobSaveTargetIsCurrent,
   version:()=>({revision:window.__loadedCloudRevisionForSaveGuard,mutation:lastLocalMutationAt}),
   read:readMaintenanceTaskAuthoritativeState,
   matches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)&&stableStringify(source)===stableStringify(getCuttingJobChronologyLocalState()),
   newId:()=>genId("trash_task"),
-  validate:state=>window.OMAXGlobalIdentityRepair?.integrity(state).valid===true&&!scanAuthoritativeCutFileContent(state).contaminated,
+  validate:state=>checkAuthoritativeIdentityIntegrity(state).valid===true,
   write:(next,expectedRevision,validateSourceState,validatePreparedState,maintenanceTaskDeletionProof,target)=>{
     const queued=cloudSaveQueue.then(()=>writeAuthoritativeStateSnapshot(next,{merge:true},{expectedRevision,validateSourceState,validatePreparedState,maintenanceTaskDeletionProof,authoritativeTarget:target}));
     cloudSaveQueue=queued.catch(()=>{});return queued;
   },
-  adopt:state=>adoptIdentityCheckedAuthoritativeState(state)?.recovery===false,
+  adopt:(state,proof)=>{
+    const adopted=adoptIdentityCheckedAuthoritativeState(state)?.recovery===false;
+    if(adopted){
+      // Existing local Data Flow log only; no second save or owning archive.
+      try{recordDataFlowEvent(`maintenance task ${proof.operation==="restore"?"restore":"delete"}: ${proof.id}; archive: ${proof.trash.id}`,state);}catch(error){console.warn("Task transfer log unavailable",error);}
+    }
+    return adopted;
+  },
   suspend:result=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastIndeterminateSave=window.__lastIndeterminateSave||result;renderRecoveryDiagnosticsPanel();}
 });
 

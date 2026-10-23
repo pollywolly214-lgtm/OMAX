@@ -36,49 +36,73 @@
     if(trash.meta.list!==(collection==="tasksAsReq"?"asreq":"interval"))throw Error("Archive task list does not match its source.");
     return {...clone(source),[collection]:clone(source[collection].filter(task=>task?.id!==id)),deletedItems:[clone(trash),...clone(source.deletedItems)]};
   }
+  function planRestore(source,archiveId){
+    if(!collections.every(name=>Array.isArray(source?.[name]))||!Array.isArray(source?.deletedItems))throw Error("Authoritative task lists and Trash are required.");
+    const matches=source.deletedItems.filter(entry=>entry?.id===archiveId),entry=matches[0],payload=entry?.payload,meta=entry?.meta;
+    const list=meta?.list??payload?.mode;
+    if(!canonical(archiveId)||matches.length!==1||entry?.type!=="task"||!payload||Array.isArray(payload)||!canonical(payload.id)
+      ||typeof entry.deletedAt!=="string"||!Number.isFinite(Date.parse(entry.deletedAt))
+      ||(meta!==undefined&&(!meta||typeof meta!=="object"||Array.isArray(meta)))
+      ||(meta?.originalId!==undefined&&meta.originalId!==payload.id)
+      ||!["interval","asreq"].includes(list)||(payload.mode!==undefined&&payload.mode!==list)
+      ||resolve(source,payload.id).status!=="archived")throw Error("Restore requires one valid archive with an exact original ID and unambiguous original task list; active/archived conflicts must be reviewed.");
+    const collection=list==="asreq"?"tasksAsReq":"tasksInterval";
+    return {...clone(source),[collection]:[...clone(source[collection]),clone(payload)],deletedItems:clone(source.deletedItems.filter(entry=>entry.id!==archiveId))};
+  }
   // This projection is available only to the isolated transaction after proving
-  // the entire state is exactly one intact definition-to-Trash transfer.
+  // the entire state is exactly one intact active/archive transfer.
   function safetyBaseline(source,pending,proof){
     if(!source||!proof)return source;
-    const expected=plan(source,proof.id,proof.trash);
+    const restoring=proof.operation==="restore";
+    if(restoring&&(proof.id!==proof.trash?.payload?.id||key(source.deletedItems?.find(entry=>entry?.id===proof.trash?.id))!==key(proof.trash)))throw Error("The confirmed task archive changed before restoration.");
+    const expected=restoring?planRestore(source,proof.trash.id):plan(source,proof.id,proof.trash);
     const withoutSync=state=>Object.fromEntries(Object.entries(state).filter(([name])=>name!=="syncMeta"));
-    if(key(withoutSync(expected))!==key(withoutSync(pending)))throw Error("Task deletion changed history, archive evidence, or unrelated data.");
+    if(key(withoutSync(expected))!==key(withoutSync(pending)))throw Error("Task archive transfer changed history, archive evidence, or unrelated data.");
     return {...source,tasksInterval:pending.tasksInterval,tasksAsReq:pending.tasksAsReq,deletedItems:pending.deletedItems};
   }
   function createApi(env){
     let busy=false;
-    return {isBusy:()=>busy,async remove(id){
-      if(busy||!env.canWrite())return {saved:false,error:"Task deletion is unavailable while changes are saving or Recovery Mode is active."};
+    async function transfer(id,confirmation){
+      const restoring=confirmation!==undefined,action=restoring?"restoration":"deletion";
+      if(restoring&&(typeof confirmation!=="string"||!confirmation))return {saved:false,error:"Confirm the exact archived task before restoration."};
+      if(busy||!env.canWrite())return {saved:false,error:`Task ${action} is unavailable while changes are saving or Recovery Mode is active.`};
       busy=true;let attempted=false;
       try{
         await env.settle();
         const target=env.captureTarget(),version=key(env.version());
         const source=await env.read(target);
-        if(!env.canWrite()||version!==key(env.version())||!env.matches(source))throw Error("Task deletion baseline changed. Reload/review before retrying.");
-        if(!env.validate(source))throw Error("Existing integrity issues require review before deleting a task.");
-        const task=resolve(source,id).task;
-        const list=source.tasksAsReq.some(row=>row?.id===id)?"asreq":"interval";
-        const trash={id:env.newId(),type:"task",payload:clone(task),meta:{list,originalId:id},label:"Maintenance task: "+(task?.name||"(unnamed task)"),deletedAt:new Date().toISOString()};
-        const next=plan(source,id,trash),proof={id,trash};
-        if(!env.validate(next))throw Error("The archived task does not pass integrity validation.");
+        if(!env.canWrite()||version!==key(env.version())||!env.matches(source))throw Error(`Task ${action} baseline changed. Reload/review before retrying.`);
+        if(!env.validate(source))throw Error("Existing integrity issues require review before moving a task.");
+        let trash,next,proof;
+        if(restoring){
+          trash=source.deletedItems.find(entry=>entry?.id===id);
+          if(key(trash)!==confirmation)throw Error("The confirmed task archive changed. Review it again before restoration.");
+          next=planRestore(source,id);proof={operation:"restore",id:trash.payload.id,trash:clone(trash)};
+        }else{
+          const task=resolve(source,id).task,list=source.tasksAsReq.some(row=>row?.id===id)?"asreq":"interval";
+          trash={id:env.newId(),type:"task",payload:clone(task),meta:{list,originalId:id},label:"Maintenance task: "+(task?.name||"(unnamed task)"),deletedAt:new Date().toISOString()};
+          next=plan(source,id,trash);proof={id,trash};
+        }
+        if(!env.validate(next))throw Error("The task transfer does not pass integrity validation.");
         const unchanged=()=>version===key(env.version())&&env.matches(source)&&env.targetIsCurrent(target);
         if(!unchanged())throw Error("Local task evidence changed before saving.");
         attempted=true;
-        const result=await env.write(clone(next),source.syncMeta.rev,remote=>unchanged()&&key(remote)===key(source),prepared=>key(prepared)===key(next),proof,target);
+        const result=await env.write(clone(next),source.syncMeta.rev,remote=>env.canWrite()&&unchanged()&&key(remote)===key(source)&&env.validate(remote),prepared=>key(prepared)===key(next)&&env.validate(prepared),proof,target);
         attempted=result.stateWriteAttempted===true;
         if(!result.saved){if(result.indeterminate)env.suspend(result);return result;}
         const actual=await env.read(target);
         if(!unchanged()||!result.committedState||key(actual)!==key(result.committedState)
-          ||key({...actual,syncMeta:source.syncMeta})!==key(next)||actual.syncMeta?.rev<=source.syncMeta.rev||!env.validate(actual))throw Error("Task deletion server verification failed; review before further saves.");
-        if(!env.canWrite())throw Error("Task deletion committed, but a separate write blocker prevents adoption; review before further saves.");
-        if(!env.adopt(actual))throw Error("Verified deletion could not be adopted safely.");
-        return {...result,verified:true};
+          ||key({...actual,syncMeta:source.syncMeta})!==key(next)||actual.syncMeta?.rev<=source.syncMeta.rev||!env.validate(actual))throw Error(`Task ${action} server verification failed; review before further saves.`);
+        if(!env.canWrite())throw Error(`Task ${action} committed, but a separate write blocker prevents adoption; review before further saves.`);
+        if(!env.adopt(actual,proof))throw Error(`Verified ${action} could not be adopted safely.`);
+        return {...result,verified:true,operation:restoring?"restore":"delete",archiveEvidence:clone(trash)};
       }catch(error){
         const result={saved:false,error:String(error?.message||error),indeterminate:attempted,stateWriteAttempted:attempted};
         if(attempted)env.suspend(result);
         return result;
       }finally{busy=false;}
-    }};
+    }
+    return {isBusy:()=>busy,isAvailable:()=>!busy&&env.canWrite(),remove:id=>transfer(id),restore:(id,confirmedArchiveKey)=>transfer(id,confirmedArchiveKey??null)};
   }
-  return Object.freeze({entries,mode,resolve,historicalTasks,deletedFor,displayTask,plan,safetyBaseline,createApi,key});
+  return Object.freeze({entries,mode,resolve,historicalTasks,deletedFor,displayTask,plan,planRestore,safetyBaseline,createApi,key});
 });
