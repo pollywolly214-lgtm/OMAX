@@ -1961,6 +1961,18 @@ function completeTask(taskId){
   }
 }
 
+async function archiveCalendarTask(task){
+  const api=window.maintenanceTaskDeletionApi;
+  if(!task?.id||!api?.isAvailable()){
+    toast("Task archiving is unavailable while changes are saving or Recovery Mode is active.");return false;
+  }
+  const confirmed=window.confirm?.(`Archive "${task.name||"Maintenance task"}" from Maintenance Settings? Its history, linked inventory, existing calendar entries and other task definitions will be preserved. New repeat projections stop while archived. Restore its original identity from Deleted History.`);
+  if(!confirmed)return false;
+  const result=await api.remove(task.id);
+  if(!result?.saved||!result.verified){toast(result?.error||"Task archive was not verified. Review before retrying.");return false;}
+  toast("Task archived");return true;
+}
+
 function showTaskBubble(taskId, anchor, options = {}){
   const archived=window.OMAXMaintenanceTaskArchive?.resolve(window,String(taskId));
   if(archived?.status === "archived"){
@@ -1974,6 +1986,9 @@ function showTaskBubble(taskId, anchor, options = {}){
   const meta = findCalendarTaskMeta(taskId);
   if (!meta || !meta.task) return;
   const task = meta.task;
+  // Legacy display helpers normalize their argument. Keep those changes in a
+  // view copy; action handlers below still use the exact original definition.
+  const viewTask = JSON.parse(JSON.stringify(task));
   const mode = modeHint === "asreq" || meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
   const dateKey = normalizeDateKey(dateHint);
   const displayDate = dateKey ? (()=>{
@@ -1984,9 +1999,9 @@ function showTaskBubble(taskId, anchor, options = {}){
   const completedSet = new Set(Array.isArray(task.completedDates) ? task.completedDates.map(normalizeDateKey).filter(Boolean) : []);
   const normalizedStatus = statusHint || (completedSet.has(dateKey || "") ? "completed" : (mode === "asreq" && dateKey ? "manual" : "due"));
   const isCompleted = !!(dateKey && completedSet.has(dateKey)) || normalizedStatus === "completed";
-  const history = typeof ensureTaskManualHistory === "function"
-    ? ensureTaskManualHistory(task)
-    : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+  // Opening a read-only popup must not normalize protected history. The archive
+  // coordinator compares this exact live evidence with the authoritative source.
+  const history = Array.isArray(task.manualHistory) ? task.manualHistory : [];
   const hasHistoryEntry = !!(dateKey && history.some(entry => entry && normalizeDateKey(entry.dateISO) === dateKey));
   const canRemoveOccurrence = !!dateKey;
   const canMarkComplete = !!dateKey && !isCompleted;
@@ -1996,10 +2011,10 @@ function showTaskBubble(taskId, anchor, options = {}){
     ? "Completed"
     : (normalizedStatus === "manual" ? "Scheduled" : normalizedStatus === "due" ? "Projected" : "Scheduled");
 
-  const occurrenceNote = dateKey ? getOccurrenceNoteForTask(task, dateKey) : "";
+  const occurrenceNote = dateKey ? getOccurrenceNoteForTask(viewTask, dateKey) : "";
 
   const hoursPerDay = configuredTaskDurationDailyHours();
-  const occurrenceHours = dateKey ? getOccurrenceHoursForTask(task, dateKey) : null;
+  const occurrenceHours = dateKey ? getOccurrenceHoursForTask(viewTask, dateKey) : null;
   
   const downtimeHours = (()=>{
     const raw = Number(task.downtimeHours);
@@ -2014,7 +2029,7 @@ function showTaskBubble(taskId, anchor, options = {}){
   }
   if (mode === "interval"){
     infoParts.push(`<div class="bubble-kv"><span>Interval:</span><span>${task.interval != null ? escapeHtml(`${task.interval} hrs`) : "—"}</span></div>`);
-    const nd = typeof nextDue === "function" ? nextDue(task) : null;
+    const nd = typeof nextDue === "function" ? nextDue(viewTask) : null;
     infoParts.push(`<div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusLabel)}</span></div>`);
     infoParts.push(`<div class="bubble-kv"><span>Last serviced:</span><span>${nd ? escapeHtml(`${nd.since.toFixed(0)} hrs ago`) : "—"}</span></div>`);
     infoParts.push(`<div class="bubble-kv"><span>Remain:</span><span>${nd ? escapeHtml(`${nd.remain.toFixed(0)} hrs`) : "—"}</span></div>`);
@@ -2045,7 +2060,7 @@ function showTaskBubble(taskId, anchor, options = {}){
   }
 
   const targetKey = dateKey || normalizeDateKey(new Date());
-  const recurrence = getTaskRecurrence(task);
+  const recurrence = getTaskRecurrence(viewTask);
   const isRepeating = Boolean(recurrence && recurrence.enabled);
 
   const actions = [];
@@ -2152,25 +2167,8 @@ function showTaskBubble(taskId, anchor, options = {}){
   b.querySelector("[data-bbl-remove-future]")?.addEventListener("click", ()=> runRemoveScope("future"));
   b.querySelector("[data-bbl-remove-all]")?.addEventListener("click", ()=> runRemoveScope("all"));
 
-  b.querySelector("[data-bbl-remove-task]")?.addEventListener("click", ()=>{
-    const templateId = task.templateId != null ? String(task.templateId) : String(task.id);
-    const list = mode === "asreq" ? (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []) : (Array.isArray(window.tasksInterval) ? window.tasksInterval : []);
-    const templateTask = list.find(item => item && String(item.id) === templateId && isTemplateTask(item)) || (isTemplateTask(task) ? task : null);
-    const label = templateTask?.name || task.name || "Task";
-    const confirmText = `Remove "${label}" from Maintenance Settings and delete all scheduled copies?`;
-    const shouldRemove = window.confirm ? window.confirm(confirmText) : true;
-    if (!shouldRemove) return;
-    try {
-      if (typeof recordDeletedItem === "function"){
-        recordDeletedItem("task", templateTask || task, { list: mode, cat: (templateTask || task)?.cat ?? null, parentTask: (templateTask || task)?.parentTask ?? null });
-      }
-    } catch (err) {
-      console.warn("Failed to record deleted task from calendar", err);
-    }
-    if (removeCalendarTaskFamily(meta)){
-      if (typeof saveCloudNow === "function") saveCloudNow();
-      else saveCloudDebounced();
-      toast("Task removed");
+  b.querySelector("[data-bbl-remove-task]")?.addEventListener("click", async ()=>{
+    if (await archiveCalendarTask(task)){
       hideBubble();
       rerenderCalendarKeepScroll();
     }
