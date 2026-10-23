@@ -919,12 +919,7 @@ function openV2RepeatPanel(view){
       return !["removed", "skipped"].includes(String(state.lifecycleStatus || ""));
     });
     if (!hasOtherVisible){
-      const askStop = window.confirm ? window.confirm("This is the last visible occurrence in this repeat chain. Remove it and stop repeat tracking?") : true;
-      if (!askStop) return;
-      logRepeatAction("removed_last_visible_stop");
-      appendPanelRootEvent("removed", { source:"repeat_panel" });
-      if (typeof window.stopV2RepeatTracking === "function") window.stopV2RepeatTracking(String(view.instanceId), String(view.taskId), String(view.originalDateISO), String(view.rootOccurrenceId), String(view.displayDateISO || view.dateISO));
-      closeV2OneTimePanel();
+      window.stopV2RepeatTracking?.(String(view.instanceId), String(view.taskId), String(view.originalDateISO));
       return;
     }
     const ok=window.confirm?window.confirm("Remove this repeat occurrence from calendar?"):true;
@@ -942,14 +937,9 @@ function openV2RepeatPanel(view){
 }
 
 window.stopV2RepeatTracking = (instanceId, taskId, dateISO, rootOccurrenceId = null, displayDateISO = null)=>{
-  const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
-  const inst = instances.find(entry => entry && String(entry.id || "") === String(instanceId));
-  if (!inst) return;
-  if (String(inst.status || "") === "stopped"){ toast("Repeat tracking already stopped"); return; }
-  inst.status = "stopped";
-  inst.stoppedAtISO = new Date().toISOString();
-  appendV2RepeatEventByRoot({ instanceId, taskId, rootOccurrenceId: rootOccurrenceId || makeV2RepeatOccurrenceKey(instanceId, dateISO), originalDateISO: dateISO, displayDateISO, eventType: "stopped", payload: { source: "repeat_panel" } });
-  toast("Repeat tracking stopped");
+  toast("Stopping a repeat schedule is temporarily unavailable: this legacy path cannot verify history preservation. Existing records are unchanged. Use the verified task archive action to stop new projections.");
+  return false;
+
 };
 
 async function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supersedesEventId = null){
@@ -1727,148 +1717,9 @@ function removeCalendarTaskOccurrence(meta, dateISO){
 }
 
 function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
-  const normalizedScope = scope === "future" ? "future" : (scope === "all" ? "all" : "single");
-  if (!meta || !meta.task) return false;
+  if (typeof toast === "function") toast("Legacy occurrence removal is temporarily unavailable because it can rewrite completed history. Existing records are unchanged. V2 one-time removal and task archiving remain available.");
+  return false;
 
-  const key = normalizeDateKey(dateISO);
-  if (!key) return false;
-
-  const task = meta.task;
-  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
-  let changed = false;
-
-  const isSameDay = (value)=> normalizeDateKey(value) === key;
-
-  if (isInstanceTask(task) && mode === "asreq"){
-    return removeCalendarTaskOccurrence(meta, key);
-  }
-
-  const targetTime = (()=>{
-    const targetDate = toDayStart(key);
-    return targetDate instanceof Date && !Number.isNaN(targetDate.getTime())
-      ? targetDate.getTime()
-      : null;
-  })();
-
-  const matchesScope = (value)=>{
-    const normalized = normalizeDateKey(value);
-    if (!normalized) return false;
-
-    if (normalizedScope === "all") return true;
-    if (normalizedScope === "single") return normalized === key;
-
-    const compareDate = toDayStart(normalized);
-    const compareTime = (compareDate instanceof Date && !Number.isNaN(compareDate.getTime()))
-      ? compareDate.getTime()
-      : null;
-    if (targetTime != null && compareTime != null) return compareTime >= targetTime;
-    return normalized >= key;
-  };
-
-  if (mode === "interval" && normalizedScope === "single"){
-    const removed = removeSingleOccurrenceAcrossTaskFamily(task, key);
-    if (removed) changed = true;
-    return changed;
-  }
-
-  if (mode === "interval"){
-    const removedSet = normalizeRemovedOccurrences(task);
-    const removedBefore = removedSet.size;
-    const addRemoved = (value)=>{
-      const normalized = normalizeDateKey(value);
-      if (!normalized) return;
-      if (!matchesScope(normalized)) return;
-      removedSet.add(normalized);
-    };
-
-    if (normalizedScope === "single"){
-      if (markOccurrenceRemoved(task, key)) changed = true;
-    }else{
-      addRemoved(key);
-      const addObjectKeys = (obj)=>{
-        if (!obj || typeof obj !== "object") return;
-        Object.keys(obj).forEach(addRemoved);
-      };
-      const addArrayValues = (arr)=>{
-        if (!Array.isArray(arr)) return;
-        arr.forEach(addRemoved);
-      };
-
-      addArrayValues(task.completedDates);
-      addObjectKeys(task.occurrenceNotes);
-      addObjectKeys(task.occurrenceHours);
-      addArrayValues(Array.isArray(task.manualHistory) ? task.manualHistory.map(entry => entry?.dateISO) : []);
-      addRemoved(task.calendarDateISO);
-
-      const projected = projectIntervalDueDates(task, { monthsAhead: 12, minOccurrences: 12 });
-      projected.forEach(pred => {
-        const projectedKey = normalizeDateKey(pred?.dateISO);
-        if (!projectedKey) return;
-        if (normalizedScope === "all"){
-          removedSet.add(projectedKey);
-          return;
-        }
-        const projectedDate = toDayStart(projectedKey);
-        const projectedTime = (projectedDate instanceof Date && !Number.isNaN(projectedDate.getTime()))
-          ? projectedDate.getTime()
-          : null;
-        if (targetTime != null && projectedTime != null && projectedTime >= targetTime){
-          removedSet.add(projectedKey);
-        }
-      });
-
-      if (removedSet.size !== removedBefore){
-        task.removedOccurrences = Array.from(removedSet);
-        changed = true;
-      }
-    }
-  }else{
-    const removedChanged = clearRemovedOccurrences(task, matchesScope);
-    if (removedChanged) changed = true;
-  }
-
-  const pruneOccurrenceObject = (obj)=>{
-    if (!obj || typeof obj !== "object") return false;
-    let mutated = false;
-    Object.keys(obj).forEach(k => {
-      if (matchesScope(k)){
-        delete obj[k];
-        mutated = true;
-      }
-    });
-    return mutated;
-  };
-
-  if (matchesScope(task.calendarDateISO)){
-    task.calendarDateISO = null;
-    changed = true;
-  }
-
-  if (Array.isArray(task.completedDates)){
-    const next = task.completedDates.filter(value => !matchesScope(value));
-    if (next.length !== task.completedDates.length){
-      task.completedDates = next;
-      changed = true;
-    }
-  }
-
-  if (pruneOccurrenceObject(task.occurrenceNotes)) changed = true;
-  if (pruneOccurrenceObject(task.occurrenceHours)) changed = true;
-
-  if (mode === "interval"){
-    if (Array.isArray(task.manualHistory)){
-      const nextHistory = task.manualHistory.filter(entry => !matchesScope(entry?.dateISO));
-      if (nextHistory.length !== task.manualHistory.length){
-        task.manualHistory = nextHistory;
-        changed = true;
-      }
-    }
-    if (changed){
-      applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
-    }
-  }
-
-  return changed;
 }
 
 function removeCalendarTaskEverywhere(meta){
