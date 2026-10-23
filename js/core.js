@@ -2776,19 +2776,24 @@ function startWorkspaceStateListener(){
     }
   };
   workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
-    if (!snap || !snap.exists){ enterMissingStateRecovery(); return; }
+    // Cache and pending local echoes cannot establish authoritative corruption
+    // or absence. Keep the adopted baseline until a confirmed server event.
+    if (!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites) return;
     if (isRecoveryMode()) return;
     // The isolated material writer owns adoption until SERVER verification.
     if (window.maintenanceTaskDeletionApi?.isBusy() || window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending || window.__pumpLogMutationPending || window.__waterQualityMutationPending) return;
-    if (snap.metadata && snap.metadata.hasPendingWrites) return;
+    if (!snap.exists){ enterMissingStateRecovery(); return; }
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
+    const meta = incoming && typeof incoming.syncMeta === "object" ? incoming.syncMeta : null;
+    const incomingRev = Number(meta?.rev || 0);
+    // An obsolete view is not evidence about the currently adopted document.
+    // Reject it before integrity checks can suspend a newer valid session.
+    if (Number.isSafeInteger(meta?.rev) && incomingRev > 0 && incomingRev <= lastAppliedCloudRevision) return;
     if(!checkAuthoritativeIdentityIntegrity(incoming).valid){
       window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
       loadFromCloud().then(refreshRouteSafely);return;
     }
-    const meta = incoming && typeof incoming.syncMeta === "object" ? incoming.syncMeta : null;
-    const incomingRev = Number(meta?.rev || 0);
     if (!incomingRev) return;
     const incomingBy = String(meta?.updatedBy || "");
     if (hasPendingLocalChanges) return;
@@ -2797,8 +2802,6 @@ function startWorkspaceStateListener(){
     if (window.isCuttingJobChronologySaving?.()) return;
     const localEditAgeMs = Date.now() - (Number(lastLocalMutationAt) || 0);
     if (incomingBy !== localClientId && localEditAgeMs >= 0 && localEditAgeMs < 15000) return;
-    if (incomingRev && incomingRev <= lastAppliedCloudRevision) return;
-    if (incomingRev && incomingBy === localClientId && incomingRev === lastAppliedCloudRevision) return;
     // Realtime adoption must establish the same exact evidence and live
     // bindings as initial loading, without seeding or normalizing business data.
     adoptIdentityCheckedAuthoritativeState(incoming);
@@ -5030,7 +5033,9 @@ window.auditCuttingFileContentExposure = auditCuttingFileContentExposure;
 window.getCloudCutFileStorageDiagnostics = getCloudCutFileStorageDiagnostics;
 window.runMaintenanceCalendarMutation = window.OMAXMaintenanceCalendarIntegrity.createMutationRunner({
   state:()=>compactStateForStorage(snapshotState({skipLocalFileCacheSync:true})),
-  readCloud:()=>readCurrentCloudStateReadOnly(),
+  captureTarget:captureCuttingJobSaveTarget,
+  targetIsCurrent:cuttingJobSaveTargetIsCurrent,
+  readCloud:target=>readMaintenanceTaskAuthoritativeState(target),
   loadedRevision:()=>Number(window.__loadedCloudRevisionForSaveGuard||0),
   canWrite:()=>canWriteCloud("maintenance calendar action"),
   apply:(key,value)=>{window[key]=value;refreshGlobalCollections();},
@@ -5040,7 +5045,7 @@ window.runMaintenanceCalendarMutation = window.OMAXMaintenanceCalendarIntegrity.
     undoStack.splice(0,undoStack.length,...checkpoint.undo);redoStack.splice(0,redoStack.length,...checkpoint.redo);currentSnapshotJSON=checkpoint.current;
     persistLocalStateBackup(snapshotState({skipLocalFileCacheSync:true}));
   },
-  suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastImportVerificationError=reason;renderRecoveryDiagnosticsPanel();}
+  suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastImportVerificationError=window.__lastImportVerificationError||reason;renderRecoveryDiagnosticsPanel();}
 });
 window.inspectMaintenanceCalendarIntegrity = (options={})=>window.OMAXMaintenanceCalendarIntegrity.inspect(window,{...options,projectedRepeatRows:window.__maintenanceCalendarProjectedRepeatRows||[]});
 window.inspectMaintenanceCalendarCloud = async (options={})=>window.OMAXMaintenanceCalendarIntegrity.inspect(await readCurrentCloudStateReadOnly(),options);
@@ -7078,6 +7083,7 @@ async function performCloudSave(saveOptions = {}){
     return cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked; no authoritative write was attempted.");
   }
   if (isVercelPreviewRuntime()) return cloudSaveNoWriteFailure("preview_readonly", "Cloud save is disabled in preview read-only mode.");
+  if (saveOptions.authoritativeTarget && !cuttingJobSaveTargetIsCurrent(saveOptions.authoritativeTarget)) return cloudSaveNoWriteFailure("maintenance_target_changed", "Maintenance workspace/backend or actor changed before saving. Reload before retrying.");
   try{
     const expectedRevision = Number(saveOptions.expectedRevision ?? window.__loadedCloudRevisionForSaveGuard ?? 0);
     const mutationVersionAtSave = lastLocalMutationAt;
@@ -7278,7 +7284,7 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.firestoreWritePayloadInstanceFound = Array.isArray(snap.maintenanceCalendarInstancesV2) && snap.maintenanceCalendarInstancesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
       explicitTrace.firestoreWritePayloadOccurrenceFound = Array.isArray(snap.maintenanceOccurrencesV2) && snap.maintenanceOccurrencesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
     }
-    const writeResult = await writeAuthoritativeStateSnapshot(snap, { merge:true }, { expectedRevision, repairProof:allowScheduledV2Dedupe ? repairAuthorization.proof : null, cuttingJobDeletionProof:deletionProof, cuttingJobHistoryRestoreProof:historyRestoreProof });
+    const writeResult = await writeAuthoritativeStateSnapshot(snap, { merge:true }, { expectedRevision, authoritativeTarget:saveOptions.authoritativeTarget, repairProof:allowScheduledV2Dedupe ? repairAuthorization.proof : null, cuttingJobDeletionProof:deletionProof, cuttingJobHistoryRestoreProof:historyRestoreProof });
     writeRev = Number(snap?.syncMeta?.rev || 0);
     authoritativeStateWriteAttempted = writeResult.stateWriteAttempted;
     authoritativeStateWriteCompleted = writeResult.stateWriteCompleted;
