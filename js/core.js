@@ -4825,6 +4825,7 @@ async function readMaintenanceTaskAuthoritativeState(target){
   const state=await target.db.runTransaction(async transaction=>{
     if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Task archive transfer workspace/backend changed before verification.");
     const snapshot=await transaction.get(target.docRef);
+    if(snapshot?.metadata?.fromCache||snapshot?.metadata?.hasPendingWrites)throw Error("Authoritative verification cannot accept cached or pending-write evidence.");
     if((snapshot?.ref?.path && snapshot.ref.path!==target.path)
       ||(snapshot?.ref?.firestore && snapshot.ref.firestore!==target.db))throw Error("Task archive transfer verification returned another document/backend.");
     return snapshot?.exists ? snapshot.data() : null;
@@ -7052,6 +7053,7 @@ async function performCloudSave(saveOptions = {}){
   if (window.__inventoryMaterialMutationPending) return cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending.");
   let authoritativeStateWriteAttempted = false;
   let authoritativeStateWriteCompleted = false;
+  let authoritativeStateVerified = false;
   const explicitTrace = (typeof window !== "undefined" && window.__activeExplicitMaintenanceAddSaveTrace && typeof window.__activeExplicitMaintenanceAddSaveTrace === "object")
     ? window.__activeExplicitMaintenanceAddSaveTrace
     : null;
@@ -7085,6 +7087,7 @@ async function performCloudSave(saveOptions = {}){
   if (isVercelPreviewRuntime()) return cloudSaveNoWriteFailure("preview_readonly", "Cloud save is disabled in preview read-only mode.");
   if (saveOptions.authoritativeTarget && !cuttingJobSaveTargetIsCurrent(saveOptions.authoritativeTarget)) return cloudSaveNoWriteFailure("maintenance_target_changed", "Maintenance workspace/backend or actor changed before saving. Reload before retrying.");
   try{
+    const saveTarget = saveOptions.authoritativeTarget || captureCuttingJobSaveTarget();
     const expectedRevision = Number(saveOptions.expectedRevision ?? window.__loadedCloudRevisionForSaveGuard ?? 0);
     const mutationVersionAtSave = lastLocalMutationAt;
     const rawSnap = snapshotState();
@@ -7185,8 +7188,8 @@ async function performCloudSave(saveOptions = {}){
       console.warn("Failed to record save flow event", err);
     }
     window.__lastSnapshot = snap;
-    const remoteSnap = await FB.docRef.get();
-    const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+    const remoteData = await readMaintenanceTaskAuthoritativeState(saveTarget);
+    const remoteSnap = {exists:remoteData !== null};
     const deletionCheck = validateCuttingJobDeletionSave(remoteData, snap, deletionProof);
     if (!deletionCheck.valid) return cuttingJobDeletionFailure(deletionCheck.error);
     const historyRestoreCheck = validateCuttingJobHistoryRestoreSave(remoteData, snap, historyRestoreProof);
@@ -7284,24 +7287,36 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.firestoreWritePayloadInstanceFound = Array.isArray(snap.maintenanceCalendarInstancesV2) && snap.maintenanceCalendarInstancesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
       explicitTrace.firestoreWritePayloadOccurrenceFound = Array.isArray(snap.maintenanceOccurrencesV2) && snap.maintenanceOccurrencesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
     }
-    const writeResult = await writeAuthoritativeStateSnapshot(snap, { merge:true }, { expectedRevision, authoritativeTarget:saveOptions.authoritativeTarget, repairProof:allowScheduledV2Dedupe ? repairAuthorization.proof : null, cuttingJobDeletionProof:deletionProof, cuttingJobHistoryRestoreProof:historyRestoreProof });
+    const writeResult = await writeAuthoritativeStateSnapshot(snap, { merge:true }, { expectedRevision, authoritativeTarget:saveTarget, repairProof:allowScheduledV2Dedupe ? repairAuthorization.proof : null, cuttingJobDeletionProof:deletionProof, cuttingJobHistoryRestoreProof:historyRestoreProof });
     writeRev = Number(snap?.syncMeta?.rev || 0);
     authoritativeStateWriteAttempted = writeResult.stateWriteAttempted;
     authoritativeStateWriteCompleted = writeResult.stateWriteCompleted;
     if (explicitTrace) explicitTrace.firestoreSetAttempted = writeResult.stateWriteAttempted;
     if (!writeResult.saved){
       hasPendingLocalChanges = true;
+      window.__lastOrdinarySaveError = {atISO:new Date().toISOString(),errorCode:writeResult.errorCode,error:writeResult.error,stateWriteAttempted:writeResult.stateWriteAttempted,stateWriteCompleted:writeResult.stateWriteCompleted,indeterminate:writeResult.indeterminate};
       return writeResult;
     }
     if (explicitTrace) explicitTrace.firestoreSetCompleted = true;
+    // Acknowledgement alone cannot establish what the authoritative document
+    // contains. Read independently of Firebase v8's listener/cache view before
+    // advancing the loaded revision or reporting success. Retained server log
+    // evidence is the sole top-level omission made by ordinary compaction.
+    const verified = await readMaintenanceTaskAuthoritativeState(saveTarget);
+    const expectedState = {...snap};
+    if (!Object.prototype.hasOwnProperty.call(expectedState,"syncProcessLog") && Object.prototype.hasOwnProperty.call(remoteData||{},"syncProcessLog")) expectedState.syncProcessLog = remoteData.syncProcessLog;
+    if (!writeResult.committedState || !Number.isSafeInteger(verified?.syncMeta?.rev) || verified.syncMeta.rev <= expectedRevision
+      || stableStringifyForIntegrity(verified) !== stableStringifyForIntegrity(expectedState)
+      || stableStringifyForIntegrity(snap) !== stableStringifyForIntegrity(writeResult.committedState)) throw Error("Acknowledged save did not match independent backend readback. Preserve local evidence and verify before retrying.");
+    if (!canWriteCloud("saveCloudInternal")) throw Error("Save committed, but a separate write blocker prevents verified acknowledgement.");
+    authoritativeStateVerified = true;
     if (typeof window !== "undefined"){
       window.__loadedCloudRevisionForSaveGuard = Number(snap?.syncMeta?.rev || 0);
       if (explicitTrace){
         explicitTrace.loadedRevUpdatedAfterSuccessfulSave = true;
         explicitTrace.loadedRevAfterSave = Number(window.__loadedCloudRevisionForSaveGuard || 0);
-      } else {
-        window.__lastLoadedCloudState = cloneStructured(snap) || { ...snap };
       }
+      window.__lastLoadedCloudState = cloneStructured(verified);
     }
     console.info("Cloud save succeeded", {
       workspaceId: WORKSPACE_ID,
@@ -7343,11 +7358,11 @@ async function performCloudSave(saveOptions = {}){
         console.warn(warning, metadataError);
       }
     }
-    window.__lastLoadedCloudState = { ...snap };
     return {
       saved:true,
       stateWriteAttempted:true,
       stateWriteCompleted:true,
+      verified:true,
       path:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
       warnings
     };
@@ -7359,11 +7374,21 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
     }
     console.error("Cloud save failed:", e);
+    if (authoritativeStateWriteCompleted && !authoritativeStateVerified){
+      hasPendingLocalChanges = true;
+      const uncertain = {saved:false,verified:false,indeterminate:true,stateWriteAttempted:true,stateWriteCompleted:true,errorCode:"committed_readback_unverified",error:String(e?.message||e)};
+      window.__lastOrdinarySaveError = {atISO:new Date().toISOString(),...uncertain};
+      window.__autosaveDisabled = true; window.__recoveryInspectMode = true;
+      window.__lastIndeterminateSave = window.__lastIndeterminateSave || uncertain;
+      try { renderRecoveryDiagnosticsPanel(); } catch (_err){}
+      return uncertain;
+    }
     if (authoritativeStateWriteCompleted){
       return {
         saved:true,
         stateWriteAttempted:true,
         stateWriteCompleted:true,
+        verified:true,
         path:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
         warnings:[`Authoritative state was saved, but post-write bookkeeping failed: ${String(e?.message || e)}`]
       };
