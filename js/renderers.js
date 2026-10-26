@@ -3239,6 +3239,7 @@ function renderNextDueWidget(ndBox){
 
   const upcoming = tasksInterval
     .filter(task => task && task.mode === "interval" && isInstanceTask(task) && task.calendarKilled !== true && !(task.recurrence && task.recurrence.enabled === false))
+    .map(task=>JSON.parse(JSON.stringify(task)))
     .map(t => {
       const nd = nextDue(t);
       if (!nd || !(nd.due instanceof Date)) return null;
@@ -3252,6 +3253,7 @@ function renderNextDueWidget(ndBox){
       if (typeof projectIntervalDueDates === "function"){
         const skipDates = new Set(completedSet);
         if (manualKey) skipDates.add(manualKey);
+        window.OMAXMaintenanceCalendarCancellation?.singleDates(window,t.id).forEach(date=>skipDates.add(date));
         const projections = projectIntervalDueDates(t, { monthsAhead: 3, excludeDates: skipDates, minOccurrences: 1, maxOccurrences: 1 });
         if (projections.length){
           const projected = projections[0];
@@ -3278,6 +3280,7 @@ function renderNextDueWidget(ndBox){
         : new Set();
       const dueKey = normalizeKey(dueDate);
       if (dueKey && removedSet.has(dueKey)) return null;
+      if(dueKey&&window.OMAXMaintenanceCalendarCancellation?.hidden(window,{legacyTaskId:t.id,dateISO:dueKey,status:"due"}))return null;
 
       return { t, nd: { ...nd, due: dueDate, days } };
     })
@@ -10906,13 +10909,8 @@ function renderSettings(){
     if ((type === "interval" || type === "asreq") && isTemplateTask(task)){
       if (task.templateId == null) task.templateId = task.id;
     }
-    if (typeof normalizeTaskRecurrence === "function"){
-      try {
-        normalizeTaskRecurrence(task);
-      } catch (err){
-        console.warn("Failed to normalize recurrence for task", task?.id, err);
-      }
-    }
+    // Recurrence is normalized on the render copy below. Opening Settings must
+    // not rewrite historical anchors before an exact archive/restore request.
   }
 
   const taskEntries = [];
@@ -11115,7 +11113,7 @@ function renderSettings(){
   }
 
   function renderTask(entry){
-    const t = entry.task;
+    const t = JSON.parse(JSON.stringify(entry.task));
     const type = entry.type;
     const name = escapeHtml(t.name || "(unnamed task)");
     const condition = escapeHtml(t.condition || "As required");
@@ -11503,7 +11501,7 @@ function renderSettings(){
     const meta = taskId ? findTaskMeta(taskId) : null;
     const task = meta?.task;
     if (!task) return;
-    const recurrence = normalizeTaskRecurrence(task);
+    const recurrence = normalizeTaskRecurrence(JSON.parse(JSON.stringify(task)));
     const isEditing = getTaskEditingState(taskEl);
     const repeatEnabled = Boolean(recurrence?.enabled);
     const basis = String(recurrence?.basis || "");

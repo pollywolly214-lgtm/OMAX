@@ -113,7 +113,7 @@ test(`real dashboard click saves, reloads and completes without a diagnostic hoo
     document.addEventListener("submit", event => {
       if (event.target.id === "dashOneTimeForm") __mcfStages.push("form-submit");
     }, true);
-    for (const name of ["createMaintenanceV2FromTemplate", "runMaintenanceCalendarMutation", "saveCloudNow", "readCurrentCloudStateReadOnly"]) {
+    for (const name of ["createMaintenanceV2FromTemplate", "runMaintenanceCalendarMutation", "saveCloudNow", "readCurrentCloudStateReadOnly", "readMaintenanceTaskAuthoritativeState"]) {
       const actual = window[name];
       window[name] = function (...args) {
         __mcfStages.push(name);
@@ -143,7 +143,7 @@ test(`real dashboard click saves, reloads and completes without a diagnostic hoo
   for (const stage of ["form-submit", "runMaintenanceCalendarMutation", "createMaintenanceV2FromTemplate", "saveCloudNow"]) assert.equal(stages.filter(value => value === stage).length, 1, stage);
   assert.ok(stages.indexOf("form-submit") < stages.indexOf("createMaintenanceV2FromTemplate"));
   assert.ok(stages.indexOf("createMaintenanceV2FromTemplate") < stages.indexOf("saveCloudNow"));
-  assert.ok(stages.filter(value => value === "readCurrentCloudStateReadOnly").length >= 3); // Baseline, guarded read-back, explicit test read.
+  assert.ok(stages.filter(value => value === "readMaintenanceTaskAuthoritativeState").length >= 4); // Runner baseline/readback plus ordinary baseline/readback, all independent.
   const saved = await cloud();
   assert.deepEqual(saved.weeklyCostReports, before.weeklyCostReports);
   for (const key of maintenanceKeys) {
