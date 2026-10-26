@@ -151,6 +151,6 @@ test("real calendar repeat history keeps completed and already-created future ev
   const context=vm.createContext({window,normalizeDateKey:v=>v,makeV2CalendarEquivalentKey:JSON.stringify,
     resolveV2RepeatOccurrenceStateByRoot:(root,date)=>({lifecycleStatus:root.endsWith("2026-10-01")?"completed":"scheduled",displayDateISO:date,note:"preserved",hours:0.5})});
   const start=calendar.indexOf("  const repeatEvents = Array.isArray(window.maintenanceOccurrencesV2)");
-  vm.runInContext('const dueMap={},seenV2RepeatProjectionKeys=new Set(),v2TaskLookup=new Map(window.maintenanceTasksV2.map(task=>[task.id,window.OMAXMaintenanceTaskArchive.displayTask(window,task)]));\n'+calendar.slice(start,calendar.indexOf('window.__maintenanceCalendarProjectedRepeatRows=',start))+";this.rows=Object.values(dueMap).flat();",context);
+  vm.runInContext('const dueMap={},hiddenMap={},seenV2RepeatProjectionKeys=new Set(),v2TaskLookup=new Map(window.maintenanceTasksV2.map(task=>[task.id,window.OMAXMaintenanceTaskArchive.displayTask(window,task)]));\n'+calendar.slice(start,calendar.indexOf('\n  return { dueMap',start))+";this.rows=Object.values(dueMap).flat();",context);
   assert.equal(context.rows.length,2);assert.ok(context.rows.every(row=>row.name.endsWith(" — Deleted")));assert.ok(context.rows.some(row=>row.dateISO==="2026-11-01"));assert.ok(context.rows.some(row=>row.status==="completed"));
 });

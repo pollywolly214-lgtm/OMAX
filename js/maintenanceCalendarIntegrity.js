@@ -103,19 +103,24 @@
       if(busy||!env.canWrite())return{saved:false,error:"A writable baseline and one maintenance action at a time are required."};
       busy=true;let before,staged,checkpoint,applied=false,committed=false;
       try{
-        before=clone(env.state());const cloud=await env.readCloud();
-        if(!cloud||cloud.syncMeta?.rev!==env.loadedRevision()||!env.canWrite()||key(normalized(before))!==key(normalized(cloud))||key(normalized(before))!==key(normalized(env.state())))throw Error("Maintenance baseline changed. Reload before retrying.");
+        const target=env.captureTarget?.(),targetIsCurrent=()=>target===undefined||env.targetIsCurrent?.(target)===true;
+        before=clone(env.state());const cloud=await env.readCloud(target);
+        if(!targetIsCurrent()||!cloud||cloud.syncMeta?.rev!==env.loadedRevision()||!env.canWrite()||key(normalized(before))!==key(normalized(cloud))||key(normalized(before))!==key(normalized(env.state())))throw Error("Maintenance baseline changed. Reload before retrying.");
         checkpoint=env.checkpoint?.();applied=true;const created=change();staged=clone(env.state());validateAppend(before,staged);
         if(key(normalized(before))===key(normalized(staged)))return{saved:true,noChange:true,created};
         let result;
-        try{result=await env.save({expectedRevision:cloud.syncMeta.rev});}catch(error){env.suspend("Maintenance save threw with unknown outcome.");return{saved:false,indeterminate:true,error:String(error?.message||error)};}
+        try{result=await env.save({expectedRevision:cloud.syncMeta.rev,...(target===undefined?{}:{authoritativeTarget:target})});}catch(error){env.suspend("Maintenance save threw with unknown outcome.");return{saved:false,indeterminate:true,error:String(error?.message||error)};}
         committed=result?.saved===true&&result?.stateWriteCompleted===true;
         if(!committed){
           if(result?.indeterminate||result?.stateWriteAttempted===true&&!result?.definiteFailure){env.suspend("Maintenance save outcome is unknown; verify before retrying.");return{saved:false,indeterminate:true,error:result?.error||"Maintenance save outcome is unknown."};}
           throw Error(result?.error||"Maintenance save was rejected.");
         }
-        const verified=await env.readCloud();
+        const acknowledgedRevision=env.loadedRevision();
+        const verified=await env.readCloud(target);
+        if(!targetIsCurrent())throw Error("Maintenance workspace/backend or actor changed during verification.");
+        if(!Number.isSafeInteger(verified?.syncMeta?.rev)||verified.syncMeta.rev<=cloud.syncMeta.rev||verified.syncMeta.rev!==acknowledgedRevision||acknowledgedRevision!==env.loadedRevision())throw Error("Saved maintenance revision does not match the acknowledged loaded revision; verify before further saves.");
         if(key(normalized(verified||{}))!==key(normalized(staged)))throw Error("Saved maintenance action failed exact server verification.");
+        if(!env.canWrite())throw Error("Maintenance action committed, but a separate write blocker requires review.");
         return{saved:true,created};
       }catch(error){
         const message=String(error?.message||error);

@@ -3239,6 +3239,7 @@ function renderNextDueWidget(ndBox){
 
   const upcoming = tasksInterval
     .filter(task => task && task.mode === "interval" && isInstanceTask(task) && task.calendarKilled !== true && !(task.recurrence && task.recurrence.enabled === false))
+    .map(task=>JSON.parse(JSON.stringify(task)))
     .map(t => {
       const nd = nextDue(t);
       if (!nd || !(nd.due instanceof Date)) return null;
@@ -3252,6 +3253,7 @@ function renderNextDueWidget(ndBox){
       if (typeof projectIntervalDueDates === "function"){
         const skipDates = new Set(completedSet);
         if (manualKey) skipDates.add(manualKey);
+        window.OMAXMaintenanceCalendarCancellation?.singleDates(window,t.id).forEach(date=>skipDates.add(date));
         const projections = projectIntervalDueDates(t, { monthsAhead: 3, excludeDates: skipDates, minOccurrences: 1, maxOccurrences: 1 });
         if (projections.length){
           const projected = projections[0];
@@ -3278,6 +3280,7 @@ function renderNextDueWidget(ndBox){
         : new Set();
       const dueKey = normalizeKey(dueDate);
       if (dueKey && removedSet.has(dueKey)) return null;
+      if(dueKey&&window.OMAXMaintenanceCalendarCancellation?.hidden(window,{legacyTaskId:t.id,dateISO:dueKey,status:"due"}))return null;
 
       return { t, nd: { ...nd, due: dueDate, days } };
     })
@@ -10483,6 +10486,129 @@ function wireMaintenanceHistoryImportTool(root){
   });
 }
 
+function openMaintenanceTaskHistory(t){
+  // Calendar-day arithmetic avoids DST and UTC conversion of business dates.
+  const historyDayNumber = dateISO => {
+    const [year, month, day] = dateISO.split('-').map(Number);
+    return Math.round(Date.UTC(year, month - 1, day) / 86400000);
+  };
+  const rows = buildMaintenanceTaskHistory(t.id);
+  const completedDates = rows.filter(row => row.status === 'completed').map(row => row.dateISO);
+  const lastCompleted = completedDates.length ? completedDates[completedDates.length-1] : '';
+  let gapLabel = '—';
+  if (completedDates.length >= 2){
+    const a = historyDayNumber(completedDates[completedDates.length-2]); const b = historyDayNumber(completedDates[completedDates.length-1]);
+    gapLabel = `${b-a} day(s)`;
+  }
+  const todayISO = ymd(new Date());
+  const predicted = rows.find(row => row.activeCalendar && row.status === 'scheduled' && row.dateISO >= todayISO)?.dateISO || '—';
+  let completedCount = 0;
+  const bodyRows = rows.map((row, rowIndex)=>{
+    const dateISO = row.dateISO;
+    const note = row.note;
+    const completionIndex = row.status === 'completed' ? completedCount++ : -1;
+    let sincePrior = '—';
+    if (completionIndex > 0){
+      const prev = historyDayNumber(completedDates[completionIndex - 1]);
+      const cur = historyDayNumber(completedDates[completionIndex]);
+      sincePrior = `${cur - prev} day(s)`;
+    }
+    const intervalHours = t.intervalHrs ?? t.interval;
+    const intervalLabel = Number.isFinite(Number(intervalHours)) && Number(intervalHours) > 0 ? `${Number(intervalHours)} hrs` : (Number.isFinite(Number(t.recurrenceEvery)) ? `${Math.max(1, Number(t.recurrenceEvery))} ${String(t.recurrenceBasis||'day').replace('calendar_','')}` : '—');
+    const statusLabel = ({completed:'Completed',logged:'Logged',scheduled:'Scheduled',removed:'Removed',skipped:'Skipped',uncompleted:'Reopened',stopped:'Stopped',cancelled:'Cancelled',canceled:'Cancelled'})[row.status] || row.status;
+    const lastServicedLabel = lastCompleted ? `${lastCompleted}` : '—';
+    let remainLabel = '—';
+    if (Number.isFinite(Number(intervalHours))){
+      const base = Number.isFinite(Number(t.anchorTotal)) ? Number(t.anchorTotal) : 0;
+      const cur = (typeof currentTotal === 'function') ? Number(currentTotal()) : NaN;
+      if (Number.isFinite(cur)) remainLabel = `${Math.max(0, Number(intervalHours) - Math.max(0, cur - base)).toFixed(0)} hrs`;
+    }
+    const costLabel = Number.isFinite(Number(t.price)) ? `$${Number(t.price).toFixed(0)}` : '—';
+    const eventHours = row.hours ?? t.downtimeHours;
+    const timeLabel = eventHours != null && Number.isFinite(Number(eventHours)) ? `${Number(eventHours)} hr` : '—';
+    const links = [];
+    if (t.manualLink) links.push(`<a href="${escapeHtml(t.manualLink)}" target="_blank" rel="noopener">Manual</a>`);
+    if (t.storeLink) links.push(`<a href="${escapeHtml(t.storeLink)}" target="_blank" rel="noopener">Store</a>`);
+    const dateDetail = [row.isMoved?`Rescheduled from ${row.originalDateISO}`:'',row.source==='legacy history'?'Legacy history':'',row.archived?'Archived task':'',row.trackingStopped?'Repeat tracking stopped':'',row.calendarHiddenReason,
+      row.status!=='completed'&&row.completionEvidence?.length?'Earlier completion record retained':''].filter(Boolean).join(' · ');
+    return `<tr data-history-event="${escapeHtml(row.key)}" data-history-active-calendar="${row.activeCalendar?'true':'false'}"><td style="white-space:nowrap"><button type="button" data-history-jump="${dateISO}" data-history-row="${rowIndex}" data-task-id="${escapeHtml(String(t.id))}">${dateISO}</button>${dateDetail ? `<div class="small muted">${escapeHtml(dateDetail)}</div>` : ''}</td><td>${escapeHtml(intervalLabel)}</td><td>${escapeHtml(statusLabel)}</td><td>${escapeHtml(lastServicedLabel)}</td><td>${escapeHtml(remainLabel)}</td><td>${escapeHtml(costLabel)}</td><td>${escapeHtml(timeLabel)}</td><td>${links.length ? links.join(' · ') : '—'}</td><td>${row.activeCalendar ? 'Yes' : 'No'}</td><td>${row.status === 'completed' ? 'Yes' : row.completionEvidence?.length?'Recorded evidence':'No'}</td><td>${escapeHtml(sincePrior)}</td><td>${escapeHtml(note || '—')}</td></tr>`;
+  }).join('') || '<tr><td colspan="12">No history yet.</td></tr>';
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.setAttribute('data-maintenance-history', String(t.id));
+  modal.innerHTML = `<div class="modal-card" style="max-width:min(96vw,1600px);width:min(96vw,1600px);max-height:90vh;overflow:auto"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: maintenance calendar + recorded legacy history • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Next scheduled: ${escapeHtml(predicted)}</p><p class="small muted">Recurring dates use the calendar’s existing projection limits. Hidden, cancelled and archived evidence stays in History; only rows marked Active Calendar can be opened there.</p><p class="small muted" data-history-navigation-status role="status" hidden></p><table class="cost-table"><thead><tr><th>Date</th><th>Interval</th><th>Status</th><th>Last serviced</th><th>Remain</th><th>Cost</th><th>Time to complete</th><th>Links</th><th>Active Calendar</th><th>Completed</th><th>Since prior completion</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+  document.body.appendChild(modal);
+  let navigationPending = false;
+  const navigationFeedback = message => {
+    const status = modal.querySelector('[data-history-navigation-status]');
+    status.textContent = message;
+    status.hidden = false;
+    status.scrollIntoView({ block:'nearest' });
+  };
+  modal.addEventListener('click', (ev)=>{
+    const jump = ev.target instanceof HTMLElement ? ev.target.closest('[data-history-jump]') : null;
+    if (jump){
+      if (navigationPending) return;
+      const dateISO = jump.getAttribute('data-history-jump');
+      const row = rows[Number(jump.getAttribute('data-history-row'))];
+      const date = parseDateLocal(dateISO);
+      if (!date || Number.isNaN(date.getTime())){
+        navigationFeedback('This history date cannot be opened in the calendar. History remains available here.');
+        return;
+      }
+      const today = new Date();
+      const diffMonths = (date.getFullYear() - today.getFullYear()) * 12 + date.getMonth() - today.getMonth();
+      const monthOffset = Math.max(-12, Math.min(12, diffMonths));
+      const monthsNeeded = diffMonths - monthOffset + 1;
+      // Existing navigation permits ±12 starting months and a 12-month expanded view.
+      if (diffMonths < -12 || monthsNeeded > 12){
+        navigationFeedback(`${dateISO} is outside the calendar's navigation range. History remains available here.`);
+        return;
+      }
+      if (!row?.calendarEvent){
+        navigationFeedback(`${row?.calendarHiddenReason||'This recorded history entry has no event in the current calendar display'}. History remains available here.`);
+        return;
+      }
+      navigationPending = true;
+      navigationFeedback('Opening calendar event…');
+      window.__calendarMonthOffset = monthOffset;
+      if (monthsNeeded > 3) window.__calendarShowAllMonths = true;
+      location.hash = '#/';
+      const focusCalendarDay = (attempt = 0)=>{
+        if (!modal.isConnected) return;
+        if (typeof renderCalendar === 'function') renderCalendar();
+        const cell = document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`);
+        const selector = row.sourceSystem === 'v2'
+          ? `[data-v2-root-occurrence-id="${CSS.escape(row.rootOccurrenceId)}"]`
+          : `[data-cal-task="${CSS.escape(String(row.taskId))}"][data-cal-start="${CSS.escape(dateISO)}"]`;
+        const anchor = cell?.querySelector(selector);
+        if (!anchor){
+          if (attempt < 8) setTimeout(()=>focusCalendarDay(attempt + 1), 120);
+          else {
+            navigationPending = false;
+            navigationFeedback(`The calendar event for ${dateISO} could not be reached. History remains available here.`);
+          }
+          return;
+        }
+        modal.remove();
+        cell.scrollIntoView({ behavior:'smooth', block:'center' });
+        if (typeof highlightCalendarDayCell === 'function') highlightCalendarDayCell(cell);
+        if (row?.calendarEvent?.type === 'v2task'){
+          openV2OneTimePanel(row.rootOccurrenceId);
+        }else if (row?.calendarEvent?.type === 'v2repeat'){
+          openV2RepeatPanel({...row.calendarEvent.repeatView,lifecycleStatus:row.status,note:row.note,hours:row.hours});
+        }else{
+          const taskId = row?.taskId || t.id;
+          if (typeof showTaskBubble === 'function') showTaskBubble(String(taskId), anchor, { dateISO });
+        }
+      };
+      setTimeout(()=>focusCalendarDay(), 220);
+      return;
+    }
+    if (ev.target === modal || (ev.target instanceof HTMLElement && ev.target.closest('[data-close]'))) modal.remove();
+  });
+}
+
 function renderSettings(){
   ensureMaintenanceTaskModalAPI();
   // === Explorer-style Maintenance Settings ===
@@ -10906,13 +11032,8 @@ function renderSettings(){
     if ((type === "interval" || type === "asreq") && isTemplateTask(task)){
       if (task.templateId == null) task.templateId = task.id;
     }
-    if (typeof normalizeTaskRecurrence === "function"){
-      try {
-        normalizeTaskRecurrence(task);
-      } catch (err){
-        console.warn("Failed to normalize recurrence for task", task?.id, err);
-      }
-    }
+    // Recurrence is normalized on the render copy below. Opening Settings must
+    // not rewrite historical anchors before an exact archive/restore request.
   }
 
   const taskEntries = [];
@@ -11115,7 +11236,7 @@ function renderSettings(){
   }
 
   function renderTask(entry){
-    const t = entry.task;
+    const t = JSON.parse(JSON.stringify(entry.task));
     const type = entry.type;
     const name = escapeHtml(t.name || "(unnamed task)");
     const condition = escapeHtml(t.condition || "As required");
@@ -11503,7 +11624,7 @@ function renderSettings(){
     const meta = taskId ? findTaskMeta(taskId) : null;
     const task = meta?.task;
     if (!task) return;
-    const recurrence = normalizeTaskRecurrence(task);
+    const recurrence = normalizeTaskRecurrence(JSON.parse(JSON.stringify(task)));
     const isEditing = getTaskEditingState(taskEl);
     const repeatEnabled = Boolean(recurrence?.enabled);
     const basis = String(recurrence?.basis || "");
@@ -12683,57 +12804,7 @@ function renderSettings(){
       const id = historyBtn.getAttribute('data-task-history');
       const meta = findTaskMeta(id);
       if (!meta) return;
-      const t = meta.task;
-      const model = (typeof computeCostModel === 'function') ? computeCostModel() : null;
-      const rows = Array.isArray(model?.allMaintenanceDataTable) ? model.allMaintenanceDataTable.filter(row => String(row?.taskId || '') === String(id)) : [];
-      const completedDates = Array.from(new Set(rows.map(r => String(r?.dateISO || '').trim()).filter(Boolean))).sort();
-      const scheduledDates = Array.from(new Set([].concat(Array.isArray(t.manualHistory) ? t.manualHistory.map(x=>x&&x.dateISO).filter(Boolean) : [], t.calendarDateISO ? [t.calendarDateISO] : [], completedDates))).sort();
-      const lastCompleted = completedDates.length ? completedDates[completedDates.length-1] : '';
-      let gapLabel = '—';
-      if (completedDates.length >= 2){
-        const a = new Date(completedDates[completedDates.length-2]); const b = new Date(completedDates[completedDates.length-1]);
-        gapLabel = `${Math.round((b-a)/86400000)} day(s)`;
-      }
-      const every = Math.max(1, Number(t.recurrenceEvery||1));
-      const basis = String(t.recurrenceBasis || 'calendar_day');
-      let predicted = '—';
-      if (lastCompleted){ const d = new Date(lastCompleted+'T00:00:00'); if (basis==='calendar_week') d.setDate(d.getDate()+every*7); else if (basis==='calendar_month') d.setMonth(d.getMonth()+every); else d.setDate(d.getDate()+every); predicted = d.toISOString().slice(0,10); }
-      const merged = Array.from(new Set(scheduledDates.concat(completedDates))).sort();
-      const bodyRows = merged.map(dateISO=>{
-        const centralRows = rows.filter(r => String(r?.dateISO||'')===dateISO);
-        const note = centralRows.map(r => String(r?.note || r?.occurrenceNote || '').trim()).filter(Boolean)[0] || (t.occurrenceNotes && t.occurrenceNotes[dateISO]) || '';
-        const completionIndex = completedDates.indexOf(dateISO);
-        let sincePrior = '—';
-        if (completionIndex > 0){
-          const prev = new Date(completedDates[completionIndex - 1] + 'T00:00:00');
-          const cur = new Date(completedDates[completionIndex] + 'T00:00:00');
-          sincePrior = `${Math.round((cur - prev)/86400000)} day(s)`;
-        }
-        const intervalLabel = Number.isFinite(Number(t.intervalHrs)) && Number(t.intervalHrs) > 0 ? `${Number(t.intervalHrs)} hrs` : (Number.isFinite(Number(t.recurrenceEvery)) ? `${Math.max(1, Number(t.recurrenceEvery))} ${String(t.recurrenceBasis||'day').replace('calendar_','')}` : '—');
-        const statusLabel = completedDates.includes(dateISO) ? 'Completed' : (scheduledDates.includes(dateISO) ? 'Scheduled' : '—');
-        const lastServicedLabel = lastCompleted ? `${lastCompleted}` : '—';
-        let remainLabel = '—';
-        if (Number.isFinite(Number(t.intervalHrs))){
-          const base = Number.isFinite(Number(t.anchorTotal)) ? Number(t.anchorTotal) : 0;
-          const cur = (typeof currentTotal === 'function') ? Number(currentTotal()) : NaN;
-          if (Number.isFinite(cur)) remainLabel = `${Math.max(0, Number(t.intervalHrs) - Math.max(0, cur - base)).toFixed(0)} hrs`;
-        }
-        const costLabel = Number.isFinite(Number(t.price)) ? `$${Number(t.price).toFixed(0)}` : '—';
-        const timeLabel = Number.isFinite(Number(t.downtimeHours)) ? `${Number(t.downtimeHours)} hr` : '—';
-        const links = [];
-        if (t.manualLink) links.push(`<a href="${escapeHtml(t.manualLink)}" target="_blank" rel="noopener">Manual</a>`);
-        if (t.storeLink) links.push(`<a href="${escapeHtml(t.storeLink)}" target="_blank" rel="noopener">Store</a>`);
-        return `<tr><td><button type="button" data-history-jump="${dateISO}" data-task-id="${t.id}">${dateISO}</button></td><td>${escapeHtml(intervalLabel)}</td><td>${escapeHtml(statusLabel)}</td><td>${escapeHtml(lastServicedLabel)}</td><td>${escapeHtml(remainLabel)}</td><td>${escapeHtml(costLabel)}</td><td>${escapeHtml(timeLabel)}</td><td>${links.length ? links.join(' · ') : '—'}</td><td>${scheduledDates.includes(dateISO)?'Yes':'No'}</td><td>${completedDates.includes(dateISO)?'Yes':'No'}</td><td>${escapeHtml(sincePrior)}</td><td>${escapeHtml(note || '—')}</td></tr>`;
-      }).join('') || '<tr><td colspan="12">No history yet.</td></tr>';
-      const modal = document.createElement('div');
-      modal.className = 'modal-backdrop';
-      modal.innerHTML = `<div class="modal-card" style="max-width:min(96vw,1600px);width:min(96vw,1600px);max-height:90vh;overflow:auto"><button class="modal-close" data-close>×</button><h4>${escapeHtml(t.name||'Task')} history</h4><p class="small muted">Source: central data table • Last completed: ${escapeHtml(lastCompleted||'—')} • Completion gap: ${escapeHtml(gapLabel)} • Predicted next: ${escapeHtml(predicted)}</p><table class="cost-table"><thead><tr><th>Date</th><th>Interval</th><th>Status</th><th>Last serviced</th><th>Remain</th><th>Cost</th><th>Time to complete</th><th>Links</th><th>Scheduled</th><th>Completed</th><th>Since prior completion</th><th>Occurrence notes</th></tr></thead><tbody>${bodyRows}</tbody></table></div>`;
-      document.body.appendChild(modal);
-      modal.addEventListener('click', (ev)=>{
-        const jump = ev.target instanceof HTMLElement ? ev.target.closest('[data-history-jump]') : null;
-        if (jump){ const dateISO = jump.getAttribute('data-history-jump'); if (dateISO){ if (modal && modal.parentElement) modal.remove(); const d=new Date(dateISO+'T00:00:00'); if(!Number.isNaN(d.getTime())){ const today=new Date(); today.setHours(0,0,0,0); const diffMonths=(d.getFullYear()-today.getFullYear())*12+(d.getMonth()-today.getMonth()); window.__calendarMonthOffset=Math.max(-12,Math.min(12,Math.round(diffMonths))); } location.hash = '#/'; const focusCalendarDay = (attempt=0)=>{ if (typeof renderCalendar==='function') renderCalendar(); const cell=document.querySelector(`[data-date-iso="${CSS.escape(dateISO)}"]`); if(cell){ cell.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof highlightCalendarDayCell==='function') highlightCalendarDayCell(cell); const taskAnchor = cell.querySelector(`[data-cal-task="${CSS.escape(String(t.id))}"]`) || cell; if (typeof showTaskBubble==='function') showTaskBubble(String(t.id), taskAnchor); return; } if (attempt < 8) setTimeout(()=>focusCalendarDay(attempt+1), 120); }; setTimeout(()=>focusCalendarDay(0),220); } }
-        if (ev.target === modal || (ev.target instanceof HTMLElement && ev.target.closest('[data-close]'))) modal.remove();
-      });
+      openMaintenanceTaskHistory(meta.task);
       return;
     }
     const removeBtn = e.target.closest('[data-remove]');
@@ -26761,6 +26832,10 @@ function renderDeletedItems(options){
   content.querySelectorAll("[data-trash-restore]").forEach(btn=>{
     const entry=window.deletedItems?.find(entry=>entry.id===btn.getAttribute("data-trash-restore")&&entry.type==="task");
     if(!entry)return;
+    const history=document.createElement("button");history.type="button";history.textContent="View history";
+    history.setAttribute("data-trash-history",entry.id);
+    history.addEventListener("click",()=>openMaintenanceTaskHistory(entry.payload));
+    btn.insertAdjacentElement("beforebegin",history);
     try{
       window.OMAXMaintenanceTaskArchive.planRestore(window.__lastLoadedCloudState,entry.id);
       const blocked=!window.maintenanceTaskDeletionApi?.isAvailable();
