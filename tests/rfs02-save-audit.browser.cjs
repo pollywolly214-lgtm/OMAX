@@ -52,15 +52,15 @@ test("RFS-02 independent sessions verify ordinary field saves, stale listener im
   for(const name of Object.keys(before).filter(name=>![field,'syncMeta','saveMeta','syncProcessLog'].includes(name)))assert.deepEqual(after[name],before[name],kind+': '+name);
   await load(a.page);await load(b.page);for(const page of [a.page,b.page]){await health(page);assert.deepEqual(await page.evaluate(field=>window.__lastLoadedCloudState[field],field),after[field]);}
  }
- // The actual legacy Remove occurrence click is an explicit, zero-write block.
+ // The actual legacy Remove click now appends verified intent, preserving history.
  const isolationBefore=clone(documents.get(seed.path)),isolationCount=commits;
  await a.page.evaluate(()=>showTaskBubble(window.tasksInterval[0].id,document.querySelector('#content'),{dateISO:'2026-10-23'}));
  await a.page.locator('[data-bbl-remove-single]').click();
- assert.equal(commits,isolationCount);assert.deepEqual(documents.get(seed.path),isolationBefore);
- assert.deepEqual(await a.page.evaluate(()=>getInventoryIdentityRepairLocalState().tasksInterval),isolationBefore.tasksInterval);
- await a.page.evaluate(()=>{hideBubble();window.stopV2RepeatTracking('synthetic-missing-repeat');});assert.equal(commits,isolationCount);
+ await a.page.waitForFunction(()=>!window.maintenanceCalendarCancellationApi.isBusy()&&window.tasksInterval[0].calendarCancellations?.length===1);
+ assert.equal(commits,isolationCount+1);const isolationAfter=clone(documents.get(seed.path));const ledger=isolationAfter.tasksInterval[0].calendarCancellations;assert.equal(ledger.length,1);delete isolationAfter.tasksInterval[0].calendarCancellations;delete isolationAfter.syncMeta;const isolationSource=clone(isolationBefore);delete isolationSource.syncMeta;assert.deepEqual(isolationAfter,isolationSource);
+ await a.page.evaluate(async()=>{hideBubble();await window.stopV2RepeatTracking('synthetic-missing-repeat');});assert.equal(commits,isolationCount+1);
  const diagnostic=await a.page.evaluate(source=>eval(source),await fs.readFile(path.join(root,'docs/RFS-02-read-only-health.js'),'utf8'));
- assert.equal(diagnostic.health.status,'WARNING');assert.match(diagnostic.health.scope,/UNTESTED/);assert.equal(commits,isolationCount);assert.deepEqual(documents.get(seed.path),isolationBefore);
+ assert.equal(diagnostic.health.status,'WARNING');assert.match(diagnostic.health.scope,/UNTESTED/);assert.equal(commits,isolationCount+1);
  // Stale second session cannot overwrite a newer independently verified save.
  const first=await a.page.evaluate(async()=>{window.inventory[0].qtyNew++;return saveCloudNow();});assert.equal(first.verified,true);
  const count=commits,conflict=await b.page.evaluate(async()=>{window.inventory[0].qtyNew+=3;return saveCloudNow();});assert.equal(conflict.saved,false);assert.equal(commits,count);

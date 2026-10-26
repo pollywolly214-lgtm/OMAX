@@ -903,43 +903,18 @@ function openV2RepeatPanel(view){
     appendPanelRootEvent("moved", { fromDateISO: view.originalDateISO, toDateISO, source: "calendar_panel" });
     closeV2OneTimePanel();
   });
-  card.querySelector("[data-rpt-remove]")?.addEventListener("click", ()=>{
-    const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
-    const inst = instances.find(entry => entry && String(entry.id || "") === String(view.instanceId || ""));
-    const projected = inst ? projectV2RepeatDates(inst) : [];
-    const hasOtherVisible = projected.some(slot => {
-      const dateISO = typeof slot === "string" ? slot : normalizeDateKey(slot?.dateISO || null);
-      const occurrenceIndex = typeof slot === "string" ? null : Number(slot?.occurrenceIndex);
-      if (!dateISO) return false;
-      const rootId = occurrenceIndex != null && Number.isFinite(occurrenceIndex)
-        ? makeV2RepeatOccurrenceSlotKey(view.instanceId, occurrenceIndex)
-        : makeV2RepeatOccurrenceKey(view.instanceId, dateISO);
-      if (rootId === String(view.rootOccurrenceId || "")) return false;
-      const state = resolveV2RepeatOccurrenceStateWithCompat({ instanceId: view.instanceId, rootOccurrenceId: rootId, fallbackDateISO: dateISO, occurrenceIndex });
-      return !["removed", "skipped"].includes(String(state.lifecycleStatus || ""));
-    });
-    if (!hasOtherVisible){
-      window.stopV2RepeatTracking?.(String(view.instanceId), String(view.taskId), String(view.originalDateISO));
-      return;
-    }
-    const ok=window.confirm?window.confirm("Remove this repeat occurrence from calendar?"):true;
-    if(!ok) return;
-    logRepeatAction("removed");
-    appendPanelRootEvent("removed", { source:"repeat_panel" });
-    closeV2OneTimePanel();
+  card.querySelector("[data-rpt-remove]")?.addEventListener("click", async ()=>{
+    const result=await runVerifiedCalendarCancellation({kind:"repeatRemove",instanceId:view.instanceId,taskId:view.taskId,rootOccurrenceId:view.rootOccurrenceId,dateISO:view.originalDateISO||view.dateISO},"Remove only this repeat occurrence from the active Calendar? Its stored history, notes, costs and other occurrences will be preserved; repeat tracking continues.");
+    if(result.saved){closeV2OneTimePanel();renderCalendar();}
   });
-  card.querySelector("[data-rpt-stop]")?.addEventListener("click", ()=>{
-    const ok = window.confirm ? window.confirm("Stop repeat tracking for this chain?") : true;
-    if (!ok) return;
-    if (typeof window.stopV2RepeatTracking === "function") window.stopV2RepeatTracking(String(view.instanceId), String(view.taskId), String(view.originalDateISO), String(view.rootOccurrenceId), String(view.displayDateISO || view.dateISO));
-    closeV2OneTimePanel();
+  card.querySelector("[data-rpt-stop]")?.addEventListener("click", async ()=>{
+    const result=await window.stopV2RepeatTracking?.(view.instanceId,view.taskId,view.originalDateISO||view.dateISO,view.rootOccurrenceId);
+    if(result?.saved){closeV2OneTimePanel();renderCalendar();}
   });
 }
 
-window.stopV2RepeatTracking = (instanceId, taskId, dateISO, rootOccurrenceId = null, displayDateISO = null)=>{
-  toast("Stopping a repeat schedule is temporarily unavailable: this legacy path cannot verify history preservation. Existing records are unchanged. Use the verified task archive action to stop new projections.");
-  return false;
-
+window.stopV2RepeatTracking = async (instanceId, taskId, dateISO, rootOccurrenceId = null, displayDateISO = null)=>{
+  return runVerifiedCalendarCancellation({kind:"repeatStop",instanceId,taskId,dateISO,rootOccurrenceId:rootOccurrenceId||makeV2RepeatOccurrenceKey(instanceId,dateISO)},"Stop generating repeat projections for this exact schedule? Existing scheduled events, completions, notes, hours and costs will be preserved.");
 };
 
 async function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supersedesEventId = null){
@@ -1638,88 +1613,26 @@ function unmarkCalendarTaskComplete(meta, dateISO){
   return changed;
 }
 
-function removeCalendarTaskOccurrence(meta, dateISO){
-  if (!meta || !meta.task) return false;
-  const key = normalizeDateKey(dateISO);
-  if (!key) return false;
-  const task = meta.task;
-  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
-  let changed = false;
-
-  if (isInstanceTask(task)){
-    if (Array.isArray(meta.list)){
-      meta.list.splice(meta.index, 1);
-      changed = true;
-      if (meta.mode === "asreq"){
-        window.tasksAsReq = meta.list;
-      }else{
-        window.tasksInterval = meta.list;
-      }
-    }
-    return changed;
-  }
-
-  if (mode === "interval"){
-    const history = typeof ensureTaskManualHistory === "function"
-      ? ensureTaskManualHistory(task)
-      : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
-    for (let i = history.length - 1; i >= 0; i--){
-      const entry = history[i];
-      if (entry && normalizeDateKey(entry.dateISO) === key){
-        history.splice(i,1);
-        changed = true;
-      }
-    }
-    if (changed){
-      task.manualHistory = history;
-    }
-    if (Array.isArray(task.completedDates)){
-      const idx = task.completedDates.indexOf(key);
-      if (idx >= 0){
-        task.completedDates.splice(idx,1);
-        changed = true;
-      }
-    }
-    if (normalizeDateKey(task.calendarDateISO) === key){
-      task.calendarDateISO = null;
-      changed = true;
-    }
-    if (setFamilyOccurrenceNote(task, key, "")){
-      changed = true;
-    }
-    if (setFamilyOccurrenceHours(task, key, null)){
-      changed = true;
-    }
-    if (changed){
-      applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
-    }
-  }else{
-    if (normalizeDateKey(task.calendarDateISO) === key){
-      task.calendarDateISO = null;
-      changed = true;
-    }
-    if (setFamilyOccurrenceNote(task, key, "")){
-      changed = true;
-    }
-    if (setFamilyOccurrenceHours(task, key, null)){
-      changed = true;
-    }
-    if (Array.isArray(task.completedDates)){
-      const idx = task.completedDates.indexOf(key);
-      if (idx >= 0){
-        task.completedDates.splice(idx,1);
-        changed = true;
-      }
-    }
-  }
-
-  return changed;
+async function removeCalendarTaskOccurrence(meta, dateISO){
+  return removeCalendarTaskOccurrences(meta,dateISO,'single');
 }
 
-function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
-  if (typeof toast === "function") toast("Legacy occurrence removal is temporarily unavailable because it can rewrite completed history. Existing records are unchanged. V2 one-time removal and task archiving remain available.");
-  return false;
+async function runVerifiedCalendarCancellation(operation,message){
+  const api=window.maintenanceCalendarCancellationApi;
+  if(!api?.isAvailable()){toast("Maintenance cancellation is unavailable while another change or recovery review is pending.");return {saved:false};}
+  try{
+    const reviewed=api.review(operation);
+    if(!window.confirm?.(message))return {saved:false,cancelled:true};
+    const result=await api.run(reviewed);
+    if(result.saved&&result.verified)toast(operation.kind==="repeatStop"?"Repeat tracking stopped; stored history preserved":"Calendar cancellation verified; history preserved");
+    else toast(result.error||"Cancellation was not verified. Preserve evidence and review before retrying.");
+    return result;
+  }catch(error){toast(String(error?.message||error));return {saved:false,error:String(error?.message||error)};}
+}
 
+async function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
+  const message=scope==="all"?"Cancel all scheduled occurrences for this definition and its explicitly linked schedules? Completed history, notes, costs and inventory will remain.":scope==="future"?"Cancel scheduled occurrences on and after this date? Completed history, notes, costs and inventory will remain.":"Hide this one legacy occurrence from the active Calendar? Its original completion/history, notes, costs and inventory will remain; independent V2 roots are unchanged.";
+  return runVerifiedCalendarCancellation({kind:"legacy",taskId:meta?.task?.id,dateISO,scope},message);
 }
 
 function removeCalendarTaskEverywhere(meta){
@@ -1932,6 +1845,7 @@ function showTaskBubble(taskId, anchor, options = {}){
     if (isRepeating){
       actions.push(`<button class="secondary" data-bbl-remove-future>Remove future</button>`);
     }
+    actions.push(`<button class="secondary" data-bbl-remove-all>Remove all scheduled</button>`);
   }
   actions.push(`<button data-bbl-edit>Edit settings</button>`);
   actions.push(`<button class="danger" data-bbl-remove-task>Remove task</button>`);
@@ -1992,24 +1906,9 @@ function showTaskBubble(taskId, anchor, options = {}){
     }
   });
 
-  const runRemoveScope = (scope)=>{
-    const confirmText = scope === "future"
-      ? "Remove this occurrence and all future occurrences from the calendar?"
-      : scope === "all"
-        ? "Remove all calendar occurrences for this task (past and future)?"
-        : "Remove this occurrence from the calendar?";
-    const shouldRemove = window.confirm ? window.confirm(confirmText) : true;
-    if (!shouldRemove) return;
-    const changed = removeCalendarTaskOccurrences(meta, targetKey, scope);
-    if (changed){
-      if (typeof saveCloudNow === "function") saveCloudNow();
-      else saveCloudDebounced();
-      const toastMessage = scope === "future"
-        ? "Current and future occurrences removed"
-        : scope === "all"
-          ? "All occurrences removed"
-          : "Removed from calendar";
-      toast(toastMessage);
+  const runRemoveScope = async (scope)=>{
+    const result = await removeCalendarTaskOccurrences(meta, targetKey, scope);
+    if (result.saved){
       hideBubble();
       rerenderCalendarKeepScroll();
     }
@@ -2896,6 +2795,7 @@ function renderCalendar(){
     if (!task || !iso) return;
     const key = normalizeDateKey(iso);
     if (!key) return;
+    if(window.OMAXMaintenanceCalendarCancellation?.hidden(window,{legacyTaskId:task.id,dateISO:key,status:status||"due"}))return;
     const downtimeHours = resolveTaskDowntimeHours(task, key);
     const segments = splitTaskDuration(key, downtimeHours);
     const statusKey = status || "due";
@@ -2965,7 +2865,7 @@ function renderCalendar(){
   }
 
   const intervalTasks = (window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"interval") || window.tasksInterval || [])
-    .filter(t => t && t.mode === "interval" && (isInstanceTask(t) || t.archivedDefinition));
+    .filter(t => t && t.mode === "interval" && (isInstanceTask(t) || t.archivedDefinition)).map(task=>JSON.parse(JSON.stringify(task)));
   const completedByTask = new Map();
   intervalTasks.forEach(t => {
     if (!t) return;
@@ -3053,7 +2953,7 @@ function renderCalendar(){
     }
   });
 
-  const asReqTasks = window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"asreq") || window.tasksAsReq || [];
+  const asReqTasks = (window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"asreq") || window.tasksAsReq || []).map(task=>task&&JSON.parse(JSON.stringify(task)));
   const hasLegacyHistoryEvidence = (task)=>{
     if (!task || typeof task !== "object") return false;
     if (Array.isArray(task.completedDates) && task.completedDates.some(Boolean)) return true;
@@ -3129,6 +3029,7 @@ function renderCalendar(){
     const mapKey = `${occurrenceId}:${dateISO}`;
     if (seenV2ChipKeys.has(mapKey)) return;
     if (status === "removed" || status === "skipped") return;
+    if(window.OMAXMaintenanceCalendarCancellation?.hidden(window,{instanceId,dateISO:resolvedDateISO,status}))return;
     const equivalentKey = `one_time_root:${occurrenceId}`;
     if (seenV2ScheduledEquivalentKeys.has(equivalentKey)) return;
     seenV2ChipKeys.add(mapKey);
@@ -3178,6 +3079,7 @@ function renderCalendar(){
       const task = v2TaskLookup.get(String(instance.taskId || "")) || null;
       const taskName = String((task && task.name) || "Maintenance repeat");
       const renderDateISO = state.displayDateISO || dateISO;
+      if(window.OMAXMaintenanceCalendarCancellation?.hidden(window,{instanceId:String(instance.id),dateISO:renderDateISO,status:state.lifecycleStatus}))return;
       const repeatEquivalentKey = makeV2CalendarEquivalentKey(["v2", "repeat", String(instance.legacyTaskId || instance.taskId || ""), taskName, renderDateISO, String(instance.repeatRule?.basis || ""), String(instance.repeatRule?.every || instance.repeatRule?.intervalHours || "")]);
       if (state.lifecycleStatus !== "completed"){
         if (seenV2RepeatProjectionKeys.has(repeatEquivalentKey)) return;
@@ -3214,6 +3116,7 @@ function renderCalendar(){
   const repeatHistoryLatest = new Map();
   repeatEvents.forEach((entry, index) => {
     if (!entry || typeof entry !== "object") return;
+    if(entry.eventType==="stopped")return; // Tracking intent must not hide its stored completion/root history.
     if (String(entry.system || "") !== "v2" && Number(entry.schemaVersion || 0) < 2) return;
     const rootId = String(entry.rootOccurrenceId || "");
     if (!rootId.startsWith("repeat:")) return;
@@ -3242,6 +3145,7 @@ function renderCalendar(){
     if (["removed","skipped"].includes(String(state.lifecycleStatus || ""))) return;
     const resolvedDateISO = normalizeDateKey(state.displayDateISO || dateISO || null);
     if (!resolvedDateISO) return;
+    if(window.OMAXMaintenanceCalendarCancellation?.hidden(window,{instanceId,dateISO:resolvedDateISO,status:state.lifecycleStatus}))return;
     const exists = (dueMap[resolvedDateISO] || []).some(item => item && item.type === "v2repeat" && String(item.id || "") === rootId);
     if (exists) return;
     const repeatEquivalentKey = makeV2CalendarEquivalentKey(["v2", "repeat_history", String(entry.legacyTaskId || taskId || ""), taskName, resolvedDateISO, latestType]);

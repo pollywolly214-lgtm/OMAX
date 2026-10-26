@@ -52,11 +52,19 @@ test("late metadata bookkeeping cannot replace a newer independently adopted lis
   };
   h.window.inventory[0].qtyNew=5;const result=await h.context.saveCloudNow();assert.equal(result.verified,true,result.error);assert.deepEqual(h.window.__lastLoadedCloudState,h.cloud);assert.equal(h.window.__loadedCloudRevisionForSaveGuard,h.cloud.syncMeta.rev);
 });
-test("legacy single/future/all cancellation and repeat-stop are isolated with zero local or backend changes",()=>{
+
+test("newer independently adopted state during readback retains its revision and permits the next save",async()=>{
+  const h=harness();let advanced=false;
+  wrap(h,{readback:(_state,current)=>{if(advanced)return;advanced=true;current.alterCloud(state=>{state.syncMeta.rev++;state.inventory[0].note="newer during readback";});current.reload();current.window.__lastLoadedCloudState=current.cloud;current.window.__loadedCloudRevisionForSaveGuard=current.cloud.syncMeta.rev;vm.runInContext("lastAppliedCloudRevision=window.__loadedCloudRevisionForSaveGuard",current.context);}});
+  h.window.inventory[0].qtyNew=5;const result=await h.context.saveCloudNow();assert.equal(result.verified,true,result.error);
+  assert.deepEqual(h.window.__lastLoadedCloudState,h.cloud);assert.equal(h.window.__loadedCloudRevisionForSaveGuard,h.cloud.syncMeta.rev);assert.equal(vm.runInContext("lastAppliedCloudRevision",h.context),h.cloud.syncMeta.rev);
+  h.window.inventory[0].qtyNew=6;const next=await h.context.saveCloudNow();assert.equal(next.verified,true,next.error);assert.equal(h.commits,2);assert.equal(h.cloud.inventory[0].note,"newer during readback");
+});
+test("cancellation UI without a writable coordinator preserves source evidence",async()=>{
   const window={tasksInterval:[{id:"task",completedDates:["2026-10-23"],manualHistory:[{dateISO:"2026-10-23",status:"completed"}]}],maintenanceCalendarInstancesV2:[{id:"repeat",status:"active"}]},before=clone(window),messages=[];
-  const c=vm.createContext({window,toast:message=>messages.push(message)}),start=calendar.indexOf("function removeCalendarTaskOccurrences"),end=calendar.indexOf("\n}",start)+2;
-  vm.runInContext(calendar.slice(start,end),c);for(const scope of ["single","future","all"])assert.equal(c.removeCalendarTaskOccurrences({task:window.tasksInterval[0]},"2026-10-23",scope),false);
-  const stop=calendar.indexOf("\nwindow.stopV2RepeatTracking =")+1;vm.runInContext(calendar.slice(stop,calendar.indexOf("\n};",stop)+3),c);assert.equal(window.stopV2RepeatTracking("repeat"),false);delete window.stopV2RepeatTracking;
+  const c=vm.createContext({window,toast:message=>messages.push(message)}),start=calendar.indexOf("async function runVerifiedCalendarCancellation"),end=calendar.indexOf("function removeCalendarTaskEverywhere",start);
+  vm.runInContext(calendar.slice(start,end),c);for(const scope of ["single","future","all"])assert.equal((await c.removeCalendarTaskOccurrences({task:window.tasksInterval[0]},"2026-10-23",scope)).saved,false);
+  const stop=calendar.indexOf("\nwindow.stopV2RepeatTracking =")+1;vm.runInContext(calendar.slice(stop,calendar.indexOf("\n};",stop)+3),c);assert.equal((await window.stopV2RepeatTracking("repeat","task","2026-11-01","repeat:repeat:2026-11-01")).saved,false);delete window.stopV2RepeatTracking;
   assert.deepEqual(window,before);assert.equal(messages.length,4);assert.ok(messages.every(message=>/unavailable/.test(message)));
 });
 test("read-only health diagnostic reports scope without mutating gates or writing",async()=>{

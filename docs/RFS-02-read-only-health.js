@@ -14,8 +14,11 @@
   report.gates.hasPendingLocalChanges=typeof hasPendingLocalChanges==="undefined"?null:hasPendingLocalChanges;
   report.gates.lastAppliedCloudRevision=typeof lastAppliedCloudRevision==="undefined"?null:lastAppliedCloudRevision;
   report.gates.archiveBusy=window.maintenanceTaskDeletionApi?.isBusy?.()??null;
+  report.gates.cancellationBusy=window.maintenanceCalendarCancellationApi?.isBusy?.()??null;
+  report.maintenanceCancellationEvidence=bounded(window.__lastMaintenanceCancellationEvidence);
   report.gates.materialBusy=window.inventoryMaterialMutationApi?.isBusy?.()??null;
   report.features={archiveCoordinator:!!window.maintenanceTaskDeletionApi,
+    cancellationCoordinator:!!window.maintenanceCalendarCancellationApi,
     ordinaryIndependentVerification:typeof performCloudSave==="function"&&String(performCloudSave).includes("authoritativeStateVerified"),
     archiveCalendarHandler:typeof archiveCalendarTask==="function",
     independentTaskReader:typeof readMaintenanceTaskAuthoritativeState==="function",
@@ -40,6 +43,8 @@
       agreesWithLoadedRevision:rev===loaded?.syncMeta?.rev,agreesWithGuardRevision:rev===window.__loadedCloudRevisionForSaveGuard};
     const check=window.OMAXGlobalIdentityRepair?.integrity(copy(authoritative));
     report.identity={valid:check?.valid??null,blockers:check?.blockers??["Identity validator unavailable on this deployment"]};
+    const cancellation=window.OMAXMaintenanceCalendarCancellation?.integrity(copy(authoritative));
+    report.cancellationIntegrity={valid:cancellation?.valid??null,blockers:cancellation?.blockers??["Cancellation validator unavailable on this deployment"]};
     const archives=(authoritative?.deletedItems||[]).filter(entry=>entry?.type==="task");
     report.archivedInventory=(authoritative?.inventory||[]).flatMap((item,index)=>{
       if(!item?.linkedTaskId)return[];const id=item.linkedTaskId;
@@ -55,7 +60,7 @@
     report.note="Confirmed backend state is separate from loaded browser evidence. No write, retry or unblock was attempted. Review exact identity paths, protected changes and retained uncertain-save evidence before any operation.";
   }catch(error){report.authoritative={confirmed:false,error:String(error?.message||error)};}
   const g=report.gates,a=report.authoritative;
-  report.health={status:g.__recoveryInspectMode||g.__autosaveDisabled||g.__lastIndeterminateSave||a?.confirmed===true&&report.identity?.valid===false?"FAIL":a?.confirmed!==true||report.identity?.valid!==true||!a.agreesWithLoadedRevision||!a.agreesWithGuardRevision||g.hasPendingLocalChanges||!g.__initialAdoptComplete||g.__lastCloudSaveBlock||g.__lastImportVerificationError||g.__globalIdentityVerificationPending||report.protectedLoaded?.blocked?"WARNING":"PASS",
+  report.health={status:g.__recoveryInspectMode||g.__autosaveDisabled||g.__lastIndeterminateSave||a?.confirmed===true&&(report.identity?.valid===false||report.cancellationIntegrity?.valid===false)?"FAIL":a?.confirmed!==true||report.identity?.valid!==true||report.cancellationIntegrity?.valid!==true||!a.agreesWithLoadedRevision||!a.agreesWithGuardRevision||g.hasPendingLocalChanges||!g.__initialAdoptComplete||g.__lastCloudSaveBlock||g.__lastImportVerificationError||g.__globalIdentityVerificationPending||report.protectedLoaded?.blocked?"WARNING":"PASS",
     scope:"Current independently read state and browser gates only; Firebase mutation reliability remains UNTESTED by this read-only diagnostic."};
   report.recentOrdinarySaveError=bounded(window.__lastOrdinarySaveError);
   console.log("OMAX RFS-02 read-only diagnostic",report);return report;

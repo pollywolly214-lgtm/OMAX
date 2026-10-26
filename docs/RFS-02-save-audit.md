@@ -1,5 +1,11 @@
 # RFS-02 — comprehensive save reliability audit
 
+**RFS-02B acceptance correction (October 26):** disabled Calendar removal was
+temporary containment and is superseded by verified history-preserving
+cancellation. See [RFS-02B implementation, evidence and Undo architecture](RFS-02B-authorized-removal.md)
+for the current removal contract and final results. The pre-edit sections and
+original run counts below remain historical audit evidence.
+
 ## Pre-edit architecture and plan
 
 Recorded before application edits. Base `0c11b0f` is latest fetched main and
@@ -159,11 +165,11 @@ formula change was performed.
    manual-history status to removed; future/all removal clears matching
    completedDates, manual history and notes before persistence. As-required
    instances could be spliced out. These are not proven equivalent to cancelling
-   a future reminder. The public scope entry point is now explicitly unavailable
-   with no mutation/write. Repeat-stop and last-visible removal are likewise
-   blocked before status mutation or removal-event append. The verified archive
-   and V2 one-time lifecycle remain usable. These blocked operations are **not
-   classified as successfully implemented cancellations**.
+   a future reminder. RFS-02 initially disabled these paths. RFS-02B replaces that
+   containment: single/future/all append scoped cancellation intent; repeat Remove
+   and Stop use exact root/status lifecycle transactions. Source history remains
+   exact. All of these actions now pass real guarded-save and browser checks;
+   no removal is classified as successful merely because it is blocked.
 
 ## Exact implementation and conservation contract
 
@@ -214,9 +220,9 @@ recursive merge semantics. Existing feature suites provide the UI-level evidence
 | CAL02 | PASS append/reverse scenarios | PARTIAL completed creation/removal workflows | mcf-01 lifecycle unit; not every reversal UI/fault pair |
 | CAL03 | PASS selected note/hours/move lifecycle cases | UNTESTED full edit UI | mcf-01; no calendar-wide edit certification |
 | CAL04 | PASS stable root/history/readback | PASS actual Remove and reload | RFS-01 browser rerun, preserved |
-| CAL05/CAL06 | FAIL operation unavailable; PASS no-change isolation | PASS single Remove click performs zero changes/writes; other scopes unit-only | Unsafe historical pruning isolated; replacement deferred |
+| CAL05/CAL06 | PASS exact single/future/all cancellation conservation | PASS all scopes, reload, stale second browser, rejection/uncertainty | RFS-02B append-only ledger; completed history and inventory retained |
 | CAL07 | PARTIAL repeat create/edit | PARTIAL | Remaining legacy repeat actions still acknowledge early |
-| CAL08 | FAIL stop/last-visible removal unavailable; PASS no-change guard | PARTIAL direct stop/no-write check | Other repeat removals and lifecycle edits remain unverified UI paths |
+| CAL08 | PASS exact-root Remove and exact-instance Stop conservation | PASS both actions, reload and preserved completed roots | RFS-02B verified lifecycle events; no last-visible automatic Stop |
 | CAL09 | PASS real exact archive/restore CAS/adoption | PASS actual archive/Restore, reload and independent profiles | MDEL and RFS-01 suites rerun |
 | CAL10 | PARTIAL | UNTESTED | Legacy completion/reversal history policy requires review |
 | MNT01 | PARTIAL raw creation + task-setup tests | PARTIAL pipeline only | Actual Settings create form not independently exercised here |
@@ -384,9 +390,10 @@ its existing explicit reconciliation behavior; Firebase remains authoritative.
 
 Recommended RFS-03 work, in priority order:
 
-1. Define and implement history-preserving legacy cancellation and repeat-stop
+1. RFS-02B delivered history-preserving legacy cancellation and repeat-stop
    with scoped confirmation, exact source/prepared-state proof and verified
-   adoption. Until then, the blocked paths intentionally remain unavailable.
+   adoption. Remaining follow-up: authenticated SDK/emulator and deployed checks;
+   inverse cancellation UI remains a separate explicitly scoped operation.
 2. Move early-success legacy hours, completion/reversal, repeat-event, pump-note,
    RPM-delete, garnet and inventory handlers onto awaited verified acknowledgements
    with bounded rollback or preserved drafts. Strengthening ordinary persistence
@@ -412,5 +419,5 @@ Recommended RFS-03 work, in priority order:
 
 Recommendation: **ready for review of this bounded P0 patch and truthful audit;
 further work is required before claiming comprehensive reliability.** Existing
-failing suites and blocked operations must remain visible during the merge
+failing suites and uncovered operations must remain visible during the merge
 decision. Do not merge automatically.
