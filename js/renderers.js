@@ -17154,7 +17154,7 @@ const appendEmptyRow = (focusFirst = false)=>{
     }
 
     tip.dataset.placement = placement;
-    tip.style.left = `${anchorXCss}px`;
+    tip.style.left = `${anchorXCss - halfWidth}px`;
     tip.style.top = `${anchorYCss}px`;
     tip.style.visibility = "";
     tip.dataset.visible = "true";
@@ -17251,6 +17251,11 @@ const appendEmptyRow = (focusFirst = false)=>{
         y: Number(event.clientY)
       };
       const target = resolvePointerTarget(event, { allowProximity: true })?.target || null;
+      if (target?.key === "maintenanceIncomplete"){
+        const list = content.querySelector("[data-incomplete-maintenance-list]");
+        if (list) list.open = true;
+        return;
+      }
       if (!target || !target.rowRef || typeof window === "undefined") return;
       const focusFn = window.__focusCostDataCenterRow;
       if (typeof focusFn === "function"){
@@ -20511,12 +20516,16 @@ function computeCostModel(){
     return date && date <= financialPeriod.endISO && (!financialPeriod.startISO || date >= financialPeriod.startISO);
   };
   const selectedMaintenanceSeries = maintenanceSeriesFromDataTable.filter(inFinancialPeriod);
+  // Presentation only: normalized nullable fields, never the internal zero
+  // placeholders or totalCost of an incomplete row, supply these markers.
+  const incompleteMaintenanceMarkers = buildIncompleteMaintenanceMarkers(maintenanceDataTableRows).filter(inFinancialPeriod);
   maintenanceCostReconciliation.forEach(entry => {
     const row = entry.normalizationIncluded && maintenanceDataTableRows.find(row=>row.sourceEventKey === entry.sourceEventKey);
     entry.historicalTableIncluded = !!row && centralMaintenanceRows.some(item=>item.sourceEventKey===row.sourceEventKey);
     entry.inSelectedPeriod = Boolean(inFinancialPeriod(entry));
     entry.centralTableIncluded = entry.historicalTableIncluded && entry.inSelectedPeriod;
     entry.chartIncluded = !!row && maintenanceTrendRows.includes(row) && entry.inSelectedPeriod;
+    entry.incompleteMarkerIncluded = !!entry.normalizationIncluded && incompleteMaintenanceMarkers.some(marker=>marker.sourceEventKey === entry.sourceEventKey);
     if (entry.normalizationIncluded && !entry.chartIncluded) entry.exclusionReason = entry.costIncomplete ? row.costExclusionReason
       : !row.taskId ? 'Missing stable task ID'
       : !row.settingsLink && row.sourceSystem !== 'v2' ? 'Missing Settings link for legacy task'
@@ -20606,6 +20615,7 @@ function computeCostModel(){
     efficiencySnapshot,
     chartColors: COST_CHART_COLORS,
     maintenanceSeries: selectedMaintenanceSeries,
+    incompleteMaintenanceMarkers,
     totalSpendSeries: selectedSpendSeries,
     jobSeries: selectedJobSeries,
     weeklyReports
@@ -20779,6 +20789,28 @@ function drawWeeklyReportChart(canvas, report){
   ctx.fillText(`Week: ${report.weekLabel || report.weekStartISO || ""}`, outerLeft, 18);
 }
 
+function buildIncompleteMaintenanceMarkers(rows){
+  const seen = new Set();
+  return (rows || []).flatMap(row=>{
+    if (!row?.costIncomplete || !row.taskId || (!row.settingsLink && row.sourceSystem !== "v2")) return [];
+    const dateISO = window.OMAXFinancialReconciliation.dateKey(row.dateISO);
+    const sourceEventKey = row.sourceEventKey;
+    if (!dateISO || !sourceEventKey || seen.has(sourceEventKey)) return [];
+    seen.add(sourceEventKey);
+    const amount = value=>typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+    const knownParts = amount(row.costFields?.parts?.value);
+    const knownDuration = amount(row.costFields?.duration?.value);
+    const evidence = field=>field?.source === "Occurrence-specific" ? "recorded occurrence input" : field?.source === "Configured default" ? "configured estimate" : field?.source || "source unavailable";
+    const partsLabel = knownParts === null ? "Parts price unknown" : `Known parts $${knownParts.toFixed(2)} (${evidence(row.costFields.parts)}); partial cost only`;
+    const durationLabel = knownDuration === null ? "Missing labor duration" : `Known labor duration ${knownDuration} hr (${evidence(row.costFields.duration)})`;
+    const reason = row.costExclusionReason || `Missing ${[knownParts === null ? "parts price" : null, knownDuration === null ? "labor duration" : null].filter(Boolean).join(" and ")}`;
+    return [{dateISO, date:new Date(dateISO + "T00:00:00"), sourceEventKey, taskId:row.taskId, taskName:row.taskName || "Maintenance task",
+      knownParts, knownDuration, value:knownParts === null ? null : -knownParts, fullCost:null,
+      partsSource:row.costFields?.parts?.source || null, durationSource:row.costFields?.duration?.source || null,
+      detail:`${row.taskName || "Maintenance task"} · completed ${dateISO}. ${partsLabel}. ${durationLabel}. Full event cost unavailable: ${reason}. Excluded from complete expense totals, averages and forecasts.`}];
+  }).sort((a,b)=>a.dateISO.localeCompare(b.dateISO));
+}
+
 function drawCostChart(canvas, model, show){
   if (!canvas) return;
   canvas.__maintenanceCostReconciliation = model.maintenanceCostReconciliation || [];
@@ -20792,6 +20824,7 @@ function drawCostChart(canvas, model, show){
   ctx.fillRect(0,0,W,H);
 
   const active = [];
+  const incomplete = show.maintenance ? (model.incompleteMaintenanceMarkers || []).filter(pt=>pt.date instanceof Date && !isNaN(pt.date)) : [];
   if (show.maintenance && model.maintenanceSeries.length){
     active.push({ key:"maintenance", color:model.chartColors.maintenance, points:model.maintenanceSeries });
   }
@@ -20802,7 +20835,7 @@ function drawCostChart(canvas, model, show){
     active.push({ key:"jobs", color:model.chartColors.jobs, points:model.jobSeries });
   }
 
-  if (!active.length){
+  if (!active.length && !incomplete.length){
     canvas.__costChartTargets = [];
     ctx.fillStyle = "#777";
     ctx.font = "13px sans-serif";
@@ -20819,6 +20852,10 @@ function drawCostChart(canvas, model, show){
       xs.push(pt.date.getTime());
       ys.push(Number(pt.value));
     });
+  });
+  incomplete.forEach(pt=>{
+    xs.push(pt.date.getTime());
+    if (pt.knownParts !== null) ys.push(-pt.knownParts);
   });
 
   if (!xs.length){
@@ -20859,7 +20896,8 @@ function drawCostChart(canvas, model, show){
 
   const left = 70;
   const right = W - 20;
-  const top = 20;
+  // An event lane has no monetary y value; unknown parts never plot at $0.
+  const top = incomplete.length ? 46 : 20;
   const bottom = H - 40;
   const X = (time)=> left + ((time - xMin) / Math.max(1, xMax - xMin)) * (right - left);
   const Y = (value)=> bottom - ((value - yMin) / Math.max(1e-6, yMax - yMin)) * (bottom - top);
@@ -20877,7 +20915,7 @@ function drawCostChart(canvas, model, show){
     if (value > 0) return `+${formatted}`;
     return formatted;
   };
-  if (0 >= yMin && 0 <= yMax){
+  if (ys.length && 0 >= yMin && 0 <= yMax){
     const zeroY = Y(0);
     ctx.strokeStyle = "#d0d5e2";
     ctx.setLineDash([4,4]);
@@ -20892,7 +20930,7 @@ function drawCostChart(canvas, model, show){
   }
 
   const yTickCount = Math.min(6, Math.max(3, Math.round((bottom - top) / 50)));
-  if (yTickCount > 1){
+  if (ys.length && yTickCount > 1){
     const yRange = yMax - yMin;
     ctx.textBaseline = "middle";
     for (let i = 0; i < yTickCount; i++){
@@ -21003,6 +21041,36 @@ function drawCostChart(canvas, model, show){
 
   });
 
+  // Glyphs sharing a date/parts amount are one cluster, with every source
+  // identity retained. Each tooltip lists that day's events, so dense glyphs
+  // cannot conceal a sibling event; the accessible event list is also complete.
+  const clusters = new Map();
+  incomplete.forEach(pt=>{
+    const key = JSON.stringify([pt.dateISO, pt.knownParts]);
+    const group = clusters.get(key) || []; group.push(pt); clusters.set(key, group);
+  });
+  if (incomplete.some(pt=>pt.knownParts === null)){
+    ctx.fillStyle = "#fff7ed"; ctx.fillRect(left, 4, right-left, 30);
+    ctx.fillStyle = "#92400e"; ctx.font = "10px sans-serif"; ctx.textAlign = "left";
+    ctx.fillText("Cost unknown", 2, 22);
+  }
+  for (const points of clusters.values()){
+    const pt = points[0], unknown = pt.knownParts === null;
+    const x = X(pt.date.getTime()), y = unknown ? 20 : Y(-pt.knownParts);
+    ctx.strokeStyle = "#b45309"; ctx.fillStyle = "#fff7ed"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, y-5); ctx.lineTo(x+5, y+(unknown ? 4 : 0));
+    if (!unknown) ctx.lineTo(x, y+5);
+    ctx.lineTo(x-5, y+(unknown ? 4 : 0)); ctx.closePath(); ctx.fill(); ctx.stroke();
+    if (points.length > 1){ ctx.fillStyle = "#92400e"; ctx.font = "10px sans-serif"; ctx.textAlign = "left"; ctx.fillText(`×${points.length}`, x+7, y-4); }
+    const sameDay = incomplete.filter(event=>event.dateISO === pt.dateISO);
+    hitTargets.unshift({key:"maintenanceIncomplete", datasetLabel:"Incomplete maintenance",
+      valueLabel:unknown ? "Cost unknown — event indicator" : `$${pt.knownParts.toFixed(2)} known parts only — incomplete`,
+      detail:sameDay.slice(0,3).map(event=>event.detail).join("\n\n") + (sameDay.length > 3 ? ` ${sameDay.length-3} more same-day events; open the incomplete event list for every event.` : ""),
+      rowRef:{type:"maintenanceIncomplete",dateISO:pt.dateISO,sourceEventKey:pt.sourceEventKey},
+      rowRefs:points.map(event=>({type:"maintenance",dateISO:event.dateISO,taskId:event.taskId,sourceEventKey:event.sourceEventKey})),
+      knownParts:pt.knownParts, fullCost:null, eventLane:unknown,
+      rect:{x:x-7,y:y-7,width:14,height:14}});
+  }
   canvas.__costChartTargets = hitTargets;
 }
 

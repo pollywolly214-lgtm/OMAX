@@ -233,10 +233,10 @@ test("previous card preserves the original descending-date summation order",()=>
 
 test("expense/hour numerator and denominator both use financial-period series, preserving separate cuts",()=>{
   const c=vm.createContext({window:{OMAXFinancialReconciliation:api},financialJobSelection:{window:api.period("7d","2026-10-20")},
-    maintenanceCostReconciliation:[],maintenanceSeriesFromDataTable:[],maintenanceSeries:[],totalSpendSeries:[{dateISO:"2026-10-20",value:-36},{dateISO:"2025-01-01",value:-10000}],
+    maintenanceCostReconciliation:[],maintenanceDataTableRows:[],maintenanceSeriesFromDataTable:[],maintenanceSeries:[],totalSpendSeries:[{dateISO:"2026-10-20",value:-36},{dateISO:"2025-01-01",value:-10000}],
     jobSeries:[{dateISO:"2026-10-20",jobId:"one",cutHours:2,value:165},{dateISO:"2026-10-20",jobId:"two",cutHours:2,value:165},
       {dateISO:"2025-01-01",jobId:"old",cutHours:1000,value:1}],ymd:()=>"2026-10-20"});
-  vm.runInContext(section(renderers,"  const financialPeriod =","  // Read the loaded source records,")+
+  vm.runInContext(section(renderers,"function buildIncompleteMaintenanceMarkers(","function drawCostChart(")+section(renderers,"  const financialPeriod =","  // Read the loaded source records,")+
     ";this.result={totalCutHoursInFinancialPeriod,totalSpendInFinancialPeriod,totalSpendPerCutValue,selectedJobSeries};",c);
   assert.equal(c.result.totalCutHoursInFinancialPeriod,4);assert.equal(c.result.totalSpendInFinancialPeriod,36);
   assert.equal(c.result.totalSpendPerCutValue,9);assert.equal(c.result.selectedJobSeries.length,2);
