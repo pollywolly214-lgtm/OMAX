@@ -5711,10 +5711,10 @@ function closeLogHistoryModal(){
   document.body.classList.remove("log-history-open");
 }
 
-function appendLogHistoryRow(tbody, entry){
+function appendLogHistoryRow(tbody, entry, { prepend = false } = {}){
   if (!tbody) return;
   const dateISO = normalizeDateISO(entry?.dateISO) || "";
-  const hours = Number(entry?.hours);
+  const hours = entry?.hours == null || entry.hours === "" ? NaN : Number(entry.hours);
   const safeHours = Number.isFinite(hours) ? hours : "";
   const emptyRow = tbody.querySelector(".log-history-empty");
   if (emptyRow) emptyRow.remove();
@@ -5732,7 +5732,9 @@ function appendLogHistoryRow(tbody, entry){
       tbody.innerHTML = `<tr class="log-history-empty"><td colspan="3">No logged hours yet.</td></tr>`;
     }
   });
-  tbody.appendChild(row);
+  if (prepend) tbody.prepend(row);
+  else tbody.appendChild(row);
+  return row;
 }
 
 function recomputeDailyCutHoursFromTotalHistory(history){
@@ -5843,23 +5845,19 @@ function openLogHistoryModal(){
     dateISO: normalizeDateISO(entry.dateISO),
     hours: Number(entry.hours)
   })).sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
+  // Keep record identity/provenance tied to the DOM row, independent of its
+  // position or edited date. This mapping is session-only, never persisted.
+  const originalByRow = new Map();
   if (sorted.length){
-    sorted.forEach(entry => appendLogHistoryRow(tbody, entry));
+    sorted.forEach(entry => originalByRow.set(appendLogHistoryRow(tbody, entry), entry));
   }
 
   const addBtn = overlay.querySelector("[data-log-history-add]");
   addBtn?.addEventListener("click", ()=>{
-    const todayISO = new Date().toISOString().slice(0,10);
-    const currentRows = Array.from(tbody.querySelectorAll("[data-log-history-row]"));
-    const latestDate = currentRows.length
-      ? currentRows[0].querySelector("[data-log-history-date]")?.value
-      : (sorted[0]?.dateISO || todayISO);
-    const latestHours = currentRows.length
-      ? currentRows[0].querySelector("[data-log-history-hours]")?.value
-      : sorted[0]?.hours;
-    const defaultDate = normalizeDateISO(latestDate) || todayISO;
-    const defaultHours = Number.isFinite(Number(latestHours)) ? Number(latestHours) : (RENDER_TOTAL ?? currentTotal() ?? "");
-    appendLogHistoryRow(tbody, { dateISO: defaultDate, hours: defaultHours });
+    const row = appendLogHistoryRow(tbody, null, { prepend: true });
+    const wrap = overlay.querySelector(".log-history-table-wrap");
+    if (wrap){ wrap.scrollTop = 0; wrap.scrollLeft = 0; }
+    row.querySelector("[data-log-history-date]")?.focus({ preventScroll: true });
   });
 
   overlay.querySelectorAll("[data-log-history-close]").forEach(btn => {
@@ -5875,12 +5873,13 @@ function openLogHistoryModal(){
     const entries = [];
     for (const row of rows){
       const dateVal = normalizeDateISO(row.querySelector("[data-log-history-date]")?.value);
-      const hoursVal = Number(row.querySelector("[data-log-history-hours]")?.value);
+      const hoursText = row.querySelector("[data-log-history-hours]")?.value;
+      const hoursVal = hoursText == null || hoursText.trim() === "" ? NaN : Number(hoursText);
       if (!dateVal){ toast("Enter a valid date for each log."); return; }
       if (!Number.isFinite(hoursVal) || hoursVal < 0){ toast("Hours must be zero or more."); return; }
       if (seen.has(dateVal)){ toast("Use unique dates for each log entry."); return; }
       seen.add(dateVal);
-      entries.push({ dateISO: dateVal, hours: hoursVal });
+      entries.push({ ...originalByRow.get(row), dateISO: dateVal, hours: hoursVal });
     }
     entries.sort((a, b)=> String(a.dateISO).localeCompare(String(b.dateISO)));
 

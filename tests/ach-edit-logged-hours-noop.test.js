@@ -56,7 +56,9 @@ function harness(state = fixture(), confirm = true){
   });
   ctx.appendLogHistoryRow = (tbody, entry)=>{
     const dateInput = { value:ctx.normalizeDateISO(entry.dateISO) }, hoursInput = { value:String(Number(entry.hours)) };
-    rows.push({ dateInput, hoursInput, querySelector:selector=>selector === "[data-log-history-date]" ? dateInput : hoursInput });
+    const row = { dateInput, hoursInput, querySelector:selector=>selector === "[data-log-history-date]" ? dateInput : hoursInput };
+    rows.push(row);
+    return row;
   };
   vm.runInContext(
     core.slice(core.indexOf("function parseDateLocal("),core.indexOf("function normalizeAppConfig(")) +
@@ -170,4 +172,27 @@ test("unchanged modal values preserve a newer in-memory record rather than repla
   const before = clone(state);
   h.submit();
   assertNoop(h,before,state.totalHistory,state.dailyCutHours);
+});
+
+test("real edits keep original identities and provenance after row reordering and date changes", ()=>{
+  const state = fixture(), before = clone(state), h = harness(state);
+  h.row("2025-12-09").dateInput.value = "2025-12-08";
+  h.row("2025-12-11").hoursInput.value = "1487";
+  h.rows.reverse();
+  h.submit();
+  assert.deepEqual(clone(h.ctx.totalHistory), [
+    { ...before.totalHistory[0], dateISO:"2025-12-08" },
+    { ...before.totalHistory[1], hours:1487 },
+    before.totalHistory[2]
+  ]);
+  assert.equal(h.calls.saveNow, 1);
+});
+
+test("an empty hour field cannot silently become a zero reading", ()=>{
+  const state = fixture(), before = clone(state), h = harness(state);
+  h.row("2025-12-09").hoursInput.value = "";
+  h.submit();
+  assert.deepEqual(state, before);
+  assert.equal(h.calls.saveNow, 0);
+  assert.deepEqual(h.messages, ["Hours must be zero or more."]);
 });
