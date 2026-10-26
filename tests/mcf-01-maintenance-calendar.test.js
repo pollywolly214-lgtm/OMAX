@@ -57,7 +57,7 @@ function recovery(){
 }
 function project(state){
   const window=clone(state),context=vm.createContext({window,normalizeDateKey:value=>value?String(value).slice(0,10):null,resolveV2OneTimeOccurrenceState:(root,event)=>integrity.resolveOneTime(window,root,event)});
-  vm.runInContext("const dueMap={};"+calendar.slice(calendar.indexOf("  const v2TaskLookup = new Map();"),calendar.indexOf("  const repeatInstances ="))+";this.rows=dueMap;",context);
+  vm.runInContext("const dueMap={},hiddenMap={};"+calendar.slice(calendar.indexOf("  const v2TaskLookup = new Map();"),calendar.indexOf("  const repeatInstances ="))+";window.__calendarV2OneTimeLookup=oneTimeLookup;this.rows=dueMap;",context);
   return{window,rows:clone(context.rows)};
 }
 function chips(rows){
