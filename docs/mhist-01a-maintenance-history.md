@@ -1,5 +1,10 @@
 # MHIST-01A audit and implementation plan
 
+Current integration: [MHIST-01C](mhist-01c-integration.md) merges main 039688f,
+retains RFS-01/RFS-02B protections and adds labeled cancelled/archived evidence.
+The older completed/removed inclusion rules below describe the original work;
+the 01C report and read-only F12 diagnostic describe the current acceptance scope.
+
 Audit completed before implementation on 2026-10-21. Base: origin/main,
 633e144. No production data was accessed. Findings below are proven from code;
 the exact affected production task/event counts are unknown.

@@ -429,6 +429,8 @@ function makeV2RepeatOccurrenceSlotKey(instanceId, occurrenceIndex){
 }
 
 function projectV2RepeatDates(instance, maxCount = 3){
+  const definition=(window.maintenanceTasksV2 || []).find(task=>task?.id===instance?.taskId);
+  if(window.OMAXMaintenanceTaskArchive?.deletedFor(window,definition || instance)) return [];
   const rule = instance && instance.repeatRule && typeof instance.repeatRule === "object" ? instance.repeatRule : null;
   if (!rule || !rule.enabled) return [];
   const basis = String(rule.basis || "").toLowerCase();
@@ -901,53 +903,18 @@ function openV2RepeatPanel(view){
     appendPanelRootEvent("moved", { fromDateISO: view.originalDateISO, toDateISO, source: "calendar_panel" });
     closeV2OneTimePanel();
   });
-  card.querySelector("[data-rpt-remove]")?.addEventListener("click", ()=>{
-    const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
-    const inst = instances.find(entry => entry && String(entry.id || "") === String(view.instanceId || ""));
-    const projected = inst ? projectV2RepeatDates(inst) : [];
-    const hasOtherVisible = projected.some(slot => {
-      const dateISO = typeof slot === "string" ? slot : normalizeDateKey(slot?.dateISO || null);
-      const occurrenceIndex = typeof slot === "string" ? null : Number(slot?.occurrenceIndex);
-      if (!dateISO) return false;
-      const rootId = occurrenceIndex != null && Number.isFinite(occurrenceIndex)
-        ? makeV2RepeatOccurrenceSlotKey(view.instanceId, occurrenceIndex)
-        : makeV2RepeatOccurrenceKey(view.instanceId, dateISO);
-      if (rootId === String(view.rootOccurrenceId || "")) return false;
-      const state = resolveV2RepeatOccurrenceStateWithCompat({ instanceId: view.instanceId, rootOccurrenceId: rootId, fallbackDateISO: dateISO, occurrenceIndex });
-      return !["removed", "skipped"].includes(String(state.lifecycleStatus || ""));
-    });
-    if (!hasOtherVisible){
-      const askStop = window.confirm ? window.confirm("This is the last visible occurrence in this repeat chain. Remove it and stop repeat tracking?") : true;
-      if (!askStop) return;
-      logRepeatAction("removed_last_visible_stop");
-      appendPanelRootEvent("removed", { source:"repeat_panel" });
-      if (typeof window.stopV2RepeatTracking === "function") window.stopV2RepeatTracking(String(view.instanceId), String(view.taskId), String(view.originalDateISO), String(view.rootOccurrenceId), String(view.displayDateISO || view.dateISO));
-      closeV2OneTimePanel();
-      return;
-    }
-    const ok=window.confirm?window.confirm("Remove this repeat occurrence from calendar?"):true;
-    if(!ok) return;
-    logRepeatAction("removed");
-    appendPanelRootEvent("removed", { source:"repeat_panel" });
-    closeV2OneTimePanel();
+  card.querySelector("[data-rpt-remove]")?.addEventListener("click", async ()=>{
+    const result=await runVerifiedCalendarCancellation({kind:"repeatRemove",instanceId:view.instanceId,taskId:view.taskId,rootOccurrenceId:view.rootOccurrenceId,dateISO:view.originalDateISO||view.dateISO},"Remove only this repeat occurrence from the active Calendar? Its stored history, notes, costs and other occurrences will be preserved; repeat tracking continues.");
+    if(result.saved){closeV2OneTimePanel();renderCalendar();}
   });
-  card.querySelector("[data-rpt-stop]")?.addEventListener("click", ()=>{
-    const ok = window.confirm ? window.confirm("Stop repeat tracking for this chain?") : true;
-    if (!ok) return;
-    if (typeof window.stopV2RepeatTracking === "function") window.stopV2RepeatTracking(String(view.instanceId), String(view.taskId), String(view.originalDateISO), String(view.rootOccurrenceId), String(view.displayDateISO || view.dateISO));
-    closeV2OneTimePanel();
+  card.querySelector("[data-rpt-stop]")?.addEventListener("click", async ()=>{
+    const result=await window.stopV2RepeatTracking?.(view.instanceId,view.taskId,view.originalDateISO||view.dateISO,view.rootOccurrenceId);
+    if(result?.saved){closeV2OneTimePanel();renderCalendar();}
   });
 }
 
-window.stopV2RepeatTracking = (instanceId, taskId, dateISO, rootOccurrenceId = null, displayDateISO = null)=>{
-  const instances = Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : [];
-  const inst = instances.find(entry => entry && String(entry.id || "") === String(instanceId));
-  if (!inst) return;
-  if (String(inst.status || "") === "stopped"){ toast("Repeat tracking already stopped"); return; }
-  inst.status = "stopped";
-  inst.stoppedAtISO = new Date().toISOString();
-  appendV2RepeatEventByRoot({ instanceId, taskId, rootOccurrenceId: rootOccurrenceId || makeV2RepeatOccurrenceKey(instanceId, dateISO), originalDateISO: dateISO, displayDateISO, eventType: "stopped", payload: { source: "repeat_panel" } });
-  toast("Repeat tracking stopped");
+window.stopV2RepeatTracking = async (instanceId, taskId, dateISO, rootOccurrenceId = null, displayDateISO = null)=>{
+  return runVerifiedCalendarCancellation({kind:"repeatStop",instanceId,taskId,dateISO,rootOccurrenceId:rootOccurrenceId||makeV2RepeatOccurrenceKey(instanceId,dateISO)},"Stop generating repeat projections for this exact schedule? Existing scheduled events, completions, notes, hours and costs will be preserved.");
 };
 
 async function appendV2OccurrenceEvent(baseOccurrenceId, eventType, payload = {}, supersedesEventId = null){
@@ -1646,227 +1613,26 @@ function unmarkCalendarTaskComplete(meta, dateISO){
   return changed;
 }
 
-function removeCalendarTaskOccurrence(meta, dateISO){
-  if (!meta || !meta.task) return false;
-  const key = normalizeDateKey(dateISO);
-  if (!key) return false;
-  const task = meta.task;
-  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
-  let changed = false;
-
-  if (isInstanceTask(task)){
-    if (Array.isArray(meta.list)){
-      meta.list.splice(meta.index, 1);
-      changed = true;
-      if (meta.mode === "asreq"){
-        window.tasksAsReq = meta.list;
-      }else{
-        window.tasksInterval = meta.list;
-      }
-    }
-    return changed;
-  }
-
-  if (mode === "interval"){
-    const history = typeof ensureTaskManualHistory === "function"
-      ? ensureTaskManualHistory(task)
-      : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
-    for (let i = history.length - 1; i >= 0; i--){
-      const entry = history[i];
-      if (entry && normalizeDateKey(entry.dateISO) === key){
-        history.splice(i,1);
-        changed = true;
-      }
-    }
-    if (changed){
-      task.manualHistory = history;
-    }
-    if (Array.isArray(task.completedDates)){
-      const idx = task.completedDates.indexOf(key);
-      if (idx >= 0){
-        task.completedDates.splice(idx,1);
-        changed = true;
-      }
-    }
-    if (normalizeDateKey(task.calendarDateISO) === key){
-      task.calendarDateISO = null;
-      changed = true;
-    }
-    if (setFamilyOccurrenceNote(task, key, "")){
-      changed = true;
-    }
-    if (setFamilyOccurrenceHours(task, key, null)){
-      changed = true;
-    }
-    if (changed){
-      applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
-    }
-  }else{
-    if (normalizeDateKey(task.calendarDateISO) === key){
-      task.calendarDateISO = null;
-      changed = true;
-    }
-    if (setFamilyOccurrenceNote(task, key, "")){
-      changed = true;
-    }
-    if (setFamilyOccurrenceHours(task, key, null)){
-      changed = true;
-    }
-    if (Array.isArray(task.completedDates)){
-      const idx = task.completedDates.indexOf(key);
-      if (idx >= 0){
-        task.completedDates.splice(idx,1);
-        changed = true;
-      }
-    }
-  }
-
-  return changed;
+async function removeCalendarTaskOccurrence(meta, dateISO){
+  return removeCalendarTaskOccurrences(meta,dateISO,'single');
 }
 
-function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
-  const normalizedScope = scope === "future" ? "future" : (scope === "all" ? "all" : "single");
-  if (!meta || !meta.task) return false;
+async function runVerifiedCalendarCancellation(operation,message){
+  const api=window.maintenanceCalendarCancellationApi;
+  if(!api?.isAvailable()){toast("Maintenance cancellation is unavailable while another change or recovery review is pending.");return {saved:false};}
+  try{
+    const reviewed=api.review(operation);
+    if(!window.confirm?.(message))return {saved:false,cancelled:true};
+    const result=await api.run(reviewed);
+    if(result.saved&&result.verified)toast(operation.kind==="repeatStop"?"Repeat tracking stopped; stored history preserved":"Calendar cancellation verified; history preserved");
+    else toast(result.error||"Cancellation was not verified. Preserve evidence and review before retrying.");
+    return result;
+  }catch(error){toast(String(error?.message||error));return {saved:false,error:String(error?.message||error)};}
+}
 
-  const key = normalizeDateKey(dateISO);
-  if (!key) return false;
-
-  const task = meta.task;
-  const mode = meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
-  let changed = false;
-
-  const isSameDay = (value)=> normalizeDateKey(value) === key;
-
-  if (isInstanceTask(task) && mode === "asreq"){
-    return removeCalendarTaskOccurrence(meta, key);
-  }
-
-  const targetTime = (()=>{
-    const targetDate = toDayStart(key);
-    return targetDate instanceof Date && !Number.isNaN(targetDate.getTime())
-      ? targetDate.getTime()
-      : null;
-  })();
-
-  const matchesScope = (value)=>{
-    const normalized = normalizeDateKey(value);
-    if (!normalized) return false;
-
-    if (normalizedScope === "all") return true;
-    if (normalizedScope === "single") return normalized === key;
-
-    const compareDate = toDayStart(normalized);
-    const compareTime = (compareDate instanceof Date && !Number.isNaN(compareDate.getTime()))
-      ? compareDate.getTime()
-      : null;
-    if (targetTime != null && compareTime != null) return compareTime >= targetTime;
-    return normalized >= key;
-  };
-
-  if (mode === "interval" && normalizedScope === "single"){
-    const removed = removeSingleOccurrenceAcrossTaskFamily(task, key);
-    if (removed) changed = true;
-    return changed;
-  }
-
-  if (mode === "interval"){
-    const removedSet = normalizeRemovedOccurrences(task);
-    const removedBefore = removedSet.size;
-    const addRemoved = (value)=>{
-      const normalized = normalizeDateKey(value);
-      if (!normalized) return;
-      if (!matchesScope(normalized)) return;
-      removedSet.add(normalized);
-    };
-
-    if (normalizedScope === "single"){
-      if (markOccurrenceRemoved(task, key)) changed = true;
-    }else{
-      addRemoved(key);
-      const addObjectKeys = (obj)=>{
-        if (!obj || typeof obj !== "object") return;
-        Object.keys(obj).forEach(addRemoved);
-      };
-      const addArrayValues = (arr)=>{
-        if (!Array.isArray(arr)) return;
-        arr.forEach(addRemoved);
-      };
-
-      addArrayValues(task.completedDates);
-      addObjectKeys(task.occurrenceNotes);
-      addObjectKeys(task.occurrenceHours);
-      addArrayValues(Array.isArray(task.manualHistory) ? task.manualHistory.map(entry => entry?.dateISO) : []);
-      addRemoved(task.calendarDateISO);
-
-      const projected = projectIntervalDueDates(task, { monthsAhead: 12, minOccurrences: 12 });
-      projected.forEach(pred => {
-        const projectedKey = normalizeDateKey(pred?.dateISO);
-        if (!projectedKey) return;
-        if (normalizedScope === "all"){
-          removedSet.add(projectedKey);
-          return;
-        }
-        const projectedDate = toDayStart(projectedKey);
-        const projectedTime = (projectedDate instanceof Date && !Number.isNaN(projectedDate.getTime()))
-          ? projectedDate.getTime()
-          : null;
-        if (targetTime != null && projectedTime != null && projectedTime >= targetTime){
-          removedSet.add(projectedKey);
-        }
-      });
-
-      if (removedSet.size !== removedBefore){
-        task.removedOccurrences = Array.from(removedSet);
-        changed = true;
-      }
-    }
-  }else{
-    const removedChanged = clearRemovedOccurrences(task, matchesScope);
-    if (removedChanged) changed = true;
-  }
-
-  const pruneOccurrenceObject = (obj)=>{
-    if (!obj || typeof obj !== "object") return false;
-    let mutated = false;
-    Object.keys(obj).forEach(k => {
-      if (matchesScope(k)){
-        delete obj[k];
-        mutated = true;
-      }
-    });
-    return mutated;
-  };
-
-  if (matchesScope(task.calendarDateISO)){
-    task.calendarDateISO = null;
-    changed = true;
-  }
-
-  if (Array.isArray(task.completedDates)){
-    const next = task.completedDates.filter(value => !matchesScope(value));
-    if (next.length !== task.completedDates.length){
-      task.completedDates = next;
-      changed = true;
-    }
-  }
-
-  if (pruneOccurrenceObject(task.occurrenceNotes)) changed = true;
-  if (pruneOccurrenceObject(task.occurrenceHours)) changed = true;
-
-  if (mode === "interval"){
-    if (Array.isArray(task.manualHistory)){
-      const nextHistory = task.manualHistory.filter(entry => !matchesScope(entry?.dateISO));
-      if (nextHistory.length !== task.manualHistory.length){
-        task.manualHistory = nextHistory;
-        changed = true;
-      }
-    }
-    if (changed){
-      applyIntervalBaseline(task, { baselineHours: null, currentHours: typeof getCurrentMachineHours === "function" ? getCurrentMachineHours() : undefined });
-    }
-  }
-
-  return changed;
+async function removeCalendarTaskOccurrences(meta, dateISO, scope = "single"){
+  const message=scope==="all"?"Cancel all scheduled occurrences for this definition and its explicitly linked schedules? Completed history, notes, costs and inventory will remain.":scope==="future"?"Cancel scheduled occurrences on and after this date? Completed history, notes, costs and inventory will remain.":"Hide this one legacy occurrence from the active Calendar? Its original completion/history, notes, costs and inventory will remain; independent V2 roots are unchanged.";
+  return runVerifiedCalendarCancellation({kind:"legacy",taskId:meta?.task?.id,dateISO,scope},message);
 }
 
 function removeCalendarTaskEverywhere(meta){
@@ -1959,13 +1725,34 @@ function completeTask(taskId){
   }
 }
 
+async function archiveCalendarTask(task){
+  const api=window.maintenanceTaskDeletionApi;
+  if(!task?.id||!api?.isAvailable()){
+    toast("Task archiving is unavailable while changes are saving or Recovery Mode is active.");return false;
+  }
+  const confirmed=window.confirm?.(`Archive "${task.name||"Maintenance task"}" from Maintenance Settings? Its history, linked inventory, existing calendar entries and other task definitions will be preserved. New repeat projections stop while archived. Restore its original identity from Deleted History.`);
+  if(!confirmed)return false;
+  const result=await api.remove(task.id);
+  if(!result?.saved||!result.verified){toast(result?.error||"Task archive was not verified. Review before retrying.");return false;}
+  toast("Task archived");return true;
+}
+
 function showTaskBubble(taskId, anchor, options = {}){
+  const archived=window.OMAXMaintenanceTaskArchive?.resolve(window,String(taskId));
+  if(archived?.status === "archived"){
+    const bubble=makeBubble(anchor);
+    bubble.textContent=(archived.task.name || "Maintenance task")+" — Deleted. This task was removed from Maintenance Settings. Its archived definition is read-only; history and linked records are preserved.";
+    return;
+  }
   const statusHint = options.status || anchor?.getAttribute("data-cal-status") || null;
   const modeHint = options.mode || anchor?.getAttribute("data-cal-mode") || null;
   const dateHint = options.dateISO || anchor?.getAttribute("data-cal-date") || anchor?.closest(".day")?.dataset.dateIso || null;
   const meta = findCalendarTaskMeta(taskId);
   if (!meta || !meta.task) return;
   const task = meta.task;
+  // Legacy display helpers normalize their argument. Keep those changes in a
+  // view copy; action handlers below still use the exact original definition.
+  const viewTask = JSON.parse(JSON.stringify(task));
   const mode = modeHint === "asreq" || meta.mode === "asreq" || task.mode === "asreq" ? "asreq" : "interval";
   const dateKey = normalizeDateKey(dateHint);
   const displayDate = dateKey ? (()=>{
@@ -1976,9 +1763,9 @@ function showTaskBubble(taskId, anchor, options = {}){
   const completedSet = new Set(Array.isArray(task.completedDates) ? task.completedDates.map(normalizeDateKey).filter(Boolean) : []);
   const normalizedStatus = statusHint || (completedSet.has(dateKey || "") ? "completed" : (mode === "asreq" && dateKey ? "manual" : "due"));
   const isCompleted = !!(dateKey && completedSet.has(dateKey)) || normalizedStatus === "completed";
-  const history = typeof ensureTaskManualHistory === "function"
-    ? ensureTaskManualHistory(task)
-    : (Array.isArray(task.manualHistory) ? task.manualHistory : []);
+  // Opening a read-only popup must not normalize protected history. The archive
+  // coordinator compares this exact live evidence with the authoritative source.
+  const history = Array.isArray(task.manualHistory) ? task.manualHistory : [];
   const hasHistoryEntry = !!(dateKey && history.some(entry => entry && normalizeDateKey(entry.dateISO) === dateKey));
   const canRemoveOccurrence = !!dateKey;
   const canMarkComplete = !!dateKey && !isCompleted;
@@ -1988,10 +1775,10 @@ function showTaskBubble(taskId, anchor, options = {}){
     ? "Completed"
     : (normalizedStatus === "manual" ? "Scheduled" : normalizedStatus === "due" ? "Projected" : "Scheduled");
 
-  const occurrenceNote = dateKey ? getOccurrenceNoteForTask(task, dateKey) : "";
+  const occurrenceNote = dateKey ? getOccurrenceNoteForTask(viewTask, dateKey) : "";
 
   const hoursPerDay = configuredTaskDurationDailyHours();
-  const occurrenceHours = dateKey ? getOccurrenceHoursForTask(task, dateKey) : null;
+  const occurrenceHours = dateKey ? getOccurrenceHoursForTask(viewTask, dateKey) : null;
   
   const downtimeHours = (()=>{
     const raw = Number(task.downtimeHours);
@@ -2006,7 +1793,7 @@ function showTaskBubble(taskId, anchor, options = {}){
   }
   if (mode === "interval"){
     infoParts.push(`<div class="bubble-kv"><span>Interval:</span><span>${task.interval != null ? escapeHtml(`${task.interval} hrs`) : "—"}</span></div>`);
-    const nd = typeof nextDue === "function" ? nextDue(task) : null;
+    const nd = typeof nextDue === "function" ? nextDue(viewTask) : null;
     infoParts.push(`<div class="bubble-kv"><span>Status:</span><span>${escapeHtml(statusLabel)}</span></div>`);
     infoParts.push(`<div class="bubble-kv"><span>Last serviced:</span><span>${nd ? escapeHtml(`${nd.since.toFixed(0)} hrs ago`) : "—"}</span></div>`);
     infoParts.push(`<div class="bubble-kv"><span>Remain:</span><span>${nd ? escapeHtml(`${nd.remain.toFixed(0)} hrs`) : "—"}</span></div>`);
@@ -2037,7 +1824,7 @@ function showTaskBubble(taskId, anchor, options = {}){
   }
 
   const targetKey = dateKey || normalizeDateKey(new Date());
-  const recurrence = getTaskRecurrence(task);
+  const recurrence = getTaskRecurrence(viewTask);
   const isRepeating = Boolean(recurrence && recurrence.enabled);
 
   const actions = [];
@@ -2058,6 +1845,7 @@ function showTaskBubble(taskId, anchor, options = {}){
     if (isRepeating){
       actions.push(`<button class="secondary" data-bbl-remove-future>Remove future</button>`);
     }
+    actions.push(`<button class="secondary" data-bbl-remove-all>Remove all scheduled</button>`);
   }
   actions.push(`<button data-bbl-edit>Edit settings</button>`);
   actions.push(`<button class="danger" data-bbl-remove-task>Remove task</button>`);
@@ -2118,24 +1906,9 @@ function showTaskBubble(taskId, anchor, options = {}){
     }
   });
 
-  const runRemoveScope = (scope)=>{
-    const confirmText = scope === "future"
-      ? "Remove this occurrence and all future occurrences from the calendar?"
-      : scope === "all"
-        ? "Remove all calendar occurrences for this task (past and future)?"
-        : "Remove this occurrence from the calendar?";
-    const shouldRemove = window.confirm ? window.confirm(confirmText) : true;
-    if (!shouldRemove) return;
-    const changed = removeCalendarTaskOccurrences(meta, targetKey, scope);
-    if (changed){
-      if (typeof saveCloudNow === "function") saveCloudNow();
-      else saveCloudDebounced();
-      const toastMessage = scope === "future"
-        ? "Current and future occurrences removed"
-        : scope === "all"
-          ? "All occurrences removed"
-          : "Removed from calendar";
-      toast(toastMessage);
+  const runRemoveScope = async (scope)=>{
+    const result = await removeCalendarTaskOccurrences(meta, targetKey, scope);
+    if (result.saved){
       hideBubble();
       rerenderCalendarKeepScroll();
     }
@@ -2144,25 +1917,8 @@ function showTaskBubble(taskId, anchor, options = {}){
   b.querySelector("[data-bbl-remove-future]")?.addEventListener("click", ()=> runRemoveScope("future"));
   b.querySelector("[data-bbl-remove-all]")?.addEventListener("click", ()=> runRemoveScope("all"));
 
-  b.querySelector("[data-bbl-remove-task]")?.addEventListener("click", ()=>{
-    const templateId = task.templateId != null ? String(task.templateId) : String(task.id);
-    const list = mode === "asreq" ? (Array.isArray(window.tasksAsReq) ? window.tasksAsReq : []) : (Array.isArray(window.tasksInterval) ? window.tasksInterval : []);
-    const templateTask = list.find(item => item && String(item.id) === templateId && isTemplateTask(item)) || (isTemplateTask(task) ? task : null);
-    const label = templateTask?.name || task.name || "Task";
-    const confirmText = `Remove "${label}" from Maintenance Settings and delete all scheduled copies?`;
-    const shouldRemove = window.confirm ? window.confirm(confirmText) : true;
-    if (!shouldRemove) return;
-    try {
-      if (typeof recordDeletedItem === "function"){
-        recordDeletedItem("task", templateTask || task, { list: mode, cat: (templateTask || task)?.cat ?? null, parentTask: (templateTask || task)?.parentTask ?? null });
-      }
-    } catch (err) {
-      console.warn("Failed to record deleted task from calendar", err);
-    }
-    if (removeCalendarTaskFamily(meta)){
-      if (typeof saveCloudNow === "function") saveCloudNow();
-      else saveCloudDebounced();
-      toast("Task removed");
+  b.querySelector("[data-bbl-remove-task]")?.addEventListener("click", async ()=>{
+    if (await archiveCalendarTask(task)){
       hideBubble();
       rerenderCalendarKeepScroll();
     }
@@ -2859,29 +2615,6 @@ function restoreCriticalIntervalTasks(){
   if (!tasks.length) return false;
   const targets = new Set(["mixing_tube_rotation", "jewel_nozzle_clean", "pump_rebuild", "pump_tube_noz_filter"]);
   let changed = false;
-  const deleted = Array.isArray(window.deletedItems) ? window.deletedItems : [];
-  const restoreFromTrash = (matchFn)=>{
-    if (typeof restoreDeletedItem !== "function") return false;
-    const entry = deleted.find(item => item && item.type === "task" && matchFn(String(item.payload?.id || "").toLowerCase(), String(item.payload?.name || "").toLowerCase()));
-    if (!entry || !entry.id) return false;
-    try {
-      const result = restoreDeletedItem(entry.id);
-      return Boolean(result && result.ok);
-    } catch (_err){
-      return false;
-    }
-  };
-  if (restoreFromTrash((id,name)=> id.includes("mixing_tube_rotation") || name.includes("mixing tube rotation"))) changed = true;
-  if (restoreFromTrash((id,name)=> id.includes("pump_tube_noz_filter") || (name.includes("mixing tube") && name.includes("replace")) || (name.includes("pump tube") && name.includes("nozzle filter")))) changed = true;
-  if (restoreFromTrash((id,name)=> id.includes("jewel_nozzle_clean") || (name.includes("jew") && name.includes("orifice") && name.includes("nozzle")))) changed = true;
-  const activePumpEquivalent = tasks.some(task => {
-    if (typeof window.normalizeMaintenanceTaskIdentity !== "function"){
-      return String(task?.name || "").trim().toLowerCase() === "pump rebuild" && String(task?.mode || "interval") === "interval" && Number(task?.interval) === 500;
-    }
-    return window.normalizeMaintenanceTaskIdentity(task).equivalentKey === "pump rebuild|interval|500";
-  });
-  // Recovery is by task identity/configuration, never by a deleted object's old ID.
-  if (!activePumpEquivalent && restoreFromTrash((id,name)=> id.includes("pump_rebuild") || (name.includes("pump") && name.includes("rebuild")))) changed = true;
   const matched = [];
   tasks.forEach(task => {
     if (!task) return;
@@ -2980,6 +2713,7 @@ function renderWaterQualityCalendarEvents(){
 // Legacy normalizers write into their argument, so only pass disposable copies.
 function buildMaintenanceCalendarEvents(){
   const dueMap = {};
+  const hiddenMap = {}; // Read-only evidence; never rendered as active Calendar chips.
   const hoursPerDay = configuredTaskDurationDailyHours();
   const splitTaskDuration = (startKey, hours)=>{
     const baseKey = normalizeDateKey(startKey);
@@ -3019,6 +2753,7 @@ function buildMaintenanceCalendarEvents(){
     if (!task || !iso) return;
     const key = normalizeDateKey(iso);
     if (!key) return;
+    const cancelled=window.OMAXMaintenanceCalendarCancellation?.hidden(window,{legacyTaskId:task.id,dateISO:key,status:status||"due"});
     const downtimeHours = resolveTaskDowntimeHours(task, key);
     const segments = splitTaskDuration(key, downtimeHours);
     const statusKey = status || "due";
@@ -3026,7 +2761,7 @@ function buildMaintenanceCalendarEvents(){
     segments.forEach(seg => {
       const segKey = seg.dateISO;
       if (!segKey) return;
-      const events = dueMap[segKey] ||= [];
+      const events = (cancelled?hiddenMap:dueMap)[segKey] ||= [];
       const baseId = String(task.id);
       const compositeId = seg.count > 1 ? `${baseId}__seg${seg.index}` : baseId;
       const templateKey = String(task.templateId != null ? task.templateId : task.id);
@@ -3052,6 +2787,7 @@ function buildMaintenanceCalendarEvents(){
       }
       const duplicateByTemplate = events.find(ev =>
         ev.type === "task"
+        && String(ev.taskId || ev.id) === baseId
         && String(ev.templateKey || ev.taskId || ev.id) === templateKey
         && String(ev.taskStartsOn || ev.dateISO || "") === String(key)
         && Number(ev.segmentIndex || 0) === Number(seg.index || 0)
@@ -3070,6 +2806,7 @@ function buildMaintenanceCalendarEvents(){
         return;
       }
       events.push({
+        ...(cancelled?{calendarHiddenReason:"Authorized calendar cancellation"}:{}),
         type: "task",
         id: compositeId,
         taskId: baseId,
@@ -3087,9 +2824,8 @@ function buildMaintenanceCalendarEvents(){
     });
   }
 
-  const intervalTasks = Array.isArray(window.tasksInterval)
-    ? window.tasksInterval.filter(t => t && t.mode === "interval" && isInstanceTask(t)).map(task => structuredClone(task))
-    : [];
+  const intervalTasks = (window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"interval") || window.tasksInterval || [])
+    .filter(t => t && t.mode === "interval" && (isInstanceTask(t) || t.archivedDefinition)).map(task=>structuredClone(task));
   const completedByTask = new Map();
   intervalTasks.forEach(t => {
     if (!t) return;
@@ -3148,6 +2884,7 @@ function buildMaintenanceCalendarEvents(){
       // Checkpoint: hide legacy active calendar clutter; preserve task definitions and history data.
     });
 
+    if (t.archivedDefinition) return;
     const skipDates = new Set(completedKeys);
     manualDates.forEach(dateKey => skipDates.add(dateKey));
     removedSet.forEach(dateKey => skipDates.add(dateKey));
@@ -3176,7 +2913,7 @@ function buildMaintenanceCalendarEvents(){
     }
   });
 
-  const asReqTasks = Array.isArray(window.tasksAsReq) ? window.tasksAsReq.map(task => task && structuredClone(task)) : [];
+  const asReqTasks = (window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"asreq") || window.tasksAsReq || []).map(task=>task&&structuredClone(task));
   const hasLegacyHistoryEvidence = (task)=>{
     if (!task || typeof task !== "object") return false;
     if (Array.isArray(task.completedDates) && task.completedDates.some(Boolean)) return true;
@@ -3198,7 +2935,7 @@ function buildMaintenanceCalendarEvents(){
     const recurrence = getTaskRecurrence(t);
     const templateLike = typeof isTemplateTask === "function" ? isTemplateTask(t) : (!t.templateId || String(t.templateId) === String(t.id));
     const shouldSuppressLegacySchedule = templateLike && !hasLegacyHistoryEvidence(t);
-    if (recurrence && recurrence.enabled && !shouldSuppressLegacySchedule){
+    if (!t.archivedDefinition && recurrence && recurrence.enabled && !shouldSuppressLegacySchedule){
       const skipDates = new Set(completedDates);
       if (manualKey) skipDates.add(manualKey);
       const projections = projectCalendarBasedOccurrences(t, recurrence, {
@@ -3219,7 +2956,7 @@ function buildMaintenanceCalendarEvents(){
   const v2TaskLookup = new Map();
   (Array.isArray(window.maintenanceTasksV2) ? window.maintenanceTasksV2 : []).forEach(entry => {
     if (!entry || entry.id == null) return;
-    v2TaskLookup.set(String(entry.id), entry);
+    v2TaskLookup.set(String(entry.id), window.OMAXMaintenanceTaskArchive?.displayTask(window,entry) || entry);
   });
   const v2InstanceLookup = new Map();
   (Array.isArray(window.maintenanceCalendarInstancesV2) ? window.maintenanceCalendarInstancesV2 : []).forEach(entry => {
@@ -3250,12 +2987,13 @@ function buildMaintenanceCalendarEvents(){
     if (!resolvedDateISO) return;
     const mapKey = `${occurrenceId}:${dateISO}`;
     if (seenV2ChipKeys.has(mapKey)) return;
-    if (status === "removed" || status === "skipped") return;
+    const hiddenReason=["removed","skipped"].includes(status)?`V2 lifecycle: ${status}`
+      :window.OMAXMaintenanceCalendarCancellation?.hidden(window,{instanceId,dateISO:resolvedDateISO,status})?"Authorized calendar cancellation":"";
     const equivalentKey = `one_time_root:${occurrenceId}`;
     if (seenV2ScheduledEquivalentKeys.has(equivalentKey)) return;
     seenV2ChipKeys.add(mapKey);
     seenV2ScheduledEquivalentKeys.add(equivalentKey);
-    oneTimeLookup[occurrenceId] = {
+    const historyView = {
       occurrenceId,
       eventType,
       instanceId,
@@ -3266,7 +3004,9 @@ function buildMaintenanceCalendarEvents(){
       hours,
       status
     };
-    (dueMap[resolvedDateISO] ||= []).push({
+    if(!hiddenReason)oneTimeLookup[occurrenceId]=historyView;
+    ((hiddenReason?hiddenMap:dueMap)[resolvedDateISO] ||= []).push({
+      ...(hiddenReason?{calendarHiddenReason:hiddenReason,historyView}:{}),
       type: "v2task",
       id: `v2-one-time:${occurrenceId}`,
       occurrenceId,
@@ -3299,12 +3039,14 @@ function buildMaintenanceCalendarEvents(){
       const task = v2TaskLookup.get(String(instance.taskId || "")) || null;
       const taskName = String((task && task.name) || "Maintenance repeat");
       const renderDateISO = state.displayDateISO || dateISO;
+      const hiddenReason=window.OMAXMaintenanceCalendarCancellation?.hidden(window,{instanceId:String(instance.id),dateISO:renderDateISO,status:state.lifecycleStatus})?"Authorized calendar cancellation":"";
       // Slot/date compatibility names the same logical occurrence, not a second row.
       const canonicalRoot = state.matchedRootOccurrenceId || rootOccurrenceId;
       const repeatKey = JSON.stringify([String(instance.id), canonicalRoot]);
       if (seenV2RepeatProjectionKeys.has(repeatKey)) return;
       seenV2RepeatProjectionKeys.add(repeatKey);
-      (dueMap[renderDateISO] ||= []).push({
+      ((hiddenReason?hiddenMap:dueMap)[renderDateISO] ||= []).push({
+        ...(hiddenReason?{calendarHiddenReason:hiddenReason}:{}),
         type: "v2repeat",
         id: canonicalRoot,
         instanceId: String(instance.id),
@@ -3335,6 +3077,7 @@ function buildMaintenanceCalendarEvents(){
   const repeatHistoryLatest = new Map();
   repeatEvents.forEach((entry, index) => {
     if (!entry || typeof entry !== "object") return;
+    if(entry.eventType==="stopped")return; // Tracking intent must not hide its stored completion/root history.
     if (String(entry.system || "") !== "v2" && Number(entry.schemaVersion || 0) < 2) return;
     const rootId = String(entry.rootOccurrenceId || "");
     if (!rootId.startsWith("repeat:")) return;
@@ -3352,7 +3095,7 @@ function buildMaintenanceCalendarEvents(){
   });
   repeatHistoryLatest.forEach(({ entry }, rootId) => {
     const latestType = String(entry.eventType || "");
-    if (!["completed", "uncompleted", "note_set", "hours_set", "moved", "skipped", "removed"].includes(latestType)) return;
+    if (!["scheduled", "completed", "uncompleted", "note_set", "hours_set", "moved", "skipped", "removed"].includes(latestType)) return;
     const dateISO = normalizeDateKey(entry.effectiveDateISO || null) || String(rootId).split(":").slice(-1)[0];
     if (!dateISO) return;
     const instanceId = String(entry.instanceId || "");
@@ -3360,15 +3103,17 @@ function buildMaintenanceCalendarEvents(){
     const task = v2TaskLookup.get(taskId) || null;
     const taskName = String((task && task.name) || "Maintenance repeat");
     const state = resolveV2RepeatOccurrenceStateByRoot(rootId, dateISO);
-    if (["removed","skipped"].includes(String(state.lifecycleStatus || ""))) return;
     const resolvedDateISO = normalizeDateKey(state.displayDateISO || dateISO || null);
     if (!resolvedDateISO) return;
+    const hiddenReason=["removed","skipped"].includes(state.lifecycleStatus)?`V2 lifecycle: ${state.lifecycleStatus}`
+      :window.OMAXMaintenanceCalendarCancellation?.hidden(window,{instanceId,dateISO:resolvedDateISO,status:state.lifecycleStatus})?"Authorized calendar cancellation":"";
     const exists = (dueMap[resolvedDateISO] || []).some(item => item && item.type === "v2repeat" && String(item.id || "") === rootId);
     if (exists) return;
     const repeatKey = JSON.stringify([instanceId, rootId]);
     if (seenV2RepeatProjectionKeys.has(repeatKey)) return;
     seenV2RepeatProjectionKeys.add(repeatKey);
-    (dueMap[resolvedDateISO] ||= []).push({
+    ((hiddenReason?hiddenMap:dueMap)[resolvedDateISO] ||= []).push({
+      ...(hiddenReason?{calendarHiddenReason:hiddenReason}:{}),
       type: "v2repeat",
       id: rootId,
       instanceId,
@@ -3387,13 +3132,13 @@ function buildMaintenanceCalendarEvents(){
         name: taskName,
         note: state.note,
         hours: state.hours,
-        status: state.lifecycleStatus === "completed" ? "completed" : "scheduled",
+        status: state.lifecycleStatus,
         repeatType: "Repeat history"
       }
     });
   });
 
-  return { dueMap, oneTimeLookup };
+  return { dueMap, oneTimeLookup, hiddenEvents:Object.values(hiddenMap).flat() };
 }
 
 // Settings ownership is an explicit foreign-key relationship, never a name match.
@@ -3410,7 +3155,8 @@ function buildMaintenanceTaskHistory(settingsTaskId, projection = buildMaintenan
     });
     return map;
   };
-  const legacy = index([...list(window.tasksInterval), ...list(window.tasksAsReq)]);
+  const legacy = index([...list(window.tasksInterval), ...list(window.tasksAsReq),
+    ...list(window.deletedItems).filter(entry=>entry?.type==="task").map(entry=>entry.payload)]);
   const selected = legacy.get(id(settingsTaskId));
   if (!selected) return [];
   const familyId = task => id(task.templateId || task.id);
@@ -3429,15 +3175,17 @@ function buildMaintenanceTaskHistory(settingsTaskId, projection = buildMaintenan
     if (!row.dateISO || !parseDateLocal(row.dateISO) || rows.has(row.key)) return;
     rows.set(row.key, row);
   };
-  Object.values(projection.dueMap).flat().forEach(event => {
+  const visibility = event => ({source:event.calendarHiddenReason?"historical evidence":"calendar",
+    activeCalendar:!event.calendarHiddenReason,calendarHiddenReason:event.calendarHiddenReason||""});
+  [...Object.values(projection.dueMap).flat(),...list(projection.hiddenEvents)].forEach(event => {
     if (event.type === "task"){
       const task = legacy.get(id(event.taskId));
       if (!task || !belongs(task.id)) return;
       const dateISO = normalizeDateKey(event.taskStartsOn || event.dateISO);
-      put({ key: legacyKey(task.id, dateISO), source: "calendar", sourceSystem: "legacy",
+      put({ key: legacyKey(task.id, dateISO), ...visibility(event), sourceSystem: "legacy",
         taskId: id(task.id), dateISO, originalDateISO: dateISO, status: event.status === "completed" ? "completed" : "scheduled",
         note: String(task.occurrenceNotes?.[dateISO] || ""), hours: event.totalDowntimeHours,
-        calendarEvent: event });
+        ...(event.calendarHiddenReason?{}:{calendarEvent: event}) });
       return;
     }
     if (!["v2task", "v2repeat"].includes(event.type)) return;
@@ -3458,14 +3206,22 @@ function buildMaintenanceTaskHistory(settingsTaskId, projection = buildMaintenan
     const references = [task?.legacyTaskId, instance?.legacyTaskId, ...related.map(row => row.legacyTaskId)]
       .map(id).filter(Boolean);
     if (!references.length || references.some(ref => !belongs(ref))) return;
-    const view = event.type === "v2task" ? projection.oneTimeLookup[event.occurrenceId] : event.repeatView;
+    const view = event.type === "v2task" ? event.historyView||projection.oneTimeLookup[event.occurrenceId] : event.repeatView;
+    const completions=related.filter(row=>row.eventType==="completed");
+    const latestCompletion=completions.map((row,index)=>({row,index})).sort((a,b)=>(Date.parse(a.row.recordedAtISO)||0)-(Date.parse(b.row.recordedAtISO)||0)||b.index-a.index).at(-1)?.row;
+    const completionHours=latestCompletion?.loggedHours??latestCompletion?.payload?.hours;
+    // Older completions store snapshots directly; explicit note_set/hours_set
+    // (including empty/null) still take precedence over those retained inputs.
+    const note=event.type==="v2repeat"&&!related.some(row=>row.eventType==="note_set")?view?.note||latestCompletion?.payload?.note||"":view?.note||"";
+    const hours=event.type==="v2repeat"&&!related.some(row=>row.eventType==="hours_set")?view?.hours??completionHours??null:view?.hours??null;
     const dateISO = normalizeDateKey(view?.dateISO || event.dateISO);
     const originalDateISO = normalizeDateKey(root?.effectiveDateISO || root?.dateISO || view?.originalDateISO || dateISO);
-    put({ key: JSON.stringify(["v2", instanceId, rootId]), source: "calendar", sourceSystem: "v2",
+    put({ key: JSON.stringify(["v2", instanceId, rootId]), ...visibility(event), sourceSystem: "v2",
       taskId, instanceId, rootOccurrenceId: rootId, dateISO, originalDateISO,
-      status: view?.status === "completed" ? "completed" : "scheduled",
-      isMoved: originalDateISO !== dateISO, note: String(view?.note || ""), hours: view?.hours ?? null,
-      calendarEvent: event });
+      status: view?.status || "scheduled",trackingStopped:instance?.status==="stopped",
+      lifecycleEvidence:related.map(row=>structuredClone(row)),completionEvidence:completions.map(row=>structuredClone(row)),
+      isMoved: originalDateISO !== dateISO, note: String(note), hours,
+      ...(event.calendarHiddenReason?{}:{calendarEvent: event}) });
   });
   // Keep explicit legacy evidence that predates today's calendar suppression.
   // Legacy storage defines one occurrence per task/date (completion + manual log).
@@ -3473,33 +3229,39 @@ function buildMaintenanceTaskHistory(settingsTaskId, projection = buildMaintenan
     if (!task || !belongs(task.id)) return;
     const removed = new Set((Array.isArray(task.removedOccurrences) ? task.removedOccurrences : Object.keys(task.removedOccurrences || {}))
       .map(normalizeDateKey).filter(Boolean));
-    const dates = new Map();
-    const record = (value, status, note = "") => {
-      const dateISO = normalizeDateKey(value);
-      if (!dateISO || removed.has(dateISO)) return;
-      const existing = dates.get(dateISO);
-      const priority = { completed: 3, logged: 2, scheduled: 1 };
-      dates.set(dateISO, { status: (priority[existing?.status] || 0) > priority[status] ? existing.status : status, note: note || existing?.note || "" });
-    };
-    list(task.completedDates).forEach(date => record(date, "completed"));
-    list(task.manualHistory).forEach(entry => {
-      if (!entry || entry.status === "removed") return;
-      record(entry.dateISO, entry.status === "completed" ? "completed" : entry.status === "scheduled" ? "scheduled" : "logged", String(entry.note || ""));
+    const completions=new Set(list(task.completedDates).map(normalizeDateKey).filter(Boolean)),manual=new Map();
+    list(task.manualHistory).forEach((entry,index)=>{
+      const dateISO=normalizeDateKey(entry?.dateISO||entry?.date||entry?.doneDateISO);
+      if(!dateISO)return;
+      const items=manual.get(dateISO)||[],identity=entry.import_event_id||entry.importEventId||entry.id;
+      const recordKey=JSON.stringify(["legacy-record",id(task.id),identity?["id",id(identity)]:["index",index]]);
+      if(!items.some(row=>row.recordKey===recordKey))items.push({entry,recordKey,status:entry.status||"logged"});
+      manual.set(dateISO,items);
     });
-    record(task.calendarDateISO, "scheduled");
-    dates.forEach((value, dateISO) => {
-      const key = legacyKey(task.id, dateISO);
-      const note = String(task.occurrenceNotes?.[dateISO] || value.note || "");
-      if (rows.has(key)){
-        if (!rows.get(key).note) rows.get(key).note = note;
-        return;
-      }
-      put({ key, source: "legacy history", sourceSystem: "legacy",
-        taskId: id(task.id), dateISO, originalDateISO: dateISO, status: value.status, note,
-        hours: task.occurrenceHours?.[dateISO] ?? task.downtimeHours ?? null });
+    const scheduled=normalizeDateKey(task.calendarDateISO);
+    const dates=new Set([...completions,...manual.keys(),...removed,...(scheduled?[scheduled]:[])]);
+    dates.forEach(dateISO=>{
+      const items=manual.get(dateISO)||[],primary=completions.has(dateISO)?items.find(row=>row.status==="completed"):items.find(row=>row.status==="completed")||items[0];
+      const records=[{recordKey:legacyKey(task.id,dateISO),entry:primary?.entry,
+        status:completions.has(dateISO)?"completed":primary?.status||(removed.has(dateISO)?"removed":"scheduled")},...items.filter(row=>row!==primary)];
+      records.forEach((value,index)=>{
+        const key=value.recordKey,note=String((!index&&Object.hasOwn(task.occurrenceNotes||{},dateISO)?task.occurrenceNotes[dateISO]:value.entry?.note)??"");
+        if(rows.has(key)){
+          if(!rows.get(key).note)rows.get(key).note=note;
+          if(value.entry)rows.get(key).recordedEvidence=structuredClone(value.entry);
+          return;
+        }
+        const cancelled=window.OMAXMaintenanceCalendarCancellation?.hidden(window,{legacyTaskId:task.id,dateISO,status:value.status});
+        const reason=cancelled?"Authorized calendar cancellation":removed.has(dateISO)||["removed","uncompleted","canceled","cancelled"].includes(value.status)?"Legacy removal/reopening evidence":"Legacy evidence outside active Calendar projection";
+        put({key,source:"legacy history",sourceSystem:"legacy",activeCalendar:false,calendarHiddenReason:reason,
+          taskId:id(task.id),dateISO,originalDateISO:dateISO,status:value.status,note,
+          recordedEvidence:value.entry?structuredClone(value.entry):null,
+          hours:value.entry?.loggedHours??value.entry?.timeHours??value.entry?.hours??task.occurrenceHours?.[dateISO]??task.downtimeHours??null});
+      });
     });
   });
-  return [...rows.values()].sort((a,b) => a.dateISO.localeCompare(b.dateISO) || a.key.localeCompare(b.key));
+  return [...rows.values()].map(row=>({...row,archived:[id(selected.id),selectedFamily,row.taskId].some(taskId=>window.OMAXMaintenanceTaskArchive?.resolve(window,taskId).status==="archived")}))
+    .sort((a,b) => a.dateISO.localeCompare(b.dateISO) || a.key.localeCompare(b.key));
 }
 
 function renderCalendar(){

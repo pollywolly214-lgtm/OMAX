@@ -124,7 +124,7 @@ test("actual Settings history reconciles calendar, opens/closes/jumps, reloads a
     assert.deepEqual(await page.evaluate(() => ({ offset: window.__calendarMonthOffset, expanded: window.__calendarShowAllMonths, hash: location.hash })), rangeBefore);
   }
   await modal.locator('[data-history-jump="2026-09-15"]').click();
-  assert.match(await modal.locator("[data-history-navigation-status]").innerText(), /no event in the current calendar display/);
+  assert.match(await modal.locator("[data-history-navigation-status]").innerText(), /outside active Calendar projection/);
   for (const [id, date] of [["oldest", "2025-10-15"], ["plus12", "2027-10-15"], ["plus13", "2027-11-15"],
     ["plus15", "2028-01-15"], ["plus23", "2028-09-15"]]){
     if (!await modal.count()){ await page.evaluate(() => { location.hash = "#/settings"; }); await open("task-a"); }

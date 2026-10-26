@@ -104,6 +104,8 @@ function canWriteCloud(reason = "cloud save"){
   if (typeof window === "undefined") return false;
   if (isRecoveryMode()) return blockCloudSave(`${reason}; Recovery Mode is read-only, cloud saves disabled.`);
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
+  if (window.maintenanceCalendarCancellationApi?.isBusy() && reason !== "maintenance calendar cancellation") return blockCloudSave(`${reason}; a maintenance cancellation is being verified.`);
+  if (window.maintenanceTaskDeletionApi?.isBusy() && reason !== "maintenance task deletion") return blockCloudSave(`${reason}; a maintenance task archive transfer is being verified.`);
   if (window.__pumpBaselineMutationPending && reason !== "pump baseline commit") return blockCloudSave(`${reason}; a pump baseline is being verified.`);
   if (window.__pumpLogMutationPending && reason !== "pump log commit") return blockCloudSave(`${reason}; a pump log is being verified.`);
   if (window.__waterQualityMutationPending && reason !== "water quality commit") return blockCloudSave(`${reason}; a water-quality check is being verified.`);
@@ -708,13 +710,17 @@ const REQUIRED_PROTECTED_DATA_PATHS = [
   "tasksInterval.occurrenceNotes",
   "tasksInterval.occurrenceHours",
   "tasksInterval.removedOccurrences",
+  "tasksInterval.calendarCancellations",
   "tasksAsReq.completedDates",
   "tasksAsReq.manualHistory",
   "tasksAsReq.occurrenceNotes",
   "tasksAsReq.occurrenceHours",
-  "tasksAsReq.removedOccurrences"
+  "tasksAsReq.removedOccurrences",
+  "tasksAsReq.calendarCancellations"
 ];
 const PROTECTED_FIELD_REGISTRY = [
+  { path:"tasksInterval.calendarCancellations", label:"Interval calendar cancellation evidence", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksInterval", nestedKey:"calendarCancellations", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
+  { path:"tasksAsReq.calendarCancellations", label:"As-required calendar cancellation evidence", category:"maintenance", expectedShape:"nestedCount", parentPath:"tasksAsReq", nestedKey:"calendarCancellations", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
   { path:"waterQualityChecks", label:"Water-quality check history", category:"machine history", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
   { path:"cuttingJobs", label:"Active cutting jobs", category:"jobs", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
   { path:"completedCuttingJobs", label:"Completed cutting jobs", category:"jobs", expectedShape:"array", allowEmptyOnNewWorkspace:true, dangerousDrop:true },
@@ -843,7 +849,10 @@ function sanitizeValueForStorage(value, { dropHeavyHistory = false, provenanceSc
       || (key === "__recoveryProblems" && Array.isArray(v) && v.length === 0)
     );
     if (/^(__|debug|cache|preview)/i.test(key) && !sourceMarker) continue;
-    if (dropHeavyHistory && !isProtectedBusinessDataKey(key) && /(syncprocesslog|logs|deleteditems|reports|rollups|savelogs)/i.test(key)) continue;
+    // Backup builders deliberately retain task archives. Do not discard that
+    // filtered history a second time through the generic operational-log trim.
+    const taskArchiveBackup = key === "deletedItems" && Array.isArray(v) && v.every(entry=>entry?.type === "task");
+    if (dropHeavyHistory && !taskArchiveBackup && !isProtectedBusinessDataKey(key) && /(syncprocesslog|logs|deleteditems|reports|rollups|savelogs)/i.test(key)) continue;
     if (typeof v === "string" && (isLikelyEmbeddedFileContent(key, v) || v.length > 200000)){
       if (isSafeMetadataString(key, v)) out[key] = v;
       continue;
@@ -897,7 +906,7 @@ function compactStateForStorage(raw, { forBackup = false } = {}){
   snap.totalHistory = Array.isArray(snap.totalHistory) ? snap.totalHistory.slice() : [];
   snap.dailyCutHours = Array.isArray(snap.dailyCutHours) ? snap.dailyCutHours.slice(-365) : [];
   if (forBackup){
-    delete snap.deletedItems;
+    snap.deletedItems = (snap.deletedItems || []).filter(entry=>entry?.type === "task");
     delete snap.opportunityRollups;
   }
   return sanitizeValueForStorage(snap, { dropHeavyHistory: forBackup });
@@ -911,6 +920,7 @@ function buildEmergencyBackup(snapshot){
     totalHistory: Array.isArray(src.totalHistory) ? src.totalHistory : [],
     tasksInterval: Array.isArray(src.tasksInterval) ? src.tasksInterval : [],
     tasksAsReq: Array.isArray(src.tasksAsReq) ? src.tasksAsReq : [],
+    deletedItems: (src.deletedItems || []).filter(entry=>entry?.type === "task"),
     maintenanceTasksV2: Array.isArray(src.maintenanceTasksV2) ? src.maintenanceTasksV2 : [],
     maintenanceCalendarInstancesV2: Array.isArray(src.maintenanceCalendarInstancesV2) ? src.maintenanceCalendarInstancesV2 : [],
     maintenanceOccurrencesV2: Array.isArray(src.maintenanceOccurrencesV2) ? src.maintenanceOccurrencesV2 : [],
@@ -944,6 +954,7 @@ function buildTinyCriticalBackup(snapshot, { quiet = false } = {}){
     schema: src.schema || APP_SCHEMA,
     tasksInterval: src.tasksInterval || [],
     tasksAsReq: src.tasksAsReq || [],
+    deletedItems: (src.deletedItems || []).filter(entry=>entry?.type === "task"),
     maintenanceTasksV2: src.maintenanceTasksV2 || [],
     maintenanceOccurrencesV2: src.maintenanceOccurrencesV2 || [],
     maintenanceCalendarInstancesV2: src.maintenanceCalendarInstancesV2 || [],
@@ -2301,6 +2312,7 @@ async function buildDiagnosticSummary(){
     recoveryMode: isRecoveryMode(),
     missingAuthoritativeState:window.__missingAuthoritativeState || null,
     indeterminateSave:window.__lastIndeterminateSave || null,
+    maintenanceCancellationEvidence:window.__lastMaintenanceCancellationEvidence || null,
     cloudSyncMeta:cloudState?.syncMeta || null,
     localBackupSyncMeta:localBackup?.syncMeta || null,
     browserStorage:inspectBrowserStorageReadOnly(),
@@ -2773,19 +2785,24 @@ function startWorkspaceStateListener(){
     }
   };
   workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
-    if (!snap || !snap.exists){ enterMissingStateRecovery(); return; }
+    // Cache and pending local echoes cannot establish authoritative corruption
+    // or absence. Keep the adopted baseline until a confirmed server event.
+    if (!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites) return;
     if (isRecoveryMode()) return;
     // The isolated material writer owns adoption until SERVER verification.
-    if (window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending || window.__pumpLogMutationPending || window.__waterQualityMutationPending) return;
-    if (snap.metadata && snap.metadata.hasPendingWrites) return;
+    if (window.maintenanceTaskDeletionApi?.isBusy() || window.maintenanceCalendarCancellationApi?.isBusy() || window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending || window.__pumpLogMutationPending || window.__waterQualityMutationPending) return;
+    if (!snap.exists){ enterMissingStateRecovery(); return; }
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
+    const meta = incoming && typeof incoming.syncMeta === "object" ? incoming.syncMeta : null;
+    const incomingRev = Number(meta?.rev || 0);
+    // An obsolete view is not evidence about the currently adopted document.
+    // Reject it before integrity checks can suspend a newer valid session.
+    if (Number.isSafeInteger(meta?.rev) && incomingRev > 0 && incomingRev <= lastAppliedCloudRevision) return;
     if(!checkAuthoritativeIdentityIntegrity(incoming).valid){
       window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
       loadFromCloud().then(refreshRouteSafely);return;
     }
-    const meta = incoming && typeof incoming.syncMeta === "object" ? incoming.syncMeta : null;
-    const incomingRev = Number(meta?.rev || 0);
     if (!incomingRev) return;
     const incomingBy = String(meta?.updatedBy || "");
     if (hasPendingLocalChanges) return;
@@ -2794,8 +2811,6 @@ function startWorkspaceStateListener(){
     if (window.isCuttingJobChronologySaving?.()) return;
     const localEditAgeMs = Date.now() - (Number(lastLocalMutationAt) || 0);
     if (incomingBy !== localClientId && localEditAgeMs >= 0 && localEditAgeMs < 15000) return;
-    if (incomingRev && incomingRev <= lastAppliedCloudRevision) return;
-    if (incomingRev && incomingBy === localClientId && incomingRev === lastAppliedCloudRevision) return;
     // Realtime adoption must establish the same exact evidence and live
     // bindings as initial loading, without seeding or normalizing business data.
     adoptIdentityCheckedAuthoritativeState(incoming);
@@ -2984,7 +2999,7 @@ function normalizeDeletedItem(raw){
   const deletedDate = deletedISO ? new Date(deletedISO) : new Date();
   const deletedMs = deletedDate.getTime();
   if (!Number.isFinite(deletedMs)) return null;
-  if ((Date.now() - deletedMs) > TRASH_RETENTION_MS) return null;
+  if (type !== "task" && (Date.now() - deletedMs) > TRASH_RETENTION_MS) return null;
   const payload = cloneStructured(raw.payload);
   const meta = raw.meta && typeof raw.meta === "object" ? { ...raw.meta } : {};
   const label = typeof raw.label === "string" && raw.label ? raw.label : buildTrashLabel(type, payload, meta);
@@ -3069,7 +3084,7 @@ function restoreLinkedDeletedEntry(predicate, options = {}){
     }
     if (!matches) continue;
     const result = applyRestoreByType(entry, i);
-    if (!result) return null;
+    if (!result || result.blocked) return null;
     if (!result.handledRemoval){
       deletedItems.splice(i, 1);
       window.deletedItems = deletedItems;
@@ -3103,7 +3118,7 @@ function listDeletedItems(){
   purgeExpiredDeletedItems();
   return deletedItems.map(entry => ({
     ...entry,
-    expiresAt: computeTrashExpiresAt(entry.deletedAt)
+    expiresAt: entry.type === "task" ? null : computeTrashExpiresAt(entry.deletedAt)
   }));
 }
 
@@ -3130,6 +3145,7 @@ function removeDeletedItem(id){
   purgeExpiredDeletedItems();
   const idx = deletedItems.findIndex(entry => entry && entry.id === id);
   if (idx < 0) return false;
+  if (deletedItems[idx].type === "task") return false; // Historical identity and evidence are retained indefinitely.
   deletedItems.splice(idx, 1);
   window.deletedItems = deletedItems;
   try { saveCloudDebounced(); }
@@ -3142,78 +3158,8 @@ function applyRestoreByType(entry, index){
   const { type, payload, meta } = entry;
   const clone = cloneStructured(payload) || {};
   switch (type) {
-    case "task": {
-      const mode = meta && meta.list === "asreq" ? "asreq" : "interval";
-      let targetList = mode === "asreq" ? tasksAsReq : tasksInterval;
-      if (!Array.isArray(targetList)) targetList = [];
-      if (!clone.id) clone.id = genId(clone.name || "task");
-      const existing = new Set(targetList.filter(Boolean).map(item => String(item.id)));
-      while (existing.has(String(clone.id))){
-        clone.id = genId(clone.name || "task");
-      }
-      clone.mode = mode;
-      if (clone.parentTask == null) clone.parentTask = null;
-      if (clone.cat === undefined) clone.cat = clone.cat ?? null;
-      if (typeof window._maintOrderCounter !== "number" || !Number.isFinite(window._maintOrderCounter)){
-        window._maintOrderCounter = 0;
-      }
-      const orderVal = Number(clone.order);
-      if (Number.isFinite(orderVal)){
-        if (orderVal > window._maintOrderCounter) window._maintOrderCounter = orderVal;
-      } else {
-        clone.order = ++window._maintOrderCounter;
-      }
-      targetList.push(clone);
-      if (mode === "asreq"){ tasksAsReq = targetList; window.tasksAsReq = tasksAsReq; }
-      else { tasksInterval = targetList; window.tasksInterval = tasksInterval; }
-
-      const taskIdStr = String(clone.id);
-      const candidateInventoryIds = [];
-      if (clone.inventoryId != null) candidateInventoryIds.push(clone.inventoryId);
-      if (meta && meta.inventoryId != null) candidateInventoryIds.push(meta.inventoryId);
-      if (meta && meta.linkedInventoryId != null) candidateInventoryIds.push(meta.linkedInventoryId);
-      if (meta && meta.inventoryIdOriginal != null) candidateInventoryIds.push(meta.inventoryIdOriginal);
-
-      let linkedItem = null;
-      for (const candidate of candidateInventoryIds){
-        if (candidate == null) continue;
-        linkedItem = findInventoryByIdLocal(candidate);
-        if (linkedItem) break;
-      }
-      if (!linkedItem && Array.isArray(inventory)){
-        linkedItem = inventory.find(item => item && String(item.linkedTaskId || "") === taskIdStr) || null;
-      }
-      if (!linkedItem){
-        const restored = restoreLinkedDeletedEntry(entryCandidate => {
-          if (!entryCandidate || entryCandidate.type !== "inventory") return false;
-          const payload = entryCandidate.payload || {};
-          const metaInfo = entryCandidate.meta || {};
-          const payloadId = payload.id != null ? String(payload.id) : "";
-          const metaId = metaInfo.originalId != null ? String(metaInfo.originalId) : "";
-          const metaLinked = metaInfo.linkedTaskId != null ? String(metaInfo.linkedTaskId) : "";
-          const payloadLinked = payload.linkedTaskId != null ? String(payload.linkedTaskId) : "";
-          for (const candidate of candidateInventoryIds){
-            const candidateId = candidate != null ? String(candidate) : "";
-            if (candidateId && (payloadId === candidateId || metaId === candidateId)) return true;
-          }
-          if (metaLinked && metaLinked === taskIdStr) return true;
-          if (payloadLinked && payloadLinked === taskIdStr) return true;
-          return false;
-        }, { skipId: entry.id });
-        if (restored && restored.result && restored.result.value && restored.result.value.type === "inventory"){
-          linkedItem = findInventoryByIdLocal(restored.result.value.id) || null;
-          if (!linkedItem && Array.isArray(inventory)){
-            linkedItem = inventory.find(item => item && String(item.linkedTaskId || "") === taskIdStr) || null;
-          }
-        }
-      }
-      if (linkedItem){
-        ensureTaskInventoryLink(clone, linkedItem);
-      }else{
-        clone.inventoryId = null;
-      }
-      return { handledRemoval: false, value: { type: "task", id: clone.id } };
-    }
+    case "task":
+      return { blocked:true, error:"Use the confirmed Restore action in Deleted History to restore this task with its exact original ID and verified history." };
     case "inventory": {
       if (!Array.isArray(inventory)) inventory = [];
       if (!clone.id) clone.id = genId(clone.name || "item");
@@ -3405,7 +3351,15 @@ function applyRestoreByType(entry, index){
   }
 }
 
-function restoreDeletedItem(id){
+function restoreDeletedItem(id, confirmedArchiveKey){
+  // Task restoration never enters the local, ID-regenerating generic path or
+  // its linked-entry helper. Confirmation is bound to the exact archived entry.
+  if(window.deletedItems?.some(entry=>entry?.id===id&&entry.type==="task")){
+    const api=window.maintenanceTaskDeletionApi;
+    if(!api?.restore)return Promise.resolve({ok:false,error:"Verified task restoration is unavailable."});
+    return api.restore(id,confirmedArchiveKey).then(result=>({...result,ok:result.saved===true&&result.verified===true,
+      value:result.verified?{type:"task",id:result.archiveEvidence.payload.id}:undefined}));
+  }
   refreshGlobalCollections();
   const candidate = deletedItems.find(entry=>entry && entry.id === id);
   if (candidate && ["job","completed-job"].includes(candidate.type)){
@@ -4635,7 +4589,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
   const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
     &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
-  if (!identityAuthorized && !canWriteCloud(options.waterQualityMutation ? "water quality commit" : options.pumpLogMutation ? "pump log commit" : options.pumpBaselineMutation ? "pump baseline commit" : "authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
+  if (!identityAuthorized && !canWriteCloud(options.maintenanceCalendarCancellation ? "maintenance calendar cancellation" : options.maintenanceTaskDeletionProof ? "maintenance task deletion" : options.waterQualityMutation ? "water quality commit" : options.pumpLogMutation ? "pump log commit" : options.pumpBaselineMutation ? "pump baseline commit" : "authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
   const deletionProof = options.cuttingJobDeletionProof;
   if (deletionProof){
     if (!cuttingJobDeletionProofs.has(deletionProof) || cuttingJobDeletionTransactions.has(deletionProof)) return cuttingJobDeletionFailure("Cutting-job deletion transaction authorization is invalid or already used.");
@@ -4694,11 +4648,26 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
           ||!window.CuttingJobDateEditing?.dateKey(after[0]?.completedAtISO)||typeof options.validatePreparedState!=="function"||options.validatePreparedState(JSON.parse(JSON.stringify(pending)))!==true)
           throw Object.assign(new Error("Completion must preserve the exact job in completed history."),{definite:true,code:"cutting_job_completion_rejected"});
       }
-      const safetyRemote = completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote, pending, deletionProof));
-      const safetyBaseline = completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...window.__lastLoadedCloudState, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : window.__lastLoadedCloudState, pending, deletionProof));
+      const taskDeletionSafety=baseline=>options.maintenanceTaskDeletionProof ? window.OMAXMaintenanceTaskArchive.safetyBaseline(baseline,pending,options.maintenanceTaskDeletionProof) : baseline;
+      const safetyRemote = taskDeletionSafety(completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote, pending, deletionProof)));
+      const safetyBaseline = taskDeletionSafety(completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...window.__lastLoadedCloudState, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : window.__lastLoadedCloudState, pending, deletionProof)));
       const backup = readLocalStateBackup();
-      const safetyBackup = completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup, pending, deletionProof));
-      const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:completionSafetyBaseline(buildWindowProtectedStateForCoverage()), coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
+      const matchesTaskEvidence=(evidence,backupOnly=false)=>evidence
+        && ["tasksInterval","tasksAsReq"].every(field=>stableStringifyForIntegrity(evidence[field])===stableStringifyForIntegrity(remote[field]))
+        && stableStringifyForIntegrity(backupOnly ? (evidence.deletedItems||[]) : evidence.deletedItems)
+          ===stableStringifyForIntegrity(backupOnly ? (remote.deletedItems||[]).filter(entry=>entry?.type==="task") : remote.deletedItems);
+      const projectTaskTransfer=evidence=>({...evidence,tasksInterval:pending.tasksInterval,tasksAsReq:pending.tasksAsReq,deletedItems:pending.deletedItems});
+      const matchingTaskBackup=options.maintenanceTaskDeletionProof && backup
+        && Number(backup.syncMeta?.rev || 0)<=Number(remote.syncMeta?.rev || 0)
+        && matchesTaskEvidence(backup,true);
+      const safetyBackup = matchingTaskBackup
+        ? projectTaskTransfer(backup)
+        : completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup, pending, deletionProof));
+      const windowEvidence=completionSafetyBaseline(buildWindowProtectedStateForCoverage());
+      // The whole-state transfer was proven above. Coverage may follow it only
+      // when this additional evidence has the exact same task records/archives.
+      const safetyWindow=options.maintenanceTaskDeletionProof && matchesTaskEvidence({...windowEvidence,deletedItems:window.deletedItems}) ? projectTaskTransfer(windowEvidence) : windowEvidence;
+      const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:safetyWindow, coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
       if (preflight.blocked || detectDangerousProtectedFieldReduction(safetyRemote, pending).blocked) throw Object.assign(new Error("Protected-state transaction preflight blocked the write."), { definite:true, code:"protected_preflight_blocked" });
       if (remote.pumpEff?.baselineHistory !== undefined || pending.pumpEff?.baselineHistory !== undefined){
         const retention=validatePumpBaselineRetention(remote.pumpEff,pending.pumpEff);
@@ -4864,6 +4833,85 @@ async function readInventoryMaterialAuthoritativeState(){
     return {revision:state?.syncMeta?.rev ?? null, state, path:docRef.path, readSource:"backend_transaction"};
   });
 }
+
+// Task deletion/restoration writes one exact archive transfer through the CAS writer.
+async function readMaintenanceTaskAuthoritativeState(target){
+  if(!cuttingJobSaveTargetIsCurrent(target)||typeof target.db?.runTransaction!=="function")
+    throw Error("Task archive transfer requires an independent backend transaction read for the captured workspace.");
+  // Firebase v8 server-get can still return a stale listener view after commit.
+  // Read only through the captured backend; never fall back to document.get.
+  const state=await target.db.runTransaction(async transaction=>{
+    if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Task archive transfer workspace/backend changed before verification.");
+    const snapshot=await transaction.get(target.docRef);
+    if(snapshot?.metadata?.fromCache||snapshot?.metadata?.hasPendingWrites)throw Error("Authoritative verification cannot accept cached or pending-write evidence.");
+    if((snapshot?.ref?.path && snapshot.ref.path!==target.path)
+      ||(snapshot?.ref?.firestore && snapshot.ref.firestore!==target.db))throw Error("Task archive transfer verification returned another document/backend.");
+    return snapshot?.exists ? snapshot.data() : null;
+  });
+  if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Task archive transfer workspace/backend changed during verification.");
+  return state;
+}
+
+window.maintenanceTaskDeletionApi=window.OMAXMaintenanceTaskArchive?.createApi({
+  canWrite:()=>FB.ready&&Boolean(FB.user)&&!hasPendingLocalChanges&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete
+    &&!isRecoveryMode()&&!window.__autosaveDisabled&&!window.__localBackupOnlyMode&&!isVercelPreviewRuntime()
+    &&!window.__lastIndeterminateSave&&!window.__globalIdentityVerificationPending&&!window.__lastImportVerificationError&&!window.__lastInventoryIdentityRepairError
+    &&!window.maintenanceCalendarCancellationApi?.isBusy()&&!window.__inventoryMaterialMutationPending&&!window.inventoryMaterialMutationApi?.isBusy()&&!window.isCuttingJobChronologySaving?.()
+    &&!window.__pumpBaselineMutationPending&&!window.__pumpLogMutationPending&&!window.__waterQualityMutationPending,
+  settle:async()=>{await cloudSaveQueue;if(hasPendingLocalChanges)throw Error("Other changes are still pending. Wait for their save before moving a task.");},
+  captureTarget:captureCuttingJobSaveTarget,targetIsCurrent:cuttingJobSaveTargetIsCurrent,
+  version:()=>({revision:window.__loadedCloudRevisionForSaveGuard,mutation:lastLocalMutationAt}),
+  read:readMaintenanceTaskAuthoritativeState,
+  matches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)&&stableStringify(source)===stableStringify(getCuttingJobChronologyLocalState()),
+  newId:()=>genId("trash_task"),
+  validate:state=>checkAuthoritativeIdentityIntegrity(state).valid===true,
+  write:(next,expectedRevision,validateSourceState,validatePreparedState,maintenanceTaskDeletionProof,target)=>{
+    const queued=cloudSaveQueue.then(()=>writeAuthoritativeStateSnapshot(next,{merge:true},{expectedRevision,validateSourceState,validatePreparedState,maintenanceTaskDeletionProof,authoritativeTarget:target}));
+    cloudSaveQueue=queued.catch(()=>{});return queued;
+  },
+  adopt:(state,proof)=>{
+    const adopted=adoptIdentityCheckedAuthoritativeState(state)?.recovery===false;
+    if(adopted){
+      // Existing local Data Flow log only; no second save or owning archive.
+      try{recordDataFlowEvent(`maintenance task ${proof.operation==="restore"?"restore":"delete"}: ${proof.id}; archive: ${proof.trash.id}`,state);}catch(error){console.warn("Task transfer log unavailable",error);}
+    }
+    return adopted;
+  },
+  suspend:result=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastIndeterminateSave=window.__lastIndeterminateSave||result;renderRecoveryDiagnosticsPanel();}
+});
+
+window.maintenanceCalendarCancellationApi=window.OMAXMaintenanceCalendarCancellation?.createApi({
+  canWrite:()=>canWriteCloud("maintenance calendar cancellation")&&FB.ready&&Boolean(FB.user)&&!hasPendingLocalChanges&&!isVercelPreviewRuntime()
+    &&!window.__lastIndeterminateSave&&!window.__globalIdentityVerificationPending&&!window.__lastImportVerificationError&&!window.__lastInventoryIdentityRepairError
+    &&!window.maintenanceTaskDeletionApi?.isBusy()&&!window.inventoryMaterialMutationApi?.isBusy()&&!window.__inventoryMaterialMutationPending&&!window.isCuttingJobChronologySaving?.()
+    &&!window.__pumpBaselineMutationPending&&!window.__pumpLogMutationPending&&!window.__waterQualityMutationPending,
+  settle:async()=>{await cloudSaveQueue;if(hasPendingLocalChanges)throw Error("Other changes are pending; finish them before cancelling maintenance.");},
+  local:getCuttingJobChronologyLocalState,
+  version:()=>({revision:window.__loadedCloudRevisionForSaveGuard,mutation:lastLocalMutationAt}),
+  captureTarget:captureCuttingJobSaveTarget,targetIsCurrent:cuttingJobSaveTargetIsCurrent,
+  read:readMaintenanceTaskAuthoritativeState,
+  matches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)&&stableStringify(source)===stableStringify(getCuttingJobChronologyLocalState()),
+  actor:()=>String(FB.user?.uid||""),newId:()=>genId("calendar_cancel"),now:()=>new Date().toISOString(),
+  validate:state=>checkAuthoritativeIdentityIntegrity(state).valid===true,
+  backup:source=>{
+    persistLocalStateBackup(source);
+    if(stableStringifyForIntegrity(readLocalStateBackup())!==stableStringifyForIntegrity(compactStateForStorage(source,{forBackup:true})))
+      throw Error("The maintenance transaction backup could not be verified. Export/review local storage before retrying.");
+  },
+  write:(next,expectedRevision,validateSourceState,validatePreparedState,target)=>{
+    const fields=["tasksInterval","tasksAsReq","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2"].filter(name=>stableStringify(next[name])!==stableStringify(window.__lastLoadedCloudState?.[name]));
+    const queued=cloudSaveQueue.then(()=>writeAuthoritativeStateSnapshot(next,{mergeFields:[...fields,"syncMeta"]},{expectedRevision,validateSourceState,validatePreparedState,maintenanceCalendarCancellation:true,authoritativeTarget:target}));
+    cloudSaveQueue=queued.catch(()=>{});return queued;
+  },
+  adopt:state=>adoptIdentityCheckedAuthoritativeState(state)?.recovery===false,
+  suspend:result=>{
+    window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
+    window.__lastMaintenanceCancellationEvidence=result.evidence||window.__lastMaintenanceCancellationEvidence;
+    window.__lastIndeterminateSave=window.__lastIndeterminateSave||result;
+    renderRecoveryDiagnosticsPanel();
+  }
+});
+window.addEventListener?.("beforeunload",event=>{if(window.maintenanceCalendarCancellationApi?.isBusy()){event.preventDefault();event.returnValue="";}});
 
 let inventoryMaterialOwnedSuspension = null;
 const inventoryMaterialMutationApi = window.OMAXInventoryMaterialMutations?.createApi({
@@ -5037,7 +5085,9 @@ window.auditCuttingFileContentExposure = auditCuttingFileContentExposure;
 window.getCloudCutFileStorageDiagnostics = getCloudCutFileStorageDiagnostics;
 window.runMaintenanceCalendarMutation = window.OMAXMaintenanceCalendarIntegrity.createMutationRunner({
   state:()=>compactStateForStorage(snapshotState({skipLocalFileCacheSync:true})),
-  readCloud:()=>readCurrentCloudStateReadOnly(),
+  captureTarget:captureCuttingJobSaveTarget,
+  targetIsCurrent:cuttingJobSaveTargetIsCurrent,
+  readCloud:target=>readMaintenanceTaskAuthoritativeState(target),
   loadedRevision:()=>Number(window.__loadedCloudRevisionForSaveGuard||0),
   canWrite:()=>canWriteCloud("maintenance calendar action"),
   apply:(key,value)=>{window[key]=value;refreshGlobalCollections();},
@@ -5047,7 +5097,7 @@ window.runMaintenanceCalendarMutation = window.OMAXMaintenanceCalendarIntegrity.
     undoStack.splice(0,undoStack.length,...checkpoint.undo);redoStack.splice(0,redoStack.length,...checkpoint.redo);currentSnapshotJSON=checkpoint.current;
     persistLocalStateBackup(snapshotState({skipLocalFileCacheSync:true}));
   },
-  suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastImportVerificationError=reason;renderRecoveryDiagnosticsPanel();}
+  suspend:reason=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastImportVerificationError=window.__lastImportVerificationError||reason;renderRecoveryDiagnosticsPanel();}
 });
 window.inspectMaintenanceCalendarIntegrity = (options={})=>window.OMAXMaintenanceCalendarIntegrity.inspect(window,{...options,projectedRepeatRows:window.__maintenanceCalendarProjectedRepeatRows||[]});
 window.inspectMaintenanceCalendarCloud = async (options={})=>window.OMAXMaintenanceCalendarIntegrity.inspect(await readCurrentCloudStateReadOnly(),options);
@@ -5356,6 +5406,7 @@ function captureHistoryState(nextSnapshot){
 
 async function applyHistorySnapshot(json, onConfirmed = null){
   if (!json) return false;
+  if(window.maintenanceCalendarCancellationApi?.isBusy()||window.maintenanceTaskDeletionApi?.isBusy()){toast("A verified maintenance operation is pending; history was not changed.");return false;}
   if (cuttingJobDeletionInProgress){ toast("A cutting-job operation is still saving; history was not changed."); return false; }
   let data;
   try {
@@ -5668,8 +5719,8 @@ function buildMaintenanceCompatibilityStream(){
       });
     });
   };
-  const intervalList = Array.isArray(window.tasksInterval) ? window.tasksInterval : [];
-  const asReqList = Array.isArray(window.tasksAsReq) ? window.tasksAsReq : [];
+  const intervalList = window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"interval") || window.tasksInterval || [];
+  const asReqList = window.OMAXMaintenanceTaskArchive?.historicalTasks(window,"asreq") || window.tasksAsReq || [];
   intervalList.forEach(task => {
     const row = normalizeLegacyMaintenanceTask(task, "interval");
     if (row) out.push(row);
@@ -5689,7 +5740,7 @@ function buildMaintenanceCompatibilityStream(){
     if (!task || typeof task !== "object") return;
     const id = task.id != null ? String(task.id) : "";
     if (!id) return;
-    taskMap.set(id, task);
+    taskMap.set(id, window.OMAXMaintenanceTaskArchive?.displayTask(window,task) || task);
   });
   const instanceMap = new Map();
   v2Instances.forEach(instance => {
@@ -5819,7 +5870,7 @@ function buildMaintenanceCompatibilityStream(){
       streamId: `v2-occurrence:${rootOccurrenceId}`,
       sourceSystem: "v2",
       taskId: taskId || null,
-      taskName: String(firstEvent.taskName || (task && task.name) || "").trim(),
+      taskName: String((window.OMAXMaintenanceTaskArchive?.deletedFor(window,task) && task.name) || firstEvent.taskName || (task && task.name) || "").trim(),
       instanceId: instanceId || null,
       occurrenceId: rootOccurrenceId,
       rootOccurrenceId,
@@ -7054,6 +7105,7 @@ async function performCloudSave(saveOptions = {}){
   if (window.__inventoryMaterialMutationPending) return cloudSaveNoWriteFailure("material_verification_pending", "A material change is being verified; other edits remain pending.");
   let authoritativeStateWriteAttempted = false;
   let authoritativeStateWriteCompleted = false;
+  let authoritativeStateVerified = false;
   const explicitTrace = (typeof window !== "undefined" && window.__activeExplicitMaintenanceAddSaveTrace && typeof window.__activeExplicitMaintenanceAddSaveTrace === "object")
     ? window.__activeExplicitMaintenanceAddSaveTrace
     : null;
@@ -7085,7 +7137,9 @@ async function performCloudSave(saveOptions = {}){
     return cloudSaveNoWriteFailure("cloud_write_gate_closed", "Cloud writes are currently blocked; no authoritative write was attempted.");
   }
   if (isVercelPreviewRuntime()) return cloudSaveNoWriteFailure("preview_readonly", "Cloud save is disabled in preview read-only mode.");
+  if (saveOptions.authoritativeTarget && !cuttingJobSaveTargetIsCurrent(saveOptions.authoritativeTarget)) return cloudSaveNoWriteFailure("maintenance_target_changed", "Maintenance workspace/backend or actor changed before saving. Reload before retrying.");
   try{
+    const saveTarget = saveOptions.authoritativeTarget || captureCuttingJobSaveTarget();
     const expectedRevision = Number(saveOptions.expectedRevision ?? window.__loadedCloudRevisionForSaveGuard ?? 0);
     const mutationVersionAtSave = lastLocalMutationAt;
     const rawSnap = snapshotState();
@@ -7186,8 +7240,8 @@ async function performCloudSave(saveOptions = {}){
       console.warn("Failed to record save flow event", err);
     }
     window.__lastSnapshot = snap;
-    const remoteSnap = await FB.docRef.get();
-    const remoteData = remoteSnap && remoteSnap.exists ? (typeof remoteSnap.data === "function" ? remoteSnap.data() : remoteSnap.data) : null;
+    const remoteData = await readMaintenanceTaskAuthoritativeState(saveTarget);
+    const remoteSnap = {exists:remoteData !== null};
     const deletionCheck = validateCuttingJobDeletionSave(remoteData, snap, deletionProof);
     if (!deletionCheck.valid) return cuttingJobDeletionFailure(deletionCheck.error);
     const historyRestoreCheck = validateCuttingJobHistoryRestoreSave(remoteData, snap, historyRestoreProof);
@@ -7285,24 +7339,38 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.firestoreWritePayloadInstanceFound = Array.isArray(snap.maintenanceCalendarInstancesV2) && snap.maintenanceCalendarInstancesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.instanceId || ""));
       explicitTrace.firestoreWritePayloadOccurrenceFound = Array.isArray(snap.maintenanceOccurrencesV2) && snap.maintenanceOccurrencesV2.some(entry => entry && String(entry.id || "") === String(explicitTrace.occurrenceId || ""));
     }
-    const writeResult = await writeAuthoritativeStateSnapshot(snap, { merge:true }, { expectedRevision, repairProof:allowScheduledV2Dedupe ? repairAuthorization.proof : null, cuttingJobDeletionProof:deletionProof, cuttingJobHistoryRestoreProof:historyRestoreProof });
+    const writeResult = await writeAuthoritativeStateSnapshot(snap, { merge:true }, { expectedRevision, authoritativeTarget:saveTarget, repairProof:allowScheduledV2Dedupe ? repairAuthorization.proof : null, cuttingJobDeletionProof:deletionProof, cuttingJobHistoryRestoreProof:historyRestoreProof });
     writeRev = Number(snap?.syncMeta?.rev || 0);
     authoritativeStateWriteAttempted = writeResult.stateWriteAttempted;
     authoritativeStateWriteCompleted = writeResult.stateWriteCompleted;
     if (explicitTrace) explicitTrace.firestoreSetAttempted = writeResult.stateWriteAttempted;
     if (!writeResult.saved){
       hasPendingLocalChanges = true;
+      window.__lastOrdinarySaveError = {atISO:new Date().toISOString(),errorCode:writeResult.errorCode,error:writeResult.error,stateWriteAttempted:writeResult.stateWriteAttempted,stateWriteCompleted:writeResult.stateWriteCompleted,indeterminate:writeResult.indeterminate};
       return writeResult;
     }
     if (explicitTrace) explicitTrace.firestoreSetCompleted = true;
-    if (typeof window !== "undefined"){
+    // Acknowledgement alone cannot establish what the authoritative document
+    // contains. Read independently of Firebase v8's listener/cache view before
+    // advancing the loaded revision or reporting success. Retained server log
+    // evidence is the sole top-level omission made by ordinary compaction.
+    const verified = await readMaintenanceTaskAuthoritativeState(saveTarget);
+    const expectedState = {...snap};
+    if (!Object.prototype.hasOwnProperty.call(expectedState,"syncProcessLog") && Object.prototype.hasOwnProperty.call(remoteData||{},"syncProcessLog")) expectedState.syncProcessLog = remoteData.syncProcessLog;
+    if (!writeResult.committedState || !Number.isSafeInteger(verified?.syncMeta?.rev) || verified.syncMeta.rev <= expectedRevision
+      || stableStringifyForIntegrity(verified) !== stableStringifyForIntegrity(expectedState)
+      || stableStringifyForIntegrity(snap) !== stableStringifyForIntegrity(writeResult.committedState)) throw Error("Acknowledged save did not match independent backend readback. Preserve local evidence and verify before retrying.");
+    if (!canWriteCloud("saveCloudInternal")) throw Error("Save committed, but a separate write blocker prevents verified acknowledgement.");
+    authoritativeStateVerified = true;
+    // An independent read proves this commit, but a listener may already have
+    // adopted a newer authoritative revision while the read was in flight.
+    if (typeof window !== "undefined" && Math.max(Number(window.__loadedCloudRevisionForSaveGuard||0),Number(window.__lastLoadedCloudState?.syncMeta?.rev||0)) <= verified.syncMeta.rev){
       window.__loadedCloudRevisionForSaveGuard = Number(snap?.syncMeta?.rev || 0);
       if (explicitTrace){
         explicitTrace.loadedRevUpdatedAfterSuccessfulSave = true;
         explicitTrace.loadedRevAfterSave = Number(window.__loadedCloudRevisionForSaveGuard || 0);
-      } else {
-        window.__lastLoadedCloudState = cloneStructured(snap) || { ...snap };
       }
+      window.__lastLoadedCloudState = cloneStructured(verified);
     }
     console.info("Cloud save succeeded", {
       workspaceId: WORKSPACE_ID,
@@ -7311,7 +7379,7 @@ async function performCloudSave(saveOptions = {}){
       strippedHeavyFields: Number(window.__lastStrippedHeavyFields || 0),
       layoutsIncluded: Boolean(snap && snap.dashboardLayout && snap.costLayout && snap.jobLayout)
     });
-    if (writeRev > 0) lastAppliedCloudRevision = writeRev;
+    if (writeRev > 0) lastAppliedCloudRevision = Math.max(lastAppliedCloudRevision,writeRev);
     if (FB.workspaceDoc){
       const nowMs = Date.now();
       if (nowMs - lastSaveLogWriteAt >= SAVE_LOG_THROTTLE_MS){
@@ -7344,11 +7412,11 @@ async function performCloudSave(saveOptions = {}){
         console.warn(warning, metadataError);
       }
     }
-    window.__lastLoadedCloudState = { ...snap };
     return {
       saved:true,
       stateWriteAttempted:true,
       stateWriteCompleted:true,
+      verified:true,
       path:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
       warnings
     };
@@ -7360,11 +7428,21 @@ async function performCloudSave(saveOptions = {}){
       explicitTrace.hasPendingLocalChangesAfterInternal = Boolean(hasPendingLocalChanges);
     }
     console.error("Cloud save failed:", e);
+    if (authoritativeStateWriteCompleted && !authoritativeStateVerified){
+      hasPendingLocalChanges = true;
+      const uncertain = {saved:false,verified:false,indeterminate:true,stateWriteAttempted:true,stateWriteCompleted:true,errorCode:"committed_readback_unverified",error:String(e?.message||e)};
+      window.__lastOrdinarySaveError = {atISO:new Date().toISOString(),...uncertain};
+      window.__autosaveDisabled = true; window.__recoveryInspectMode = true;
+      window.__lastIndeterminateSave = window.__lastIndeterminateSave || uncertain;
+      try { renderRecoveryDiagnosticsPanel(); } catch (_err){}
+      return uncertain;
+    }
     if (authoritativeStateWriteCompleted){
       return {
         saved:true,
         stateWriteAttempted:true,
         stateWriteCompleted:true,
+        verified:true,
         path:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
         warnings:[`Authoritative state was saved, but post-write bookkeeping failed: ${String(e?.message || e)}`]
       };
@@ -8128,6 +8206,9 @@ if (typeof window !== "undefined") window.recoveryInspect = runRecoveryInspect;
 function checkAuthoritativeIdentityIntegrity(data){
   const check=window.OMAXGlobalIdentityRepair?.integrity(data)||{valid:false,blockers:["Global identity validator is unavailable."]};
   const blockers=check.blockers.slice();
+  const cancellationCheck=window.OMAXMaintenanceCalendarCancellation?.integrity(data);
+  if(cancellationCheck&&!cancellationCheck.valid)blockers.push(...cancellationCheck.blockers);
+  if(!cancellationCheck&&[...(Array.isArray(data?.tasksInterval)?data.tasksInterval:[]),...(Array.isArray(data?.tasksAsReq)?data.tasksAsReq:[]),...(Array.isArray(data?.deletedItems)?data.deletedItems:[]).filter(entry=>entry?.type==="task").map(entry=>entry.payload)].some(task=>task?.calendarCancellations!==undefined))blockers.push("Calendar cancellation evidence requires its validator before adoption.");
   if(!stateHasMeaningfulData(data))blockers.push("Authoritative state is missing or empty.");
   if(window.__lastIndeterminateSave)blockers.push("An indeterminate save requires separate server verification; writes remain suspended.");
   if(window.__globalIdentityVerificationPending)blockers.push("A repair verification failure requires manual evidence review.");

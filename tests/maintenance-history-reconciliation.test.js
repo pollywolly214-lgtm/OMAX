@@ -1,26 +1,8 @@
 "use strict";
-const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), vm = require("node:vm");
-const fixture = require("./fixtures/maintenance-history");
-const integrity = require("../js/maintenanceCalendarIntegrity");
-const calendar = fs.readFileSync("js/calendar.js", "utf8"), core = fs.readFileSync("js/core.js", "utf8"), renderer = fs.readFileSync("js/renderers.js", "utf8");
-const plain = value => JSON.parse(JSON.stringify(value));
-class FixedDate extends Date {
-  constructor(...args){ super(...(args.length ? args : ["2026-10-21T17:00:00Z"])); }
-  static now(){ return new Date("2026-10-21T17:00:00Z").getTime(); }
-}
-function freeze(value){ if (value && typeof value === "object") { Object.values(value).forEach(freeze); Object.freeze(value); } return value; }
-function harness(state){
-  const window = structuredClone(state);
-  window.OMAXMaintenanceCalendarIntegrity = integrity;
-  const context = vm.createContext({ window, structuredClone, Date: FixedDate, console,
-    getConfiguredDailyHours: () => 8, getCurrentMachineHours: () => 100, nextDue: () => null });
-  vm.runInContext(core.slice(core.indexOf("function parseDateLocal("), core.indexOf("function isWeekendDate("))
-    + core.slice(core.indexOf("function resolveTaskVariant("), core.indexOf("function ensureTaskVariant(")), context);
-  vm.runInContext(calendar, context);
-  vm.runInContext(renderer.slice(renderer.indexOf("function ensureTaskManualHistory("), renderer.indexOf("function collectTaskHistoryDates(")), context);
-  return { window, context, projection: () => plain(context.buildMaintenanceCalendarEvents()), history: taskId => plain(context.buildMaintenanceTaskHistory(taskId)) };
-}
-
+const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),vm=require("node:vm");
+const fixture=require("./fixtures/maintenance-history");
+const {harness,plain,freeze}=require("./mhist-harness.cjs");
+const calendar=fs.readFileSync("js/calendar.js","utf8"),renderer=fs.readFileSync("js/renderers.js","utf8");
 test("one scheduled calendar root appears without a cost row or prior calendar render", () => {
   const state = fixture.initial(); fixture.oneTime(state, "one"); const h = harness(state);
   assert.equal(h.history("task-a").length, 1); assert.equal(h.history("task-a")[0].status, "scheduled");
@@ -48,7 +30,10 @@ test("multiple completions and reopening use current lifecycle, not completion e
   fixture.action(state, one, "uncompleted");
   assert.equal(harness(state).history("task-a").find(row => row.rootOccurrenceId === "one").status, "scheduled");
   fixture.action(state, one, "removed"); fixture.action(state, two, "skipped");
-  assert.deepEqual(harness(state).history("task-a"), []);
+  const retained=harness(state).history("task-a");
+  assert.deepEqual(retained.map(row=>row.status).sort(),["removed","skipped"]);
+  assert.ok(retained.every(row=>!row.activeCalendar&&row.completionEvidence.length));
+  assert.deepEqual(Object.values(harness(state).projection().dueMap).flat(),[]);
 });
 test("renames, identical visible names and calendar-only tasks do not change ownership", () => {
   const state = fixture.mixed(), before = harness(state).history("task-a").map(row => row.key);
@@ -114,7 +99,8 @@ test("legacy template and As Required evidence is retained and labeled without i
   state.tasksInterval[0].manualHistory = [{ dateISO: "2025-01-01", status: "completed" }, { dateISO: "2026-12-01", status: "scheduled" }, { dateISO: "2026-12-02", status: "removed" }];
   state.tasksAsReq[0].completedDates = ["2026-09-01"];
   const h = harness(state), rows = h.history("task-a");
-  assert.equal(rows.length, 2); assert.equal(rows[0].source, "legacy history"); assert.equal(rows[0].status, "completed");
+  assert.equal(rows.length, 3); assert.equal(rows[0].source, "legacy history"); assert.equal(rows[0].status, "completed");
+  assert.equal(rows[2].status,"removed");assert.equal(rows[2].activeCalendar,false);
   assert.equal(rows[1].status, "scheduled"); assert.equal(h.history("task-b")[0].source, "calendar");
 });
 test("legacy logged status and manual notes are retained without inferring completion", () => {
@@ -167,6 +153,6 @@ if (process.env.OMAX_MHIST_BASELINE_CALENDAR) test("ordinary calendar output exa
   for (const state of [fixture.mixed(), (() => { const state = fixture.initial(); fixture.repeat(state, "hours", { basis: "machine_hours", intervalHours: 40 }); return state; })()]) {
     const current = harness(state), old = harness(state), before = current.projection();
     vm.runInContext("function oldProjection(){const dueMap={}; const hoursPerDay=configuredTaskDurationDailyHours();" + body + ";return {dueMap,oneTimeLookup};}", old.context);
-    assert.deepEqual(before, plain(old.context.oldProjection()));
+    assert.deepEqual({dueMap:before.dueMap,oneTimeLookup:before.oneTimeLookup}, plain(old.context.oldProjection()));
   }
 });
