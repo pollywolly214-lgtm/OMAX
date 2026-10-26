@@ -6306,6 +6306,11 @@ function renderDashboard(){
       || document.getElementById("waterQualityModal")?.classList.contains("is-visible")){
     return;
   }
+  // Replacing a saved layout can briefly shrink the page and clamp its scroll.
+  // Capture before replacing it; calendar-only refreshes happen too late.
+  const scrollPosition = content.querySelector("#dashboardLayout")
+    ? { x: window.scrollX, y: window.scrollY }
+    : null;
   content.innerHTML = viewDashboard();
   window.OMAXCutCostFeedbackUi?.mountJob(content, "dashJobCostRate");
   renderWaterQualityTracker(content);
@@ -8395,6 +8400,9 @@ function renderDashboard(){
   renderPumpWidget();
   refreshTimeEfficiencyWidgets();
   notifyDashboardLayoutContentChanged();
+  if (scrollPosition){
+    window.scrollTo(scrollPosition.x, scrollPosition.y);
+  }
 }
 
 function openJobsEditor(jobId){
