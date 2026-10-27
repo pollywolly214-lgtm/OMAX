@@ -51,15 +51,25 @@ function viewWaterQualityFields(prefix){
     <label class="water-quality-note-field">Note (optional)<input id="${prefix}Note" name="note" type="text"></label>`;
 }
 
+function dashboardLastUpdatedLabel(history){
+  // This label has always represented the reading's log date, not a save or
+  // edit timestamp. Import provenance and workspace sync times are unrelated.
+  let latestDate = null;
+  for (const entry of Array.isArray(history) ? history : []){
+    const dateISO = normalizeDateISO(entry?.dateISO);
+    const hours = entry?.hours;
+    if (!dateISO || hours == null || String(hours).trim() === "" || !Number.isFinite(Number(hours)) || Number(hours) < 0) continue;
+    if (!latestDate || dateISO > latestDate) latestDate = dateISO;
+  }
+  return latestDate ? parseDateLocal(latestDate).toLocaleDateString() : "—";
+}
+
 function viewDashboard(){
   const esc = (str)=> String(str ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const cur   = RENDER_TOTAL ?? currentTotal();
   const prev  = previousTotal();
   const delta = RENDER_DELTA ?? deltaSinceLast();
-  const lastEntry = totalHistory.length ? totalHistory[totalHistory.length - 1] : null;
-  const lastUpdated = cur!=null && lastEntry && lastEntry.dateISO
-    ? new Date(lastEntry.dateISO).toLocaleString()
-    : "—";
+  const lastUpdated = dashboardLastUpdatedLabel(totalHistory);
   const efficiencyWindows = (Array.isArray(TIME_EFFICIENCY_WINDOWS) && TIME_EFFICIENCY_WINDOWS.length)
     ? TIME_EFFICIENCY_WINDOWS
     : [
@@ -156,7 +166,7 @@ function viewDashboard(){
             </div>
           </div>
           <div class="total-hours-meta" aria-live="polite">
-            <span class="hint">Last updated: ${lastUpdated}</span>
+            <span class="hint" title="Latest logged reading date; saving or editing hours does not change the log date.">Last updated: ${lastUpdated}</span>
             <span class="small">Δ since last: <b>${(delta||0).toFixed(0)} hrs</b>${prev!=null? " (prev "+prev+")":""}</span>
           </div>
         </div>
