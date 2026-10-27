@@ -198,8 +198,16 @@
   <div id="configModal" class="config-modal" hidden aria-hidden="true">
     <div class="config-dialog" role="dialog" aria-modal="true" aria-labelledby="configTitle">
       <h3 id="configTitle">Workspace configuration</h3>
-      <p class="config-description">Tune scheduling defaults for cutting work.</p>
+      <p class="config-description">Tune scheduling and financial defaults for cutting work.</p>
       <form id="configForm" class="config-form">
+        <label class="config-field" for="configMaterialCostTreatment">
+          <span class="config-label">Material Cost Treatment</span>
+          <select id="configMaterialCostTreatment" name="configMaterialCostTreatment" aria-describedby="configMaterialCostHelp">
+            <option value="deduct">Deduct material from profit</option>
+            <option value="separate">Charge material separately</option>
+          </select>
+          <small class="config-help" id="configMaterialCostHelp">Applies to new Cutting Jobs. Each job keeps its saved treatment through completion. Existing jobs retain deduct mode. Separate mode adds material at cost to the cutting charge; material does not reduce cutting profit.</small>
+        </label>
         <label class="config-field" for="configDailyHours">
           <span class="config-label">Daily cutting hours (fixed mode)</span>
           <input type="number" id="configDailyHours" name="configDailyHours" min="0.25" max="24" step="0.25" required />
@@ -238,6 +246,7 @@
           <button type="submit" class="config-button config-button-primary" id="configSave">Save changes</button>
           <button type="button" class="config-button config-button-secondary" id="configCancel">Cancel</button>
         </div>
+        <p id="configSaveStatus" class="config-note" role="status"></p>
       </form>
     </div>
   </div>

@@ -74,6 +74,20 @@
       const pending=cloneStructured(source);pending.appConfig={...(source.appConfig||{}),cutCostFeedback:config};return {pending,fields:['appConfig']};
     });
   }
+  // Reuse the verified, field-scoped configuration writer for the workspace form.
+  // Build from the backend source so unrelated settings and business records survive exactly.
+  async function saveWorkspaceConfig(changes){
+    const expected=stableStringify(normalizeAppConfig(window.appConfig));
+    const allowed=['dailyHours','excludeWeekends','predictionMode','averageWindowDays','mondayStartLookback','materialCostTreatment'];
+    const patch=Object.fromEntries(allowed.filter(key=>Object.hasOwn(changes,key)).map(key=>[key,changes[key]]));
+    const normalized=normalizeAppConfig(patch);
+    return saveChange(source=>{
+      if(stableStringify(normalizeAppConfig(source.appConfig))!==expected)throw Error('Workspace configuration changed. Reload before saving.');
+      const pending=cloneStructured(source);
+      pending.appConfig={...(source.appConfig||{}),...Object.fromEntries(Object.keys(patch).map(key=>[key,normalized[key]]))};
+      return {pending,fields:['appConfig']};
+    },'Workspace configuration');
+  }
   const saveRepair=(target,values)=>saveChange(source=>window.OMAXCutCostRepair.planMaintenance(source,target,values,{id:genId('cost_correction'),atISO:new Date().toISOString(),actor:FB.user.uid}),'Maintenance occurrence correction');
   const saveHours=entries=>saveChange(source=>({...window.OMAXCutCostRepair.planHours(source,entries,new Date().toISOString()),exactHours:true}),'Daily cutting hours correction');
   function dialog(title,attribute){
@@ -208,5 +222,5 @@
     }
     return result.cutCostPerHour;
   }
-  window.OMAXCutCostFeedbackUi=Object.freeze({calculate,saveConfig,saveRepair,saveHours,mountCosts,mountJob,refreshJob,jobRate});
+  window.OMAXCutCostFeedbackUi=Object.freeze({calculate,saveConfig,saveWorkspaceConfig,saveRepair,saveHours,mountCosts,mountJob,refreshJob,jobRate});
 })();

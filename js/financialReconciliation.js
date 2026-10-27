@@ -103,7 +103,8 @@
     const totals = {count:rows.length,positive:rows.filter(row=>row.profit.totalProfit>0).length,
       negative:rows.filter(row=>row.profit.totalProfit<0).length,zero:rows.filter(row=>row.profit.totalProfit===0).length,
       grossRevenue:total("revenue"),failureReduction:total("revenueLost"),revenue:total("adjustedRevenue"),
-      runtimeExpense:total("cuttingCost"),materialExpense:total("materialExpense"),net,
+      runtimeExpense:total("cuttingCost"),materialExpense:total("materialExpense"),materialRecovery:total("materialCharge"),
+      customerPrice:total("customerPrice"),adjustedCustomerPrice:total("adjustedCustomerPrice"),net,
       average:net == null ? null : rows.length ? net/rows.length : 0};
     const warnings = new Map();
     for (const row of rows) for (const issue of row.issues){
@@ -175,7 +176,7 @@
     const eligible=report.rows.filter(row=>row.finite && inPeriod(row.date,report.previewWindow));
     for (const id of unique) if (!eligible.some(row=>String(row.id)===id)) errors.push(`Selected record is outside the canonical financial preview period: ${id}`);
     const totals=rows=>({count:rows.length,revenue:finiteSum(rows,row=>row.revenue),runtimeExpense:finiteSum(rows,row=>row.runtimeExpense),
-      materialExpense:finiteSum(rows,row=>row.materialExpense),net:finiteSum(rows,row=>row.modeledNet)});
+      materialExpense:finiteSum(rows,row=>row.materialExpense),materialRecovery:finiteSum(rows,row=>row.materialRecovery),net:finiteSum(rows,row=>row.modeledNet)});
     const warnings=[];
     for (const group of report.duplicateGroups) if (group.rows.every(row=>unique.has(String(row.id)))) warnings.push("Every representation in a candidate group is selected; this hypothesis removes the entire group.");
     return {hypothetical:true,window:report.previewWindow,selectedIds:ids,errors,warnings,baseline:totals(eligible),
@@ -205,7 +206,7 @@
         netChange:Number.isFinite(modeled.totalProfit-original.totalProfit) ? modeled.totalProfit-original.totalProfit : null,
         sourceEvidence:sourceEvidence(job),revenue:modeled.adjustedRevenue,runtimeExpense:modeled.cuttingCost,
         finite:["hours","chargeRate","costRate","revenue","revenueLost","adjustedRevenue","cuttingCost","materialExpense","totalProfit"].every(key=>Number.isFinite(modeled[key])),
-        materialExpense:modeled.materialExpense,materialUnitCost:modeled.materialCost,materialQty:modeled.materialQty,
+        materialExpense:modeled.materialExpense,materialRecovery:modeled.materialCharge,materialUnitCost:modeled.materialCost,materialQty:modeled.materialQty,
         chargeRate:modeled.chargeRate,costRate:modeled.costRate,failurePercent:modeled.failurePercent});
     }
     const buckets=new Map();
