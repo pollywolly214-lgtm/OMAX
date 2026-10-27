@@ -6311,6 +6311,10 @@ function renderDashboard(){
   const scrollPosition = content.querySelector("#dashboardLayout")
     ? { x: window.scrollX, y: window.scrollY }
     : null;
+  const calendarMonths = content.querySelector("#months");
+  const calendarScrollPosition = calendarMonths
+    ? { top: calendarMonths.scrollTop, left: calendarMonths.scrollLeft }
+    : null;
   content.innerHTML = viewDashboard();
   window.OMAXCutCostFeedbackUi?.mountJob(content, "dashJobCostRate");
   renderWaterQualityTracker(content);
@@ -8400,6 +8404,11 @@ function renderDashboard(){
   renderPumpWidget();
   refreshTimeEfficiencyWidgets();
   notifyDashboardLayoutContentChanged();
+  const updatedCalendarMonths = content.querySelector("#months");
+  if (calendarScrollPosition && updatedCalendarMonths){
+    updatedCalendarMonths.scrollTop = calendarScrollPosition.top;
+    updatedCalendarMonths.scrollLeft = calendarScrollPosition.left;
+  }
   if (scrollPosition){
     window.scrollTo(scrollPosition.x, scrollPosition.y);
   }

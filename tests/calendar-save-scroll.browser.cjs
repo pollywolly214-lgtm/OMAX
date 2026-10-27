@@ -10,7 +10,7 @@ const { chromium } = require(process.env.OMAX_PLAYWRIGHT_PATH || "playwright");
 const root = path.resolve(__dirname, "..");
 
 for (const customLayout of [false, true])
-test(`calendar saves keep page position with ${customLayout ? "a saved" : "the default"} dashboard layout`, { timeout: 60000 }, async t => {
+test(`calendar saves keep page and calendar-window positions with ${customLayout ? "a saved" : "the default"} dashboard layout`, { timeout: 60000 }, async t => {
   const server = http.createServer(async (req, res) => {
     const pathname = new URL(req.url, "http://localhost").pathname;
     const file = path.resolve(root, "." + pathname + (pathname.endsWith("/") ? "index.html" : ""));
@@ -61,6 +61,18 @@ test(`calendar saves keep page position with ${customLayout ? "a saved" : "the d
   }
 
   const addButton = page.locator('#months [data-date-iso="2026-12-15"] .day-add-bubble');
+  await addButton.scrollIntoViewIfNeeded();
+  const calendarPosition = () => page.locator("#months").evaluate(el => ({ top: el.scrollTop, left: el.scrollLeft }));
+  const beforeRefresh = await calendarPosition();
+  assert.ok(beforeRefresh.top > 200);
+  await page.evaluate(() => {
+    renderCalendar();
+    renderCalendarPreservingScroll();
+    rerenderCalendarKeepScroll();
+  });
+  assert.deepEqual(await calendarPosition(), beforeRefresh, "Calendar-only refreshes reset the calendar window");
+  await page.evaluate(() => { renderDashboard(); renderDashboard(); });
+  assert.deepEqual(await calendarPosition(), beforeRefresh, "Full dashboard refreshes reset the calendar window");
   const open = async (choice, variant) => {
     await addButton.scrollIntoViewIfNeeded();
     await addButton.hover();
@@ -70,7 +82,9 @@ test(`calendar saves keep page position with ${customLayout ? "a saved" : "the d
   };
   const save = async (form, description) => {
     const before = await page.evaluate(() => window.scrollY);
+    const calendarBefore = await calendarPosition();
     assert.ok(before > 200, `Expected a scrolled page, got ${before}`);
+    assert.ok(calendarBefore.top > 200, `Expected a scrolled calendar, got ${calendarBefore.top}`);
     assert.deepEqual(await page.locator(form).evaluate(form => [...form.elements].filter(field => field.willValidate && !field.validity.valid).map(field => ({ id: field.id, error: field.validationMessage }))), []);
     await page.locator(`${form} button[type="submit"]`).click();
     await page.waitForFunction(() => !document.getElementById("dashboardAddModal").classList.contains("is-visible"));
@@ -78,6 +92,8 @@ test(`calendar saves keep page position with ${customLayout ? "a saved" : "the d
     await page.waitForTimeout(1600);
     const after = await page.evaluate(() => window.scrollY);
     assert.ok(Math.abs(after - before) <= 2, `${description} moved the page from ${before} to ${after}`);
+    const calendarAfter = await calendarPosition();
+    assert.deepEqual(calendarAfter, calendarBefore, `${description} moved the calendar window`);
   };
   await open("task", "one-time");
   await page.locator("#dashOneTimeName").fill("Scroll regression task");
@@ -96,8 +112,10 @@ test(`calendar saves keep page position with ${customLayout ? "a saved" : "the d
   // Closing without saving also leaves the page at the current position.
   await open("task", "one-time");
   const beforeCancel = await page.evaluate(() => window.scrollY);
+  const calendarBeforeCancel = await calendarPosition();
   await page.locator('[data-task-card="one-time"] [data-close-modal]').click();
   assert.equal(await page.evaluate(() => window.scrollY), beforeCancel);
+  assert.deepEqual(await calendarPosition(), calendarBeforeCancel);
   await load();
   assert.ok((await page.evaluate(() => readCurrentCloudStateReadOnly())).cuttingJobs.some(job => job.name === "Scroll regression cutting job"));
   assert.deepEqual(errors, []);

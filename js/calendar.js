@@ -3268,6 +3268,7 @@ function renderCalendar(){
   // Rendering is read-only. Recovery runs only from explicit load/recovery flows.
   const container = $("#months");
   if (!container) return;
+  const scrollPosition = { top: container.scrollTop, left: container.scrollLeft };
   let showAll = Boolean(window.__calendarShowAllMonths);
   const monthOffsetRaw = Number(window.__calendarMonthOffset);
   const monthOffset = Number.isFinite(monthOffsetRaw) ? Math.min(12, Math.max(-12, Math.round(monthOffsetRaw))) : 0;
@@ -3669,6 +3670,8 @@ const jobsMap = {};
   renderWaterQualityCalendarEvents();
   wireCalendarBubbles();
   if (typeof updateCalendarHoursControls === "function") updateCalendarHoursControls();
+  container.scrollTop = scrollPosition.top;
+  container.scrollLeft = scrollPosition.left;
 }
 
 function shiftCalendarMonthOffset(delta){
