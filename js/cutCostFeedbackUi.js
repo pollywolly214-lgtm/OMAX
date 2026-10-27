@@ -16,6 +16,7 @@
     const failure=error=>({saved:false,error:String(error?.message||error)});
     if(saving||!canWriteCloud('Cut Cost configuration')||!FB.ready||!FB.user||isVercelPreviewRuntime()||window.__lastIndeterminateSave)return failure('Configuration saving is unavailable while another save or Recovery Mode is active.');
     saving=true;
+    const firebaseOperation=window.OMAXFirebaseOperations?.begin("saving");
     let attempted=false,acknowledged=false,reserved=false,token;
     const suspend=error=>{
       window.__autosaveDisabled=true;window.__recoveryInspectMode=true;
@@ -64,7 +65,7 @@
       persistLocalStateBackup(verified);
       return {saved:true,verificationCompleted:true};
     }catch(error){return attempted||acknowledged?suspend(error):failure(error);}
-    finally{if(reserved&&!window.__lastIndeterminateSave&&lastLocalMutationAt===token.version)hasPendingLocalChanges=false;saving=false;}
+    finally{try{if(reserved&&!window.__lastIndeterminateSave&&lastLocalMutationAt===token.version)hasPendingLocalChanges=false;}finally{saving=false;firebaseOperation?.release();}}
   }
   async function saveConfig(config){
     config=api.settings(config);

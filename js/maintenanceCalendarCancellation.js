@@ -93,6 +93,7 @@
     async function run(reviewed){
       if(busy||!env.canWrite())return {saved:false,error:"Wait for other saves or recovery review before cancelling maintenance."};
       busy=true;let invoked=false,acknowledged=false,transactionEvidence=null;
+      const firebaseOperation = env.operations?.begin("deleting");
       try{
         await env.settle();
         const operation=clone(reviewed?.operation),target=env.captureTarget(),version=key(env.version()),source=await env.read(target);
@@ -125,7 +126,7 @@
       }catch(error){
         const result={saved:false,indeterminate:invoked,stateWriteAttempted:invoked,stateWriteCompleted:acknowledged,evidence:transactionEvidence,error:String(error?.message||error)};
         if(invoked)env.suspend(result);return result;
-      }finally{busy=false;}
+      }finally{busy=false;firebaseOperation?.release();}
     }
     return Object.freeze({isBusy:()=>busy,isAvailable:()=>!busy&&env.canWrite(),review,run});
   }

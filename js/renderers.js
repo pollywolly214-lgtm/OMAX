@@ -13598,6 +13598,7 @@ function getPurchaseOrderApi(){
     && window.__loadedCloudRevisionForSaveGuard === token.revision && token.revision === source.syncMeta.rev
     && orders.businessKey(localState()) === orders.businessKey(source);
   window.purchaseOrderApi = orders.createApi({
+    operations:window.OMAXFirebaseOperations,
     canWrite:()=> canWriteCloud("purchase order") && FB.ready && Boolean(FB.user) && !isVercelPreviewRuntime()
       && !window.__lastIndeterminateSave && !window.__inventoryMaterialMutationPending && !window.__pumpBaselineMutationPending,
     settle:async()=>{

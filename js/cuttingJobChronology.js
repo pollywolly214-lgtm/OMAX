@@ -189,6 +189,7 @@
       if (busy) return {...result, blocked:true, error:"A chronology mutation is already in progress."};
       if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || !env.canWrite()) return {...result, blocked:true, error:"Current authoritative revision and write permission are required."};
       busy = true;
+      const firebaseOperation = env.operations?.begin("saving");
       let writeInvoked = false;
       let localVersion, target;
       const current = () => env.canWrite() && (!env.targetIsCurrent || env.targetIsCurrent(target)) && stateKey(env.localVersion()) === localVersion;
@@ -306,7 +307,7 @@
         result.indeterminate = writeInvoked;
         if (writeInvoked) suspend();
         return result;
-      } finally { busy = false; }
+      } finally { busy = false; firebaseOperation?.release(); }
     }
     return Object.freeze({save, isBusy:() => busy});
   }

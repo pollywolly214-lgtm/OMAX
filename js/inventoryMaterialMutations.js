@@ -259,6 +259,7 @@
         delete action.baselineMaterials; delete action.expectedMaterials;
       } catch (_error){ return reject("Invalid material action."); }
       busy = true;
+      const firebaseOperation = env.operations?.begin("updating");
       let evidence, writeResult, attempted = false;
       try {
         await env.settle();
@@ -320,7 +321,7 @@
           definiteFailure:!attempted, errorCode:String(error?.code || "material_mutation_failed"), evidence};
         if (attempted) env.suspend(result);
         return result;
-      } finally { env.lock(false); busy = false; }
+      } finally { try { env.lock(false); } finally { busy = false; firebaseOperation?.release(); } }
     }});
   }
   // Escape, Enter and blur share one settlement, including before an async save.
