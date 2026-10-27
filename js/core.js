@@ -4402,6 +4402,8 @@ function rollbackCuttingJobDeletion(mutation){
 }
 
 async function deleteCuttingJob(collection, jobId, historyTarget = null){
+  const firebaseOperation = window.OMAXFirebaseOperations?.begin("deleting");
+  try {
   if (cuttingJobDeletionInProgress) return cuttingJobDeletionFailure("Another cutting-job deletion is still saving.");
   if (!["cuttingJobs", "completedCuttingJobs"].includes(collection) || jobId == null || String(jobId) === "") return cuttingJobDeletionFailure("Select a valid cutting job.");
   if (!canWriteCloud("cutting-job deletion") || !FB.ready || !FB.user || isVercelPreviewRuntime()) return cuttingJobDeletionFailure("Cloud writes are unavailable; the cutting job was not removed.");
@@ -4416,7 +4418,7 @@ async function deleteCuttingJob(collection, jobId, historyTarget = null){
   try {
     // Finish earlier saves before binding this operation to one cloud revision.
     if (hasPendingLocalChanges){
-      const settled = await (historyTarget ? saveCloudNowForHistory() : saveCloudNow());
+      const settled = await (historyTarget ? saveCloudNowForHistory({firebaseOperationToken:firebaseOperation?.token}) : saveCloudNow({firebaseOperationToken:firebaseOperation?.token}));
       if (!settled?.saved || !settled.stateWriteCompleted) return cuttingJobDeletionFailure("Existing changes could not be confirmed; the cutting job was not removed.");
     } else await cloudSaveQueue;
     if (!canWriteCloud("cutting-job deletion")) return cuttingJobDeletionFailure("Cloud writes are blocked; the cutting job was not removed.");
@@ -4451,7 +4453,7 @@ async function deleteCuttingJob(collection, jobId, historyTarget = null){
     refreshGlobalCollections();
     beginCuttingJobHistoryMutation(mutation);
     let result;
-    try { result = await saveCloudNow({ expectedRevision, cuttingJobDeletionToken:token }); }
+    try { result = await saveCloudNow({ firebaseOperationToken:firebaseOperation?.token, expectedRevision, cuttingJobDeletionToken:token }); }
     catch (error){ result = { saved:false, indeterminate:true, error:String(error?.message || error) }; }
     writeOutcome = result;
     if (result?.saved === true && result.stateWriteCompleted === true){
@@ -4474,6 +4476,7 @@ async function deleteCuttingJob(collection, jobId, historyTarget = null){
     if (token) cuttingJobDeletionAuthorizations.delete(token);
     cuttingJobDeletionInProgress = false;
   }
+  } finally { firebaseOperation?.release(); }
 }
 window.deleteCuttingJob = deleteCuttingJob;
 
@@ -4501,12 +4504,14 @@ function rollbackCuttingJobHistoryRestore(mutation){
 }
 
 async function restoreCuttingJobHistory(collection, id, target){
+  const firebaseOperation = window.OMAXFirebaseOperations?.begin("updating");
+  try {
   if (cuttingJobDeletionInProgress || !canWriteCloud("cutting-job history restoration")) return cuttingJobDeletionFailure("Another operation or recovery review prevents history restoration.");
   cuttingJobDeletionInProgress = true;
   let mutation = null, writeOutcome = null, token = null;
   try {
     if (hasPendingLocalChanges){
-      const settled = await saveCloudNowForHistory();
+      const settled = await saveCloudNowForHistory({firebaseOperationToken:firebaseOperation?.token});
       if (!settled?.saved || !settled.stateWriteCompleted) return cuttingJobDeletionFailure("Existing changes could not be confirmed before history restoration.");
     } else await cloudSaveQueue;
     if (!canWriteCloud("cutting-job history restoration")) return cuttingJobDeletionFailure("Cloud writes are blocked.");
@@ -4540,7 +4545,7 @@ async function restoreCuttingJobHistory(collection, id, target){
       trash:window.deletedItems[0], trashArray:window.deletedItems, priorities };
     window[collection] = staged; window.deletedItems.shift(); refreshGlobalCollections();
     beginCuttingJobHistoryMutation(mutation);
-    const saving = saveCloudNowForHistory({ expectedRevision, cuttingJobHistoryRestoreToken:token });
+    const saving = saveCloudNowForHistory({ firebaseOperationToken:firebaseOperation?.token, expectedRevision, cuttingJobHistoryRestoreToken:token });
     try { writeOutcome = await saving; }
     catch (error){ writeOutcome = { saved:false, indeterminate:true, error:String(error?.message || error) }; }
     if (writeOutcome?.saved && writeOutcome.stateWriteCompleted) return { ...writeOutcome, ...finishCuttingJobHistoryMutation(mutation, true, true) };
@@ -4561,6 +4566,7 @@ async function restoreCuttingJobHistory(collection, id, target){
     if (activeCuttingJobHistoryMutation === mutation) activeCuttingJobHistoryMutation = null;
     cuttingJobDeletionInProgress = false;
   }
+  } finally { firebaseOperation?.release(); }
 }
 async function writeReviewedGlobalIdentityRepair(next,{source,expectedRevision}){
   const api=window.OMAXGlobalIdentityRepair,plan=api.preview(source);
@@ -4744,6 +4750,7 @@ window.refreshCuttingJobVerificationNotice=refreshCuttingJobVerificationNotice;
 
 // Foundation adapter only. The reviewed UI supplies an exact preview binding.
 const cuttingJobChronologyMutationApi = window.CuttingJobChronology?.createMutationApi({
+  operations:window.OMAXFirebaseOperations,
   canWrite:()=>canWriteCloud("cutting-job chronology") && !hasPendingLocalChanges
     && !isVercelPreviewRuntime() && !window.__lastIndeterminateSave,
   localVersion:()=>({
@@ -4853,6 +4860,7 @@ async function readMaintenanceTaskAuthoritativeState(target){
 }
 
 window.maintenanceTaskDeletionApi=window.OMAXMaintenanceTaskArchive?.createApi({
+  operations:window.OMAXFirebaseOperations,
   canWrite:()=>FB.ready&&Boolean(FB.user)&&!hasPendingLocalChanges&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete
     &&!isRecoveryMode()&&!window.__autosaveDisabled&&!window.__localBackupOnlyMode&&!isVercelPreviewRuntime()
     &&!window.__lastIndeterminateSave&&!window.__globalIdentityVerificationPending&&!window.__lastImportVerificationError&&!window.__lastInventoryIdentityRepairError
@@ -4881,6 +4889,7 @@ window.maintenanceTaskDeletionApi=window.OMAXMaintenanceTaskArchive?.createApi({
 });
 
 window.maintenanceCalendarCancellationApi=window.OMAXMaintenanceCalendarCancellation?.createApi({
+  operations:window.OMAXFirebaseOperations,
   canWrite:()=>canWriteCloud("maintenance calendar cancellation")&&FB.ready&&Boolean(FB.user)&&!hasPendingLocalChanges&&!isVercelPreviewRuntime()
     &&!window.__lastIndeterminateSave&&!window.__globalIdentityVerificationPending&&!window.__lastImportVerificationError&&!window.__lastInventoryIdentityRepairError
     &&!window.maintenanceTaskDeletionApi?.isBusy()&&!window.inventoryMaterialMutationApi?.isBusy()&&!window.__inventoryMaterialMutationPending&&!window.isCuttingJobChronologySaving?.()
@@ -4915,6 +4924,7 @@ window.addEventListener?.("beforeunload",event=>{if(window.maintenanceCalendarCa
 
 let inventoryMaterialOwnedSuspension = null;
 const inventoryMaterialMutationApi = window.OMAXInventoryMaterialMutations?.createApi({
+  operations:window.OMAXFirebaseOperations,
   canWrite:()=>canWriteCloud("Material Inventory") && FB.ready && Boolean(FB.user) && !isVercelPreviewRuntime() && !window.__lastIndeterminateSave,
   settle:async()=>{
     await cloudSaveQueue;
@@ -4964,6 +4974,7 @@ window.addEventListener?.("beforeunload",event=>{
   event.preventDefault();event.returnValue="";
 });
 const inventoryIdentityRepairApi=window.OMAXInventoryIdentityRepair?.createApi({
+  operations:window.OMAXFirebaseOperations,
   localState:getInventoryIdentityRepairLocalState,
   loadedRevision:()=>window.__loadedCloudRevisionForSaveGuard,
   readCloud:readCurrentCloudStateReadOnly,
@@ -4982,6 +4993,7 @@ window.previewInventoryIdentityRepair=()=>inventoryIdentityRepairApi.preview();
 window.applyInventoryIdentityRepair=async()=>({saved:false,blocked:true,error:"Inventory-only apply is superseded by the separately reviewed global identity plan."});
 
 const globalIdentityRepairApi=window.OMAXGlobalIdentityRepair?.createApi({
+  operations:window.OMAXFirebaseOperations,
   localState:getInventoryIdentityRepairLocalState,
   loadedRevision:()=>window.__loadedCloudRevisionForSaveGuard,
   readCloud:readCurrentCloudStateReadOnly,
@@ -5084,6 +5096,7 @@ function getCloudCutFileStorageDiagnostics(){
 window.auditCuttingFileContentExposure = auditCuttingFileContentExposure;
 window.getCloudCutFileStorageDiagnostics = getCloudCutFileStorageDiagnostics;
 window.runMaintenanceCalendarMutation = window.OMAXMaintenanceCalendarIntegrity.createMutationRunner({
+  operations:window.OMAXFirebaseOperations,
   state:()=>compactStateForStorage(snapshotState({skipLocalFileCacheSync:true})),
   captureTarget:captureCuttingJobSaveTarget,
   targetIsCurrent:cuttingJobSaveTargetIsCurrent,
@@ -5103,6 +5116,7 @@ window.inspectMaintenanceCalendarIntegrity = (options={})=>window.OMAXMaintenanc
 window.inspectMaintenanceCalendarCloud = async (options={})=>window.OMAXMaintenanceCalendarIntegrity.inspect(await readCurrentCloudStateReadOnly(),options);
 
 window.historicalImport = window.OMAXHistoricalImport.createApi({
+  operations:window.OMAXFirebaseOperations,
   state:()=>compactStateForStorage(snapshotState({ skipLocalFileCacheSync:true })),
   canWrite:()=>canWriteCloud("historical reconciliation") && Boolean(FB.user),
   readCloud:readCurrentCloudStateReadOnly,
@@ -5146,6 +5160,8 @@ window.cfr05CloudCuttingFiles = window.Cfr05CloudCuttingFiles?.createApi(window,
   })
 });
 window.uploadCfr05CuttingFile = async function(jobId, file, onStage){
+  const firebaseOperation = window.OMAXFirebaseOperations?.begin("saving");
+  try {
   if(!canWriteCloud("cutting-file upload"))throw Error("Recovery/read-only mode blocks cutting-file uploads.");
   const uid=FB.user?.uid||"", workspaceId=WORKSPACE_ID, api=window.Cfr04WorkspaceMetadata;
   let membership={valid:false,active:false,role:null,path:null};
@@ -5154,8 +5170,9 @@ window.uploadCfr05CuttingFile = async function(jobId, file, onStage){
     const validation=api.validateWorkspaceMembershipRecord(data,{uid,workspaceId});
     membership={valid:validation.valid,active:data?.active===true,role:data?.role||null,path};
   }
-  return window.cfr05CloudCuttingFiles.upload({uid,workspaceId,jobId,file,membership,storage:FB.storage,firestore:FB.db,onStage,
+  return await window.cfr05CloudCuttingFiles.upload({uid,workspaceId,jobId,file,membership,storage:FB.storage,firestore:FB.db,onStage,
     jobExists:id=>(Array.isArray(window.cuttingJobs)&&window.cuttingJobs.some(job=>String(job?.id)===String(id)))||(Array.isArray(window.completedCuttingJobs)&&window.completedCuttingJobs.some(job=>String(job?.id)===String(id)))});
+  } finally { firebaseOperation?.release(); }
 };
 window.getCfr05Membership = async function(){
   const uid=FB.user?.uid||"",workspaceId=WORKSPACE_ID,api=window.Cfr04WorkspaceMetadata;
@@ -5165,9 +5182,12 @@ window.getCfr05Membership = async function(){
 };
 window.listCfr05CloudFiles = async function(jobId){const auth=await window.getCfr05Membership();return window.cfr05CloudCuttingFiles.listJobFiles({...auth,jobId,firestore:FB.db});};
 window.openCfr05CloudFile = async function(jobId,fileId,callbacks = {}){
+  const firebaseOperation = window.OMAXFirebaseOperations?.begin("loading");
+  try {
   const auth=await window.getCfr05Membership(),path=window.Cfr04WorkspaceMetadata.filePath(auth.workspaceId,jobId,fileId);
-  return window.cfr05CloudCuttingFiles.download({...auth,fileDocRef:FB.db.doc(path),expected:{workspaceId:auth.workspaceId,jobId,fileId},storage:FB.storage,fetch:window.fetch.bind(window),AbortController:window.AbortController,setTimeout:window.setTimeout.bind(window),clearTimeout:window.clearTimeout.bind(window),URL:window.URL,openObjectUrl:callbacks.openObjectUrl,displayPreview:callbacks.displayPreview,
+  return await window.cfr05CloudCuttingFiles.download({...auth,fileDocRef:FB.db.doc(path),expected:{workspaceId:auth.workspaceId,jobId,fileId},storage:FB.storage,fetch:window.fetch.bind(window),AbortController:window.AbortController,setTimeout:window.setTimeout.bind(window),clearTimeout:window.clearTimeout.bind(window),URL:window.URL,openObjectUrl:callbacks.openObjectUrl,displayPreview:callbacks.displayPreview,
     previewDispatch:(extension,buffer)=>{if(extension==="dxf"&&window.dxfPreview){const text=window.dxfPreview.arrayBufferToText(buffer);return window.dxfPreview.renderCadToSvgDataUrl(text)||null;}return null;}});
+  } finally { firebaseOperation?.release(); }
 };
 function getCuttingJobImporterState(){
   const state={};
@@ -5224,6 +5244,7 @@ async function prepareCuttingJobImportBackup({previewTrace}={}){
   return prepared;
 }
 window.cuttingJobImporter = window.CuttingJobImporter?.createApi({
+  operations:window.OMAXFirebaseOperations,
   xlsx:window.CjiXlsxParser,
   state:getCuttingJobImporterState,
   categories:()=>Array.isArray(window.jobFolders)?window.jobFolders:[],
@@ -7089,7 +7110,10 @@ function validateMaintenanceV2RepairRemoteBaseline(proof, remoteState){
 
 let cloudSaveQueue = Promise.resolve();
 const saveCloudInternal = debounce((saveOptions = {})=>{
-  const queued = cloudSaveQueue.then(()=>performCloudSave(saveOptions));
+  const enqueue = ()=>cloudSaveQueue.then(()=>performCloudSave(saveOptions));
+  const queued = window.OMAXFirebaseOperations
+    ? window.OMAXFirebaseOperations.run("saving", enqueue, saveOptions.firebaseOperationToken)
+    : enqueue();
   cloudSaveQueue = queued.catch(()=>{});
   return queued;
 }, 1800);
@@ -7805,6 +7829,8 @@ function saveCloudNow(saveOptions = {}){
 
 /* Water quality: isolated history mutation through the shared guarded writer. */
 async function saveWaterQualityCheck(request){
+  const firebaseOperation = window.OMAXFirebaseOperations?.begin("saving");
+  try {
   const failure=error=>({saved:false,verified:false,error:String(error?.message||error)});
   const available=()=>FB.ready&&FB.user&&!isVercelPreviewRuntime()&&!window.__categoryMutationPending
     &&!window.__inventoryMaterialMutationPending&&canWriteCloud("water quality commit");
@@ -7871,6 +7897,7 @@ async function saveWaterQualityCheck(request){
     return {saved:true,verified:true,revision:verified.syncMeta.rev};
   }catch(error){return invoked||acknowledged?suspend(error):failure(error);}
   finally{if(ownsLock)window.__waterQualityMutationPending=false;}
+  } finally { firebaseOperation?.release(); }
 }
 window.saveWaterQualityCheck=saveWaterQualityCheck;
 window.addEventListener?.("beforeunload",event=>{if(window.__waterQualityMutationPending){event.preventDefault();event.returnValue="";}});
@@ -7878,6 +7905,8 @@ window.addEventListener?.("beforeunload",event=>{if(window.__waterQualityMutatio
 
 /* CJCAT: one verified backend transaction updates folder metadata and linked job Project Numbers. */
 async function saveCuttingJobCategoryChange(request){
+  const firebaseOperation = window.OMAXFirebaseOperations?.begin("updating");
+  try {
   const failure=error=>({saved:false,error:String(error?.message||error)});
   if(window.__categoryMutationPending||window.__pumpLogMutationPending||window.__pumpBaselineMutationPending
     ||window.__inventoryMaterialMutationPending||!FB.ready||!FB.user||isVercelPreviewRuntime()
@@ -7968,6 +7997,7 @@ async function saveCuttingJobCategoryChange(request){
     return {saved:true,verified:true,summary:planned.summary,revision:revisionAfter};
   }catch(error){return writeStarted||acknowledged?suspend(error):failure(error);}
   finally{window.__categoryMutationPending=false;}
+  } finally { firebaseOperation?.release(); }
 }
 window.saveCuttingJobCategoryChange=saveCuttingJobCategoryChange;
 window.addEventListener?.("beforeunload",event=>{if(window.__categoryMutationPending){event.preventDefault();event.returnValue="";}});
@@ -7975,6 +8005,8 @@ window.addEventListener?.("beforeunload",event=>{if(window.__categoryMutationPen
 
 /* PRB verified baseline action; uses the existing queue, writer and backend reader. */
 async function savePumpBaseline(action){
+  const firebaseOperation = window.OMAXFirebaseOperations?.begin("saving");
+  try {
   const failure = error=>({saved:false,error:String(error?.message || error)});
   if (window.__pumpBaselineMutationPending || window.__inventoryMaterialMutationPending
     || !canWriteCloud("pump baseline commit") || !FB.ready || !FB.user || isVercelPreviewRuntime()) return failure("Baseline editing is unavailable while writes are blocked or another verified action is pending.");
@@ -8059,6 +8091,7 @@ async function savePumpBaseline(action){
   } finally {
     window.__pumpBaselineMutationPending = false;
   }
+  } finally { firebaseOperation?.release(); }
 }
 window.savePumpBaseline = savePumpBaseline;
 window.addEventListener?.("beforeunload",event=>{
@@ -8069,6 +8102,8 @@ window.addEventListener?.("beforeunload",event=>{
 
 /* POLISHv2 verified measurement action; baseline editing remains separate. */
 async function savePumpLogChange(action){
+  const firebaseOperation = window.OMAXFirebaseOperations?.begin("saving");
+  try {
   const failure = error=>({saved:false,error:String(error?.message || error)});
   if (window.__pumpLogMutationPending || window.__pumpBaselineMutationPending || window.__inventoryMaterialMutationPending
     || !canWriteCloud("pump log commit") || !FB.ready || !FB.user || isVercelPreviewRuntime()) return failure("Pump log editing is unavailable while writes are blocked or another verified action is pending.");
@@ -8152,6 +8187,7 @@ async function savePumpLogChange(action){
   } finally {
     window.__pumpLogMutationPending = false;
   }
+  } finally { firebaseOperation?.release(); }
 }
 window.savePumpLogChange = savePumpLogChange;
 window.addEventListener?.("beforeunload",event=>{if(window.__pumpLogMutationPending){event.preventDefault();event.returnValue="";}});
@@ -8182,6 +8218,8 @@ if (typeof window !== "undefined"){
 }
 
 async function runRecoveryInspect(){
+  const firebaseOperation = window.OMAXFirebaseOperations?.begin("loading");
+  try {
   window.__recoveryInspectMode = true;
   window.__autosaveDisabled = true;
   console.warn("Recovery inspect mode enabled: autosave disabled.");
@@ -8201,6 +8239,7 @@ async function runRecoveryInspect(){
     localBackupBytes: localRaw ? localRaw.length : 0
   });
   return { cloudState, localBackup };
+  } finally { firebaseOperation?.release(); }
 }
 if (typeof window !== "undefined") window.recoveryInspect = runRecoveryInspect;
 function checkAuthoritativeIdentityIntegrity(data){
@@ -8276,6 +8315,8 @@ function adoptIdentityCheckedAuthoritativeState(data){
 }
 
 async function loadFromCloud(){
+  const firebaseOperation = window.OMAXFirebaseOperations?.begin("loading");
+  try {
   if (!FB.ready || !FB.docRef) return;
   setCloudLoadGate({ loadComplete:false, adoptComplete:false });
   try {
@@ -8294,6 +8335,7 @@ async function loadFromCloud(){
     renderRecoveryDiagnosticsPanel();
     return { loaded:false, error:String(error?.message || error) };
   }
+  } finally { firebaseOperation?.release(); }
 }
 async function migrateLegacyWorkspaceDoc(){
   // Read-only legacy evidence. Normal loading does not restore or provision.
@@ -8359,6 +8401,8 @@ function setupDebugPanel(){
   }
 }
 async function refreshDebugCloud(){
+  const firebaseOperation = window.OMAXFirebaseOperations?.begin("loading");
+  try {
   const out = document.getElementById("dbgCloud");
   if (!out) return;
   try{
@@ -8372,6 +8416,7 @@ async function refreshDebugCloud(){
   }catch(err){
     out.value = "Failed to read cloud doc: " + (err && err.message || err);
   }
+  } finally { firebaseOperation?.release(); }
 }
 
 function seedInventoryFromTasks(){

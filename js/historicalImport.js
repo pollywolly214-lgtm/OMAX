@@ -154,6 +154,7 @@
       const result={saved:false,saveAttempted:false,saveCompleted:false,verificationCompleted:false,indeterminate:false,rollbackCompleted:false,backupCreated:false,beforeCount:0,afterCount:0,importedIds:[],error:""};
       if(busy||!confirmed||!env.canWrite()){result.error="Explicit reviewed confirmation and a writable authoritative baseline are required.";return result;}
       busy=true;let before=null,staged=null,plannedIds=[],applied=false,committed=false;
+      const firebaseOperation = env.operations?.begin("saving");
       try {
         const current=env.state(),cloud=await env.readCloud();
         if(!cloud||cloud.syncMeta?.rev!==env.loadedRevision())throw Error("Latest authoritative baseline changed or is missing; reload before previewing.");
@@ -180,7 +181,7 @@
         }
         if(canonical(unrelated(kind,before))!==canonical(unrelated(kind,appliedState)))throw Error("Unrelated protected fields changed during staging.");
         result.saveAttempted=true;
-        let saved;try{saved=await env.save({expectedRevision:cloud.syncMeta.rev});}catch(error){result.indeterminate=true;result.error="Save threw without a definite write outcome: "+String(error?.message||error)+". Writes are suspended; verify before retrying.";env.suspend?.(result.error);return result;}
+        let saved;try{saved=await env.save({firebaseOperationToken:firebaseOperation?.token,expectedRevision:cloud.syncMeta.rev});}catch(error){result.indeterminate=true;result.error="Save threw without a definite write outcome: "+String(error?.message||error)+". Writes are suspended; verify before retrying.";env.suspend?.(result.error);return result;}
         committed=saved?.saved===true&&saved?.stateWriteCompleted===true;
         result.indeterminate=saved?.indeterminate===true||(!committed&&saved?.stateWriteAttempted===true&&saved?.definiteFailure!==true);
         if(result.indeterminate){result.error="Save outcome is indeterminate. Writes are suspended; read/verify before retrying.";env.suspend?.(result.error);return result;}
@@ -224,7 +225,7 @@
         }
         if(committed){result.indeterminate=true;env.suspend?.(result.error);}
         return result;
-      }finally{busy=false;}
+      }finally{busy=false;firebaseOperation?.release();}
     }});
   }
   return Object.freeze({STATUS,identity,preview,append,weekFor,canonical,normalizeBusinessForComparison,normalizeDestinationForVerification,createApi});

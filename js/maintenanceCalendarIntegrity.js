@@ -102,6 +102,7 @@
     return async function run(change){
       if(busy||!env.canWrite())return{saved:false,error:"A writable baseline and one maintenance action at a time are required."};
       busy=true;let before,staged,checkpoint,applied=false,committed=false;
+      const firebaseOperation = env.operations?.begin("saving");
       try{
         const target=env.captureTarget?.(),targetIsCurrent=()=>target===undefined||env.targetIsCurrent?.(target)===true;
         before=clone(env.state());const cloud=await env.readCloud(target);
@@ -109,7 +110,7 @@
         checkpoint=env.checkpoint?.();applied=true;const created=change();staged=clone(env.state());validateAppend(before,staged);
         if(key(normalized(before))===key(normalized(staged)))return{saved:true,noChange:true,created};
         let result;
-        try{result=await env.save({expectedRevision:cloud.syncMeta.rev,...(target===undefined?{}:{authoritativeTarget:target})});}catch(error){env.suspend("Maintenance save threw with unknown outcome.");return{saved:false,indeterminate:true,error:String(error?.message||error)};}
+        try{result=await env.save({firebaseOperationToken:firebaseOperation?.token,expectedRevision:cloud.syncMeta.rev,...(target===undefined?{}:{authoritativeTarget:target})});}catch(error){env.suspend("Maintenance save threw with unknown outcome.");return{saved:false,indeterminate:true,error:String(error?.message||error)};}
         committed=result?.saved===true&&result?.stateWriteCompleted===true;
         if(!committed){
           if(result?.indeterminate||result?.stateWriteAttempted===true&&!result?.definiteFailure){env.suspend("Maintenance save outcome is unknown; verify before retrying.");return{saved:false,indeterminate:true,error:result?.error||"Maintenance save outcome is unknown."};}
@@ -137,7 +138,7 @@
           }catch(rollbackError){env.suspend(String(rollbackError?.message||rollbackError));return{saved:false,rollbackReviewRequired:true,error:message+" "+String(rollbackError?.message||rollbackError)};}
         }
         return{saved:false,error:message};
-      }finally{busy=false;}
+      }finally{busy=false;firebaseOperation?.release();}
     };
   }
   return Object.freeze({resolveOneTime,inspect,createMutationRunner});

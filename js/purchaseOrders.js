@@ -158,6 +158,7 @@
     return Object.freeze({isBusy:()=> busy, isUncertain:()=> uncertain, async save(draft, edit = null){
       if (busy || uncertain) return {saved:false, blocked:true, indeterminate:uncertain, error:uncertain ? "This save needs server verification. Do not retry the order." : "An order is already saving."};
       busy = true;
+      const firebaseOperation = env.operations?.begin("saving");
       let reserved = false, attempted = false, committed = false, token;
       const result = {saved:false, verificationCompleted:false, indeterminate:false};
       const suspend = error=>{
@@ -207,8 +208,8 @@
         if (committed || (attempted && error?.definite !== true)) return suspend(error);
         return {...result, error:String(error?.message || error)};
       } finally {
-        if (reserved) env.release(token, uncertain);
-        busy = false;
+        try { if (reserved) env.release(token, uncertain); }
+        finally { busy = false; firebaseOperation?.release(); }
       }
     }});
   }

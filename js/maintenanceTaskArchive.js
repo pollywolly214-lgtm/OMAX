@@ -67,6 +67,7 @@
       if(restoring&&(typeof confirmation!=="string"||!confirmation))return {saved:false,error:"Confirm the exact archived task before restoration."};
       if(busy||!env.canWrite())return {saved:false,error:`Task ${action} is unavailable while changes are saving or Recovery Mode is active.`};
       busy=true;let attempted=false;
+      const firebaseOperation = env.operations?.begin(restoring ? "updating" : "deleting");
       try{
         await env.settle();
         const target=env.captureTarget(),version=key(env.version());
@@ -100,7 +101,7 @@
         const result={saved:false,error:String(error?.message||error),indeterminate:attempted,stateWriteAttempted:attempted};
         if(attempted)env.suspend(result);
         return result;
-      }finally{busy=false;}
+      }finally{busy=false;firebaseOperation?.release();}
     }
     return {isBusy:()=>busy,isAvailable:()=>!busy&&env.canWrite(),remove:id=>transfer(id),restore:(id,confirmedArchiveKey)=>transfer(id,confirmedArchiveKey??null)};
   }

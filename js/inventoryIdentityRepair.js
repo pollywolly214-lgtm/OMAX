@@ -100,6 +100,7 @@
       const result={saved:false,verified:false,noop:false,backupCreated:false,indeterminate:false,manualVerificationRequired:false,error:""};
       if(busy||!confirmed||!env.canApply()){result.error="Explicit exact-plan confirmation and an authenticated authoritative baseline are required.";return result;}
       busy=true;let committed=false,writePending=false;
+      const firebaseOperation = env.operations?.begin("updating");
       try {
         const source=await env.readCloud(),plan=currentPreview(source);
         if(!reviewedPreview||key(plan)!==key(reviewedPreview))throw Error("Reviewed source/plan or revision changed; generate a fresh read-only preview.");
@@ -126,7 +127,7 @@
         result.error=String(error?.message||error);
         if(committed||writePending){result.manualVerificationRequired=true;result.indeterminate=writePending;env.suspend(result.error);}
         return result;
-      }finally{busy=false;}
+      }finally{busy=false;firebaseOperation?.release();}
     }});
   }
   return Object.freeze({key,business,counts,proposedId,preview,repairedState,verify,createApi});
