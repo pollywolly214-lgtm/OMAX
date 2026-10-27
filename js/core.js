@@ -141,6 +141,7 @@ const DEFAULT_APP_CONFIG = {
   averageWindowDays: DEFAULT_PREDICTION_AVERAGE_WINDOW,
   timeEfficiencyGoalMode: "maximum",
   mondayStartLookback: false,
+  materialCostTreatment: "deduct",
   maintenanceCalendarNewRecordsSystem: "v2"
 };
 let appConfig = { ...DEFAULT_APP_CONFIG };
@@ -371,6 +372,7 @@ function normalizeAppConfig(config){
     }
     normalized.averageWindowDays = normalizePredictionAverageWindow(config.averageWindowDays);
     normalized.timeEfficiencyGoalMode = config.timeEfficiencyGoalMode === "average" ? "average" : "maximum";
+    normalized.materialCostTreatment = config.materialCostTreatment === "separate" ? "separate" : "deduct";
     if (typeof config.mondayStartLookback === "boolean") normalized.mondayStartLookback = config.mondayStartLookback;
     normalized.maintenanceCalendarNewRecordsSystem = "v2";
   }
@@ -3719,7 +3721,10 @@ function saveCuttingJobFailurePercent(jobId, failurePercent){
 }
 
 function createCuttingJob(job){
-  return saveCuttingJobBusinessOperation({type:"create",job});
+  // Prospective policy: capture once at creation; configuration never reinterprets existing jobs.
+  const materialCostTreatment = job?.materialCostTreatment === "separate" || job?.materialCostTreatment === "deduct"
+    ? job.materialCostTreatment : (window.appConfig?.materialCostTreatment === "separate" ? "separate" : "deduct");
+  return saveCuttingJobBusinessOperation({type:"create",job:{...job,materialCostTreatment}});
 }
 
 async function saveCuttingJobBusinessOperation(operation){

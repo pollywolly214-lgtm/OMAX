@@ -397,14 +397,23 @@ function computeCuttingJobProfit(job, options = {}){
   const materialCost = finiteValue([job?.materialCost], 0, true);
   const materialQty = finiteValue([job?.materialQty], 0, true);
   const materialExpense = materialCost * materialQty;
+  // Untagged records retain their original accounting semantics, independent of global configuration.
+  const materialCostTreatment = job?.materialCostTreatment === "separate" ? "separate" : "deduct";
+  const materialCharge = materialCostTreatment === "separate" ? materialExpense : 0;
+  const materialProfitDeduction = materialCostTreatment === "deduct" ? materialExpense : 0;
   const failurePercent = Math.min(100, Math.max(0, finiteValue([options.failurePercent ?? job?.failurePercent], 0)));
   const revenue = chargeRate * hours;
   const cuttingCost = costRate * hours;
   const revenueLost = revenue * failurePercent / 100;
   const adjustedRevenue = revenue * (1 - failurePercent / 100);
-  const originalNetProfit = revenue - cuttingCost - materialExpense;
-  const totalProfit = adjustedRevenue - cuttingCost - materialExpense;
+  const cuttingProfit = adjustedRevenue - cuttingCost;
+  const originalNetProfit = revenue - cuttingCost - materialProfitDeduction;
+  const totalProfit = cuttingProfit - materialProfitDeduction;
+  // Charge Rate is revenue/hr, already covering runtime cost. Recover material at cost once.
+  const customerPrice = revenue + materialCharge;
+  const adjustedCustomerPrice = adjustedRevenue + materialCharge;
   return { hours, duration, chargeRate, costRate, netRate, materialCost, materialQty, materialExpense,
+    materialCostTreatment, materialCharge, materialProfitDeduction, cuttingProfit, customerPrice, adjustedCustomerPrice,
     failurePercent, revenue, adjustedRevenue, revenueLost, cuttingCost, originalNetProfit, totalProfit };
 }
 

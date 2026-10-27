@@ -3755,8 +3755,9 @@ function getConfigurationElements(){
   const predictionMode = document.getElementById("configPredictionMode");
   const averageWindow = document.getElementById("configAverageWindow");
   const mondayStartLookback = document.getElementById("configMondayStartLookback");
+  const materialCostTreatment = document.getElementById("configMaterialCostTreatment");
   const cancel = document.getElementById("configCancel");
-  return { modal, form, hoursInput, excludeWeekends, predictionMode, averageWindow, mondayStartLookback, cancel };
+  return { modal, form, hoursInput, excludeWeekends, predictionMode, averageWindow, mondayStartLookback, materialCostTreatment, cancel };
 }
 
 function currentAppConfiguration(){
@@ -3783,9 +3784,12 @@ function closeConfigurationModal(){
 }
 
 function openConfigurationModal(trigger){
-  const { modal, hoursInput, excludeWeekends, predictionMode, averageWindow, mondayStartLookback } = getConfigurationElements();
+  const { modal, hoursInput, excludeWeekends, predictionMode, averageWindow, mondayStartLookback, materialCostTreatment } = getConfigurationElements();
   if (!modal) return;
   const cfg = currentAppConfiguration();
+  if (materialCostTreatment) materialCostTreatment.value = cfg.materialCostTreatment === "separate" ? "separate" : "deduct";
+  const status = document.getElementById("configSaveStatus");
+  if (status) status.textContent = "";
   if (hoursInput){
     const value = cfg.dailyHours != null ? cfg.dailyHours : (typeof getConfiguredDailyHours === "function" ? getConfiguredDailyHours() : 8);
     hoursInput.value = value;
@@ -3814,8 +3818,8 @@ function openConfigurationModal(trigger){
   }
 }
 
-function applyConfigurationForm(){
-  const { hoursInput, excludeWeekends, predictionMode, averageWindow, mondayStartLookback } = getConfigurationElements();
+async function applyConfigurationForm(){
+  const { hoursInput, excludeWeekends, predictionMode, averageWindow, mondayStartLookback, materialCostTreatment } = getConfigurationElements();
   const nextDaily = hoursInput ? Number(hoursInput.value) : null;
   const nextMode = predictionMode && predictionMode.value === "fixed" ? "fixed" : "average";
   const nextWindow = averageWindow ? Number(averageWindow.value) : 60;
@@ -3824,14 +3828,13 @@ function applyConfigurationForm(){
     excludeWeekends: !!(excludeWeekends && excludeWeekends.checked),
     predictionMode: nextMode,
     averageWindowDays: nextWindow,
+    materialCostTreatment: materialCostTreatment?.value === "separate" ? "separate" : "deduct",
     mondayStartLookback: !!(mondayStartLookback && mondayStartLookback.checked)
   };
-  if (typeof setAppConfig === "function") setAppConfig(nextConfig);
-  else {
-    window.appConfig = typeof normalizeAppConfig === "function" ? normalizeAppConfig(nextConfig) : nextConfig;
-    if (typeof refreshDerivedDailyHours === "function") refreshDerivedDailyHours();
-  }
-  if (typeof saveCloudDebounced === "function") saveCloudDebounced();
+  const writer = window.OMAXCutCostFeedbackUi?.saveWorkspaceConfig;
+  if (!writer) throw Error("Workspace configuration saving is unavailable.");
+  const result = await writer(nextConfig);
+  if (!result?.saved || !result.verificationCompleted) throw Error(result?.error || "Configuration could not be verified.");
   if (typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
   renderCalendarPreservingScroll();
   if (typeof renderDashboard === "function") renderDashboard();
@@ -3842,7 +3845,8 @@ function applyConfigurationForm(){
     try { route(); }
     catch (err){ console.warn("Failed to rerender after config change", err); }
   }
-  toast("Configuration updated");
+  toast("Configuration saved and server-verified");
+  return result;
 }
 
 function wireConfigurationModal(){
@@ -3858,10 +3862,18 @@ function wireConfigurationModal(){
   }
   if (form && form.dataset.boundConfig !== "1"){
     form.dataset.boundConfig = "1";
-    form.addEventListener("submit", (event)=>{
+    form.addEventListener("submit", async (event)=>{
       event.preventDefault();
-      applyConfigurationForm();
-      closeConfigurationModal();
+      if (form.dataset.saving === "1") return;
+      form.dataset.saving = "1";
+      const status = document.getElementById("configSaveStatus");
+      if (status) status.textContent = "Saving and verifying Firebase…";
+      const controls = Array.from(form.querySelectorAll("input,select,button"));
+      const disabled = controls.map(control=>control.disabled);
+      controls.forEach(control=>control.disabled = true);
+      try { await applyConfigurationForm(); closeConfigurationModal(); }
+      catch (error){ if (status) status.textContent = error.message || "Configuration was not saved."; }
+      finally { controls.forEach((control,index)=>control.disabled = disabled[index]); form.dataset.saving = "0"; }
     });
   }
   if (cancel && cancel.dataset.boundConfig !== "1"){
@@ -16374,7 +16386,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         const hours = Math.max(0, asNumber(row?.hoursValue, 0));
         const material = Math.max(0, asNumber(row?.materialValue ?? row?.materialCostValue, 0));
         const rates = rowRates(row, chargeRate, costRate);
-        const profit = computeCuttingJobProfit({estimateHours:hours, ...rates, materialCost:material, materialQty:1, failurePercent:row.failurePercentValue});
+        const profit = computeCuttingJobProfit({estimateHours:hours, ...rates, materialCost:material, materialQty:1, failurePercent:row.failurePercentValue, materialCostTreatment:row.materialCostTreatment});
         const totalCost = profit.cuttingCost + profit.materialExpense;
         acc.rows += 1;
         acc.net += profit.totalProfit;
@@ -18513,6 +18525,7 @@ function computeCostModel(){
       revenue: profit.revenue,
       adjustedRevenue: profit.adjustedRevenue,
       failurePercent: profit.failurePercent,
+      materialCostTreatment: profit.materialCostTreatment,
       total: profit.totalProfit
     };
   };
@@ -19945,6 +19958,7 @@ function computeCostModel(){
       revenueValue: jobNet.adjustedRevenue,
       originalRevenueValue: jobNet.revenue,
       failurePercentValue: jobNet.failurePercent,
+      materialCostTreatment: jobNet.materialCostTreatment,
       chargeRateValue: chargeRate,
       costRateValue: costRate,
       materialCostValue,
@@ -19983,12 +19997,13 @@ function computeCostModel(){
       revenueValue: Number(row?.revenueValue) || 0,
       originalRevenueValue: Number(row?.originalRevenueValue) || 0,
       failurePercentValue: Number(row?.failurePercentValue) || 0,
+      materialCostTreatment: row?.materialCostTreatment,
       netGainLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
       materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
       laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
       totalCostValue: Number(row?.totalCostValue) || 0,
       totalProfitValue: Number(row?.totalProfitValue) || 0,
-      formulaTitle: "Source: Central data table completed cutting jobs row. Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense.",
+      formulaTitle: "Source: Central data table completed cutting jobs row. Net profit = Revenue × (1 - Failure % / 100) + Separate material recovery - Cutting cost - Material expense.",
       settingsLink: row?.settingsLink || ""
     }));
   const efficiencyTotals = efficiencyRows.reduce((acc, row) => {
@@ -20016,12 +20031,12 @@ function computeCostModel(){
     totalNetGainLabel: formatterCurrency(efficiencyTotals.profit, { decimals: Math.abs(efficiencyTotals.profit) < 1000 ? 2 : 0, showPlus: true }),
     averageNetGainLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
     sourceLabel: "Source: central data table completed cutting jobs rows.",
-    formulaLabel: "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense",
-    disclaimerLabel: "Uses central data table values only.",
+    formulaLabel: "Net profit = Revenue × (1 - Failure % / 100) + Separate material recovery - Cutting cost - Material expense",
+    disclaimerLabel: "Uses central data table values and each saved job material treatment. Separate recovery offsets full material expense at cost.",
     rows: efficiencyRows,
     emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
-  const efficiencyMathDetails = `Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
+  const efficiencyMathDetails = `Net profit = Revenue × (1 - Failure % / 100) + Separate material recovery - Cutting cost - Material expense. Revenue ${formatterCurrency(efficiencyTotals.revenue, { decimals: 0 })}, Run cost (cost/hr × hours) ${formatterCurrency(efficiencyTotals.labor, { decimals: 0 })}, Material ${formatterCurrency(efficiencyTotals.material, { decimals: 0 })}, Net ${formatterCurrency(efficiencyTotals.profit, { decimals: 0, showPlus: true })}.`;
   efficiencySnapshot.mathDetailsLabel = efficiencyMathDetails;
   const totalCalcHours = efficiencyTotals.hours > 0 ? efficiencyTotals.hours : 0;
   const defaultChargeRateForCalc = totalCalcHours > 0 ? (efficiencyTotals.originalRevenue / totalCalcHours) : JOB_RATE_PER_HOUR;
@@ -21392,6 +21407,7 @@ function showFailedCutDialog(jobId, trigger){
         <dt>Revenue lost / potential profit reduction</dt><dd data-failure-preview="revenueLost"></dd>
       </dl>
       <p class="small muted">Revenue lost is the reduction in revenue. A negative adjusted net profit is an actual loss. Cutting and material expenses stay unchanged.</p>
+      <p class="small muted">Material treatment: ${job.materialCostTreatment === "separate" ? "Charge material separately — full material expense is recovered at cost and does not reduce cutting profit." : "Deduct material from profit."}</p>
       <p data-failed-cut-status role="status"></p>
       <div class="failed-cut-actions"><button type="button" data-failed-cut-cancel>Cancel</button><button type="submit" data-failed-cut-save>Save</button></div>
     </form>`;
