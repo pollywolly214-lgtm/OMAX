@@ -130,7 +130,7 @@ function route(options = {}){
     }
     if (norm === "#/settings" || norm.startsWith("#/settings?"))      { renderSettings();   return; }
     if (norm === "#/tolerance")     { renderTolerance();  return; }
-    if (norm === "#/jobs")          { renderJobs();       return; }
+    if (norm === "#/jobs")          { renderJobs({financialRefresh:options?.financialRefresh===true}); return; }
     if (norm === "#/projects" || norm.startsWith("#/projects?")) { renderProjects(); return; }
     if (norm === "#/costs")         { renderCosts();      return; }
     if (norm === "#/inventory")     { renderInventory();  return; }

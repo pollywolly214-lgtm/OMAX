@@ -1,6 +1,6 @@
 # MCALC-01A — configurable material cost treatment
 
-Status: READY FOR MCALC-01B REVIEW. Prospective configuration; no historical migration or production data writes were performed during implementation/testing.
+Superseded by [MCALC-01B](mcalc-01b-global-material-treatment.md). This document records the original 01A audit and implementation; its prospective/per-job policy is no longer the implementation contract. MCALC-01B uses one global setting for all jobs and preserves stored records while recalculating displayed history.
 
 ## Starting point and isolation
 

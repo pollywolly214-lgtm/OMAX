@@ -3831,20 +3831,21 @@ async function applyConfigurationForm(){
     materialCostTreatment: materialCostTreatment?.value === "separate" ? "separate" : "deduct",
     mondayStartLookback: !!(mondayStartLookback && mondayStartLookback.checked)
   };
+  const current = currentAppConfiguration();
+  // A mode-only change must not materialize unrelated scheduling defaults in appConfig.
+  const changes = Object.fromEntries(Object.entries(nextConfig).filter(([key,value])=>value !== current[key]));
+  if (!Object.keys(changes).length){ toast("Configuration unchanged"); return {noOp:true}; }
   const writer = window.OMAXCutCostFeedbackUi?.saveWorkspaceConfig;
   if (!writer) throw Error("Workspace configuration saving is unavailable.");
-  const result = await writer(nextConfig);
+  const result = await writer(changes);
   if (!result?.saved || !result.verificationCompleted) throw Error(result?.error || "Configuration could not be verified.");
-  if (typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
-  renderCalendarPreservingScroll();
-  if (typeof renderDashboard === "function") renderDashboard();
-  if (typeof renderJobs === "function") renderJobs();
-  if (typeof renderCosts === "function") renderCosts();
-  if (typeof scheduleOpportunityRecompute === "function") scheduleOpportunityRecompute();
-  if (typeof route === "function"){
-    try { route(); }
-    catch (err){ console.warn("Failed to rerender after config change", err); }
-  }
+  const schedulingChanged = Object.keys(changes).some(key=>key !== "materialCostTreatment");
+  if (schedulingChanged && typeof refreshTimeEfficiencyWidgets === "function") refreshTimeEfficiencyWidgets();
+  if (typeof hideBubble === "function") hideBubble();
+  if (schedulingChanged && typeof scheduleOpportunityRecompute === "function") scheduleOpportunityRecompute();
+  // Rebuild only the visible page. Each route reads the authoritative config anew;
+  // this refreshes Projects as well as financial cards, graphs and open breakdowns.
+  if (typeof route === "function") route({preserveScroll:true,scrollY:window.scrollY,financialRefresh:!schedulingChanged});
   toast("Configuration saved and server-verified");
   return result;
 }
@@ -3860,6 +3861,14 @@ function wireConfigurationModal(){
       openConfigurationModal(trigger);
     });
   }
+  document.querySelectorAll("[data-material-treatment-launch]").forEach(button=>{
+    if (button.dataset.boundConfig === "1") return;
+    button.dataset.boundConfig = "1";
+    button.addEventListener("click",()=>{
+      openConfigurationModal(button);
+      document.getElementById("configMaterialCostTreatment")?.focus();
+    });
+  });
   if (form && form.dataset.boundConfig !== "1"){
     form.dataset.boundConfig = "1";
     form.addEventListener("submit", async (event)=>{
@@ -16386,7 +16395,7 @@ const appendEmptyRow = (focusFirst = false)=>{
         const hours = Math.max(0, asNumber(row?.hoursValue, 0));
         const material = Math.max(0, asNumber(row?.materialValue ?? row?.materialCostValue, 0));
         const rates = rowRates(row, chargeRate, costRate);
-        const profit = computeCuttingJobProfit({estimateHours:hours, ...rates, materialCost:material, materialQty:1, failurePercent:row.failurePercentValue, materialCostTreatment:row.materialCostTreatment});
+        const profit = computeCuttingJobProfit({estimateHours:hours, ...rates, materialCost:material, materialQty:1, failurePercent:row.failurePercentValue});
         const totalCost = profit.cuttingCost + profit.materialExpense;
         acc.rows += 1;
         acc.net += profit.totalProfit;
@@ -18525,7 +18534,6 @@ function computeCostModel(){
       revenue: profit.revenue,
       adjustedRevenue: profit.adjustedRevenue,
       failurePercent: profit.failurePercent,
-      materialCostTreatment: profit.materialCostTreatment,
       total: profit.totalProfit
     };
   };
@@ -19958,7 +19966,6 @@ function computeCostModel(){
       revenueValue: jobNet.adjustedRevenue,
       originalRevenueValue: jobNet.revenue,
       failurePercentValue: jobNet.failurePercent,
-      materialCostTreatment: jobNet.materialCostTreatment,
       chargeRateValue: chargeRate,
       costRateValue: costRate,
       materialCostValue,
@@ -19997,7 +20004,6 @@ function computeCostModel(){
       revenueValue: Number(row?.revenueValue) || 0,
       originalRevenueValue: Number(row?.originalRevenueValue) || 0,
       failurePercentValue: Number(row?.failurePercentValue) || 0,
-      materialCostTreatment: row?.materialCostTreatment,
       netGainLabel: formatterCurrency(Number(row?.totalProfitValue) || 0, { decimals: 2, showPlus: true }),
       materialValue: Math.max(0, Number(row?.materialCostValue) || 0),
       laborValue: Math.max(0, Number(row?.laborCostValue) || 0),
@@ -20032,7 +20038,7 @@ function computeCostModel(){
     averageNetGainLabel: formatterCurrency(efficiencyCount ? (efficiencyTotals.profit / efficiencyCount) : 0, { decimals: 2, showPlus: true }),
     sourceLabel: "Source: central data table completed cutting jobs rows.",
     formulaLabel: "Net profit = Revenue × (1 - Failure % / 100) + Separate material recovery - Cutting cost - Material expense",
-    disclaimerLabel: "Uses central data table values and each saved job material treatment. Separate recovery offsets full material expense at cost.",
+    disclaimerLabel: "Uses central data table values and the global Material Cost Treatment. Separate recovery offsets full material expense at cost.",
     rows: efficiencyRows,
     emptyMessage: "No valid completed cutting tasks with settings links were found in the central data table."
   };
@@ -21407,7 +21413,7 @@ function showFailedCutDialog(jobId, trigger){
         <dt>Revenue lost / potential profit reduction</dt><dd data-failure-preview="revenueLost"></dd>
       </dl>
       <p class="small muted">Revenue lost is the reduction in revenue. A negative adjusted net profit is an actual loss. Cutting and material expenses stay unchanged.</p>
-      <p class="small muted">Material treatment: ${job.materialCostTreatment === "separate" ? "Charge material separately — full material expense is recovered at cost and does not reduce cutting profit." : "Deduct material from profit."}</p>
+      <p class="small muted">Global material treatment: ${computeCuttingJobProfit(job).materialCostTreatment === "separate" ? "Charge material separately — full material expense is recovered at cost and does not reduce cutting profit." : "Deduct material from profit."}</p>
       <p data-failed-cut-status role="status"></p>
       <div class="failed-cut-actions"><button type="button" data-failed-cut-cancel>Cancel</button><button type="submit" data-failed-cut-save>Save</button></div>
     </form>`;
@@ -21469,6 +21475,7 @@ function showFailedCutDialog(jobId, trigger){
 }
 
 function renderJobs(){
+  const financialRefresh = arguments[0]?.financialRefresh === true;
   const content = document.getElementById("content");
   if (!content) return;
   isRenderingJobs = true;
@@ -21520,6 +21527,7 @@ function renderJobs(){
 
   // 1) Render the jobs view (includes the table with the Actions column)
   content.innerHTML = viewJobs();
+  wireConfigurationModal();
   bindFinancialPeriodControls(content, renderJobs);
   window.OMAXCutCostFeedbackUi?.mountJob(content, "jobCostRate");
   wireCuttingJobNetBreakdowns(content);
@@ -21553,7 +21561,8 @@ function renderJobs(){
       }
     });
   };
-  queueAttachmentPreviewHydration();
+  // Recalculating financial displays must not mutate attachment metadata or queue a job save.
+  if (!financialRefresh) queueAttachmentPreviewHydration();
 
   const jobOverlapMessage = "Jobs might be overlapping. Review the job dates and Hours Taken to check the cutting schedule.";
   const jobTableEl = content.querySelector(".job-table");

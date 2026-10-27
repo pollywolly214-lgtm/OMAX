@@ -206,7 +206,8 @@
             <option value="deduct">Deduct material from profit</option>
             <option value="separate">Charge material separately</option>
           </select>
-          <small class="config-help" id="configMaterialCostHelp">Applies to new Cutting Jobs. Each job keeps its saved treatment through completion. Existing jobs retain deduct mode. Separate mode adds material at cost to the cutting charge; material does not reduce cutting profit.</small>
+          <small class="config-help" id="configMaterialCostHelp">Applies to all Cutting Jobs, including existing and completed jobs. Changing this setting recalculates displayed financial results across the website without modifying saved job records.</small>
+          <small class="config-help">Before saving: changing modes changes existing displayed financial results and projections. These are dynamic modeled results; invoices, transactions and saved financial snapshots are unchanged.</small>
         </label>
         <label class="config-field" for="configDailyHours">
           <span class="config-label">Daily cutting hours (fixed mode)</span>

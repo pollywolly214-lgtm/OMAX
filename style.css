@@ -6111,6 +6111,28 @@ tr.row-editing {
   box-shadow: 0 14px 38px rgba(0, 0, 0, 0.18);
   width: min(520px, 90vw);
   padding: 20px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.config-dialog h3 { color: #1d2533; }
+.material-treatment-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 10px 0 16px;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #1d2533;
+}
+.material-treatment-summary .btn { margin-left: auto; white-space: normal; }
+.material-treatment-summary p { flex-basis: 100%; margin: 0; }
+@media (max-width: 520px) {
+  .material-treatment-summary .btn { margin-left: 0; width: 100%; }
 }
 
 .config-description {

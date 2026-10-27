@@ -1430,7 +1430,7 @@ function renderFinancialBreakdown(report){
     </dl></details>
     <h3 class="financial-section-title">Advanced details</h3>
     <details data-financial-advanced="rates"><summary>Runtime rates and calculations</summary>
-    <p class="small">Net profit = resolved financial hours × charge rate × (1 − failed-cut % / 100) + separate material recovery − runtime expense − material unit cost × quantity. Separate material recovery equals full material expense only for jobs saved with Charge material separately. Other jobs deduct material. Each job retains its treatment; changing workspace configuration applies to new jobs only. Positive original financial hours stay unchanged; completed zero/missing hours use supported actual time. Legitimate separate cuts remain separate, including matching names, projects and dates.</p>
+    <p class="small">Net profit = resolved financial hours × charge rate × (1 − failed-cut % / 100) + separate material recovery − runtime expense − material unit cost × quantity. The global Material Cost Treatment applies to every job, including existing, completed and imported jobs. Separate recovery equals full material expense in Charge material separately mode and zero in Deduct mode. Displayed results recalculate without modifying saved jobs, invoices or financial snapshots. Positive original financial hours stay unchanged; completed zero/missing hours use supported actual time. Legitimate separate cuts remain separate, including matching names, projects and dates.</p>
     ${t.net<0 ? `<p class="job-finance-negative">This loaded population has a modeled loss: adjusted revenue ${money(t.revenue)} + material recovery ${money(t.materialRecovery)} + runtime expense ${expense(t.runtimeExpense)} + material expense ${expense(t.materialExpense)} = ${money(t.net)}. The rows below reproduce saved inputs; they do not verify that a historical rate represented legitimate operating costs. Review rate sources, import defaults and largest losses before correcting any source data.</p>` : ""}
     <p>Total job expense includes runtime and material. The weighted runtime rate uses runtime expense only. Separate material recovery offsets material expense without markup or failure discount. Customer / Bid Price = gross cutting charge + separate material recovery; modeled customer amount after failures = adjusted cutting charge + separate material recovery. These are modeled prices, not recorded invoices or payments.</p>
     <dl class="financial-metrics">
@@ -1465,7 +1465,7 @@ function renderFinancialBreakdown(report){
     <p class="small">Recorded purchases and maintenance events use ${esc(report.window.description)}. Purchases are spending records, not verified payments or maintenance-only expenses; ${p.invalidDates} purchase row(s) have invalid/missing dates. Event costs include modeled labor at $30/hr. Incomplete events have no complete expense total.</p>
     <p class="small">Forecasts are current-year projections, separate from this historical period. Forecast source: ${esc(report.forecast.sourceWindow)}; ${esc(report.forecast.method)}.</p>
     <h4>Net Waterjet Financial Impact: ${money(report.netWaterjetImpact)}</h4>
-    <p><strong>Interim modeled Cutting Job Net Profit: ${money(report.coverage.interimNet)}</strong> · ${esc(report.window.description)}. This subtotal deducts saved runtime rates and full material expense, with separate material recovery offsetting material for jobs saved in that mode.</p>
+    <p><strong>Interim modeled Cutting Job Net Profit: ${money(report.coverage.interimNet)}</strong> · ${esc(report.window.description)}. This subtotal deducts saved runtime rates and full material expense; the global Charge material separately mode offsets material expense with full separate recovery.</p>
     <p>Current CCR estimate = (maintenance event parts + modeled labor) ÷ measured machine hours + modeled garnet consumption at delivered price per pound. Garnet refill material is excluded from CCR event parts to avoid counting it twice; refill labor remains included. Electricity, water and disposal are not explicit CCR components. This current estimate is not evidence of any historical job rate's composition.</p>
     ${ccr ? `<p data-financial-ccr>Current saved CCR window: ${esc(ccr.startDate)} to ${esc(ccr.endDate)}; observed meter span ${esc(ccr.measurementStartDate)} to ${esc(ccr.measurementEndDate)}, ${esc(ccr.hours ?? "unavailable")} hours. Maintenance ${money(ccr.maintenance)}/hr + garnet ${money(ccr.garnet)}/hr = ${money(ccr.total)}/hr (${ccr.valid ? "modeled operating-cost estimate" : "incomplete estimate"}). ${(ccr.warnings || []).map(esc).join(" ")}</p>` : '<p>Current CCR components are unavailable in this report.</p>'}
     <ul>${report.coverage.blockers.map(reason=>`<li>${esc(reason)}</li>`).join("")}</ul>
@@ -2235,6 +2235,7 @@ function viewCosts(model){
       <div class="dashboard-window" data-cost-window="overview">
         <div class="block cost-overview-block">
           <h3>Cost Overview</h3>
+          ${renderMaterialCostTreatmentLauncher("costsMaterialCostTreatmentLaunch")}
           ${data.financialReconciliation ? renderFinancialPeriodControl(data.financialReconciliation.window,"costFinancialPeriod") : ""}
           <div class="cost-summary-grid">
             ${summaryCardsHTML}
@@ -2847,17 +2848,17 @@ function viewCosts(model){
         <div class="cost-jobs-summary">
           <div><span class="label">Rows tracked</span><span>${esc(efficiencySnapshot.countLabel || "0")}</span></div>
           <div><span class="label">Total hours</span><span>${esc(efficiencySnapshot.totalHoursLabel || "0 hr")}</span></div>
-          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"}`.trim())}"><span class="label">Total net gain</span><span data-efficiency-summary-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
-          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"}`.trim())}"><span class="label">Avg net gain / row</span><span data-efficiency-summary-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
+          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) + Separate material recovery - Cutting cost - Material expense"}`.trim())}"><span class="label">Total net gain</span><span data-efficiency-summary-total>${esc(efficiencySnapshot.totalNetGainLabel || "$0.00")}</span></div>
+          <div title="${esc(`${efficiencySnapshot.mathDetailsLabel || ""} ${efficiencySnapshot.disclaimerLabel || ""} Source: ${efficiencySnapshot.sourceLabel || "central data table completed cutting jobs rows."} ${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) + Separate material recovery - Cutting cost - Material expense"}`.trim())}"><span class="label">Avg net gain / row</span><span data-efficiency-summary-average>${esc(efficiencySnapshot.averageNetGainLabel || "$0.00")}</span></div>
           <div><span class="label">Modeled expense (runtime + material)</span><span data-efficiency-summary-cost>${esc(efficiencySnapshot.totalExpenseLabel || "$0.00")}</span></div>
           <div><span class="label">Avg modeled expense / job</span><span data-efficiency-summary-cost-average>${esc(efficiencySnapshot.averageExpenseLabel || "$0.00")}</span></div>
           <div><span class="label">Runtime expense</span><span data-efficiency-summary-runtime>${esc(efficiencySnapshot.runtimeExpenseLabel || "$0.00")}</span></div>
           <div><span class="label">Material expense</span><span data-efficiency-summary-material>${esc(efficiencySnapshot.materialExpenseLabel || "$0.00")}</span></div>
         </div>
-        <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
+        <p class="small muted" title="${esc(`${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) + Separate material recovery - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || "Uses central data table values only."}`)}" data-efficiency-source-note>${esc(efficiencySnapshot.sourceLabel || "Source: central data table completed cutting jobs rows.")} ${esc(efficiencySnapshot.disclaimerLabel || "Uses central data table values only.")}</p>
         <div class="cost-weekly-table-wrap">
           <table class="cost-table">
-            <thead><tr><th>Job</th><th>Completion date</th><th>Hours Taken</th><th>Material cost</th><th>Runtime cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net profit</th><th>Job link</th></tr></thead>
+            <thead><tr><th>Job</th><th>Completion date</th><th>Hours Taken</th><th>Material cost</th><th>Runtime cost</th><th>Total cost</th><th title="${esc(`${efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) + Separate material recovery - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" aria-label="Net gain calculation">Net profit</th><th>Job link</th></tr></thead>
             <tbody>
               ${efficiencyRows.length ? efficiencyRows.map(row => `
                 <tr data-efficiency-row data-efficiency-id="${esc(row.id || "")}" data-efficiency-date="${esc(row.dateLabel || "")}" data-efficiency-hours="${esc(String(Number(row.hoursValue) || 0))}" data-efficiency-material="${esc(String(Number(row.materialValue || 0)))}">
@@ -2867,7 +2868,7 @@ function viewCosts(model){
                   <td>${esc(row.partCostLabel || "$0.00")}</td>
                   <td data-efficiency-labor-cell>${esc(row.laborCostLabel || "$0.00")}</td>
                   <td data-efficiency-total-cost-cell>${esc(row.totalCostLabel || "$0.00")}</td>
-                  <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.netGainLabel || "$0.00")}</td>
+                  <td title="${esc(`${row.formulaTitle || efficiencySnapshot.formulaLabel || "Net profit = Revenue × (1 - Failure % / 100) + Separate material recovery - Cutting cost - Material expense"} ${efficiencySnapshot.disclaimerLabel || ""}`.trim())}" data-efficiency-profit-cell>${esc(row.netGainLabel || "$0.00")}</td>
                   <td>${row.settingsLink ? `<button type="button" class="btn secondary" data-efficiency-open-job="${esc(row.id || "")}">Open job</button>` : "Invalid link"}</td>
                 </tr>
               `).join("") : `
@@ -2904,6 +2905,15 @@ function viewCosts(model){
       </div>
     </div>
 `;
+}
+
+function renderMaterialCostTreatmentLauncher(id){
+  const mode = window.appConfig?.materialCostTreatment === "separate" ? "Charge material separately" : "Deduct material from profit";
+  return `<section class="material-treatment-summary" aria-label="Global material cost treatment">
+    <div><strong>Material Cost Treatment</strong><br><span data-material-treatment-active>${mode}</span></div>
+    <button type="button" class="btn" id="${id}" data-material-treatment-launch aria-haspopup="dialog" aria-controls="configModal">Change material treatment</button>
+    <p class="small">Applies to all Cutting Jobs, including existing and completed jobs. Changing this setting recalculates displayed financial results across the website without modifying saved job records.</p>
+  </section>`;
 }
 
 function cuttingJobFinancialTone(key, value){
@@ -2956,7 +2966,7 @@ function renderCuttingJobNetBreakdown(job){
     ["totalProfit",failureKnown ? "Adjusted net profit" : "Provisional net (failure not recorded)"],["revenueLost","Revenue lost / potential profit reduction"]];
   return `<div class="job-net-summary" data-job-net-id="${esc(id)}">
     <div class="job-net-total">${failureKnown ? "Net Total" : "Net Total (provisional, failure not recorded)"}${separate ? " — cutting profit" : ""}: <strong class="${tone("totalProfit")}">${money("totalProfit")}</strong></div>
-    <div class="small">Material treatment: ${separate ? "Charge material separately" : "Deduct material from profit"}${job.materialCostTreatment == null ? " (existing job default)" : ""}</div>
+    <div class="small">Global material treatment: ${separate ? "Charge material separately" : "Deduct material from profit"}</div>
     <div class="${tone("revenue")}">Revenue: ${rate(profit.chargeRate)}/hr × ${hours} hr = ${money("revenue")}</div>
     <div class="${tone("materialExpense")}">Material Expense: ${money("materialExpense")}${separate ? " — recovered separately at cost" : ""}</div>
     <div class="${tone("cuttingCost")}">Cutting Expense: ${rate(-profit.costRate || 0)}/hr × ${hours} hr = ${money("cuttingCost")}</div>
@@ -4706,6 +4716,7 @@ function viewJobs(){
     </div>
 
     ${avgBanner}
+    ${renderMaterialCostTreatmentLauncher("jobsMaterialCostTreatmentLaunch")}
     <div class="job-onedrive-permission-banner small" data-wjcuts-permission-banner hidden>
       <span data-wjcuts-permission-text>WJ Cuts file references need folder permission before previews/opening files will work. Grant access to this computer’s WJ Cuts root folder.</span>
       <button type="button" data-wjcuts-grant-permission>Grant permission</button>
@@ -4786,7 +4797,6 @@ function viewJobs(){
         ${addFormOpen ? "" : "hidden"}
         aria-hidden="${addFormOpen ? "false" : "true"}"
       >
-        <p class="small">Material treatment for this new job: <strong>${window.appConfig?.materialCostTreatment === "separate" ? "Charge material separately" : "Deduct material from profit"}</strong>. Set in Workspace configuration; saved with the job.</p>
         <form id="addJobForm" class="mini-form job-add-form">
           <div class="job-add-column">
           <label>Job name

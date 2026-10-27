@@ -60,7 +60,7 @@
     }
     if ((job.import_event_id || job.importProvenance) && issues.length) flag("incomplete_import", "Imported job has incomplete/defaulted financial evidence.");
     if (valid(job.efficiency?.gainLoss) && Math.abs(Number(job.efficiency.gainLoss)-profit.totalProfit)>0.005)
-      flag("stale_legacy", "Stored legacy gain/loss differs; canonical net is used.");
+      flag("stale_legacy", "Stored legacy gain/loss differs from the current global financial model; canonical net is used and the stored snapshot is preserved.");
     return issues;
   }
   function previousCardEligibility(job, index){

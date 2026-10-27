@@ -397,8 +397,9 @@ function computeCuttingJobProfit(job, options = {}){
   const materialCost = finiteValue([job?.materialCost], 0, true);
   const materialQty = finiteValue([job?.materialQty], 0, true);
   const materialExpense = materialCost * materialQty;
-  // Untagged records retain their original accounting semantics, independent of global configuration.
-  const materialCostTreatment = job?.materialCostTreatment === "separate" ? "separate" : "deduct";
+  // One verified workspace setting controls every read, including historical/imported jobs.
+  // Per-job treatment and cached financial totals are retained only as source metadata.
+  const materialCostTreatment = typeof window !== "undefined" && window.appConfig?.materialCostTreatment === "separate" ? "separate" : "deduct";
   const materialCharge = materialCostTreatment === "separate" ? materialExpense : 0;
   const materialProfitDeduction = materialCostTreatment === "deduct" ? materialExpense : 0;
   const failurePercent = Math.min(100, Math.max(0, finiteValue([options.failurePercent ?? job?.failurePercent], 0)));

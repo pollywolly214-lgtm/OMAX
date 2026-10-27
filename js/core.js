@@ -3721,10 +3721,7 @@ function saveCuttingJobFailurePercent(jobId, failurePercent){
 }
 
 function createCuttingJob(job){
-  // Prospective policy: capture once at creation; configuration never reinterprets existing jobs.
-  const materialCostTreatment = job?.materialCostTreatment === "separate" || job?.materialCostTreatment === "deduct"
-    ? job.materialCostTreatment : (window.appConfig?.materialCostTreatment === "separate" ? "separate" : "deduct");
-  return saveCuttingJobBusinessOperation({type:"create",job:{...job,materialCostTreatment}});
+  return saveCuttingJobBusinessOperation({type:"create",job});
 }
 
 async function saveCuttingJobBusinessOperation(operation){
