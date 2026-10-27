@@ -5,31 +5,38 @@ const chronology=require("../js/cuttingJobChronology"),calendar=require("../js/m
 const core=fs.readFileSync("js/core.js","utf8");
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+function cursorDocument(label={textContent:""}){
+  const classes=new Set(),documentElement={classList:{toggle(name,active){if(active)classes.add(name);else classes.delete(name);}}};
+  return {documentElement,getElementById:()=>label,isBusy:()=>classes.has("firebase-busy")};
+}
 
-test("one pending operation shows the global status and clears on completion",async()=>{
-  const tracker=createTracker(),gate=deferred(),indicator={hidden:true},label={textContent:""};
-  const unbind=bindIndicator(tracker,{getElementById:id=>id==="firebaseOperationStatus"?indicator:label});
+test("one pending operation attaches the busy class to html and clears on completion",async()=>{
+  const tracker=createTracker(),gate=deferred(),label={textContent:""},document=cursorDocument(label);
+  const unbind=bindIndicator(tracker,document);
   const result={saved:true},pending=tracker.run("saving",()=>gate.promise);
-  assert.equal(indicator.hidden,false);assert.equal(label.textContent,"Saving...");
-  gate.resolve(result);assert.equal(await pending,result);assert.equal(indicator.hidden,true);assert.equal(label.textContent,"");unbind();
+  assert.equal(document.isBusy(),true);assert.equal(label.textContent,"Saving...");
+  gate.resolve(result);assert.equal(await pending,result);assert.equal(document.isBusy(),false);assert.equal(label.textContent,"");unbind();
 });
 test("overlap keeps the remaining type visible regardless of completion order",async()=>{
   for(const first of ["save","load"]){
     const tracker=createTracker(),save=deferred(),load=deferred();
+    const document=cursorDocument();bindIndicator(tracker,document);
     const saving=tracker.run("saving",()=>save.promise),loading=tracker.run("loading",()=>load.promise);
     assert.deepEqual(tracker.snapshot(),{pending:2,label:"Working..."});
     (first==="save"?save:load).resolve();await (first==="save"?saving:loading);
     assert.deepEqual(tracker.snapshot(),{pending:1,label:first==="save"?"Loading...":"Saving..."});
+    assert.equal(document.isBusy(),true);
     (first==="save"?load:save).resolve();await Promise.all([saving,loading]);assert.equal(tracker.snapshot().pending,0);
+    assert.equal(document.isBusy(),false);
   }
 });
 test("rejection, synchronous throws, indeterminate results and presentation errors cannot leak tokens",async()=>{
-  const tracker=createTracker();tracker.subscribe(()=>{throw Error("broken view");});
+  const tracker=createTracker(),document=cursorDocument();bindIndicator(tracker,document);tracker.subscribe(()=>{throw Error("broken view");});
   const error=Error("permission denied");
   await assert.rejects(tracker.run("saving",()=>{throw error;}),e=>e===error);
   const gate=deferred(),pending=tracker.run("updating",()=>gate.promise);gate.reject(error);await assert.rejects(pending,e=>e===error);
   const uncertain={saved:false,indeterminate:true,error:"Reload before retrying",requiresReload:true};
-  assert.equal(await tracker.run("deleting",()=>uncertain),uncertain);assert.equal(tracker.snapshot().pending,0);
+  assert.equal(await tracker.run("deleting",()=>uncertain),uncertain);assert.equal(tracker.snapshot().pending,0);assert.equal(document.isBusy(),false);
 });
 test("nested queue work reuses its explicit parent token until the parent settles",async()=>{
   const tracker=createTracker(),write=deferred(),readback=deferred();
@@ -43,8 +50,8 @@ test("nested queue work reuses its explicit parent token until the parent settle
   assert.equal(tracker.snapshot().pending,0);
 });
 test("repeated same-label transitions do not repeatedly rewrite the live status",async()=>{
-  let writes=0,text="";const tracker=createTracker(),indicator={};
-  bindIndicator(tracker,{getElementById:id=>id==="firebaseOperationStatus"?indicator:{get textContent(){return text;},set textContent(value){writes++;text=value;}}});
+  let writes=0,text="";const tracker=createTracker();
+  bindIndicator(tracker,cursorDocument({get textContent(){return text;},set textContent(value){writes++;text=value;}}));
   const first=tracker.begin("saving"),second=tracker.begin("saving");first.release();assert.equal(writes,1);second.release();assert.equal(writes,2);
 });
 test("the real shared queue tracks waiting, verification, failures and parent ownership",async()=>{
@@ -107,7 +114,13 @@ test("passive listeners, cache reads and housekeeping do not own registrations",
   assert.doesNotMatch(fs.readFileSync("js/cloudFilePresentation.js","utf8"),/OMAXFirebaseOperations/);
   const html=fs.readFileSync("index.html","utf8");assert.equal((html.match(/id="firebaseOperationStatus"/g)||[]).length,1);
   assert.ok(html.indexOf('id="firebaseOperationStatus"')<html.indexOf('<main id="content"'));
+  assert.ok(html.indexOf('id="firebaseOperationStatus"')>html.indexOf('</header>'));
+  assert.doesNotMatch(html,/firebase-operation-spinner/);
   assert.ok(html.indexOf('src="js/firebaseOperations.js"')<html.indexOf('src="js/core.js"'));
+});
+test("cursor binding works without status markup and projects already pending work",async()=>{
+  const tracker=createTracker(),registration=tracker.begin("saving"),document=cursorDocument(null);
+  bindIndicator(tracker,document);assert.equal(document.isBusy(),true);registration.release();assert.equal(document.isBusy(),false);
 });
 test("Storage upload boundary covers membership and final metadata verification, including failures",async()=>{
   for(const failed of [false,true]){

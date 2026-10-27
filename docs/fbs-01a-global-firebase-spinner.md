@@ -1,5 +1,7 @@
 # FBS-01A: global Firebase operation indicator
 
+Historical implementation record: FBS-01B replaces the visible header spinner with the requested native global busy cursor. See [the current cursor implementation and validation report](fbs-01b-global-firebase-busy-cursor.md). The shared operation boundaries and save-safety behavior below are retained.
+
 ## Implementation and coverage
 
 One in-memory token tracker feeds one polite status in the persistent header. Same-type operations retain their label; mixed types show `Working...`. Registration cleanup uses `finally`, including rejected promises, thrown preflight errors, blocked operations and settled indeterminate results. Observer errors cannot affect backend results. Status text changes only when the displayed label changes. The icon respects reduced-motion preferences.

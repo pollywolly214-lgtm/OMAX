@@ -3,9 +3,8 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root){
     root.OMAXFirebaseOperations = api.createTracker();
-    const mount = ()=>api.bindIndicator(root.OMAXFirebaseOperations, root.document);
-    if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", mount, {once:true});
-    else mount();
+    // Loaded after the persistent status markup and before core.js can start work.
+    api.bindIndicator(root.OMAXFirebaseOperations, root.document);
   }
 })(typeof window === "undefined" ? null : window, function(){
   "use strict";
@@ -47,14 +46,14 @@
     }});
   }
   function bindIndicator(tracker, document){
-    const indicator = document.getElementById("firebaseOperationStatus");
+    const root = document.documentElement;
     const label = document.getElementById("firebaseOperationLabel");
-    if (!indicator || !label) return ()=>{};
+    if (!root) return ()=>{};
     return tracker.subscribe(state=>{
+      root.classList.toggle("firebase-busy", state.pending > 0);
       const text = state.pending ? state.label : "";
       // Announce only actual label changes, never every token/count transition.
-      if (label.textContent !== text) label.textContent = text;
-      indicator.hidden = state.pending === 0;
+      if (label && label.textContent !== text) label.textContent = text;
     });
   }
   return Object.freeze({createTracker, bindIndicator});

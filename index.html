@@ -64,10 +64,6 @@
         />
       </div>
       <div class="header-actions">
-        <div id="firebaseOperationStatus" class="firebase-operation-status" role="status" aria-live="polite" aria-atomic="true" hidden>
-          <span class="firebase-operation-spinner" aria-hidden="true"></span>
-          <span id="firebaseOperationLabel"></span>
-        </div>
         <div class="dashboard-settings" id="dashboardSettings">
           <button type="button" class="dashboard-settings-btn" id="dashboardSettingsToggle" aria-haspopup="true" aria-expanded="false" aria-controls="dashboardSettingsMenu" aria-label="Workspace settings" title="Workspace settings">
             <span aria-hidden="true">⚙</span>
@@ -123,6 +119,7 @@
     </div>
   </div>
 
+  <div id="firebaseOperationStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"><span id="firebaseOperationLabel"></span></div>
   <main id="content"></main>
 
   <footer>

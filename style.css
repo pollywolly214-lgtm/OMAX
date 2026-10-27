@@ -6822,27 +6822,13 @@ body.job-category-modal-open{overflow:hidden}
 @media (max-width: 1000px) { .project-finance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 650px) { .project-summary-grid, .project-finance-grid { grid-template-columns: 1fr; } }
 
-/* FBS: one nonblocking operation indicator in the persistent header. */
-.firebase-operation-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: #f7faff;
-  font-size: 0.8125rem;
-  white-space: nowrap;
-  pointer-events: none;
-}
-.firebase-operation-status[hidden] { display: none; }
-.firebase-operation-spinner {
-  width: 14px;
-  height: 14px;
-  box-sizing: border-box;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: firebase-operation-spin 0.8s linear infinite;
-}
-@keyframes firebase-operation-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .firebase-operation-spinner { animation: none; }
+/* FBS: native busy cursor without blocking interaction. Explicit descendants
+   override normal pointer, text, drag, resize and hover/inline cursor styles. */
+html.firebase-busy,
+html.firebase-busy *,
+html.firebase-busy::before,
+html.firebase-busy::after,
+html.firebase-busy *::before,
+html.firebase-busy *::after {
+  cursor: progress !important;
 }
