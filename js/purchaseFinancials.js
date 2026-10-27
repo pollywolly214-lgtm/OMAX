@@ -20,5 +20,31 @@
       : (typeof source.source_id === "string" && source.source_id.trim() && typeof source.source_record_id === "string" && source.source_record_id.trim() ? JSON.stringify([source.source_id, source.source_record_id]) : "");
     return sourceIdentity === row.import_event_id && typeof source.date === "string" && typeof source.purchased === "string" && Number.isFinite(source.cost) && Number.isFinite(source.qty);
   }
-  return Object.freeze({ getPurchaseFinancials, isHistoricalPurchase });
+  // Read-only receipt projection. PHv2 orders already live as allocated receipt
+  // lines; orderRequests are approvals, not an additional purchase ledger.
+  function normalizePurchaseHistory(weeks){
+    const out = [], seen = new Map();
+    const valid = value => value != null && String(value).trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0;
+    for (const week of Array.isArray(weeks) ? weeks : []){
+      (Array.isArray(week?.rows) ? week.rows : []).forEach((row, rowIndex) => {
+        if (!row || ![row.date,row.purchased,row.partNumber,row.cost,row.qty,row.shipping,row.tax].some(value=>value != null && value !== "")) return;
+        const source = row.importProvenance?.sourceRecord || {};
+        const identity = row.orderId && row.lineId ? JSON.stringify(["order",row.orderId,row.lineId])
+          : row.import_event_id ? JSON.stringify(["import",row.import_event_id])
+          : source.source_id && source.source_record_id ? JSON.stringify(["source",source.source_id,source.source_record_id])
+          : row.id ? JSON.stringify(["row",row.id]) : null;
+        const financials = getPurchaseFinancials(row);
+        const incomplete = !valid(row.cost) || !valid(row.qty) || [row.shipping,row.tax].some(value=>value != null && value !== "" && !valid(value)) || !Number.isFinite(financials.totalSpend);
+        const signature = JSON.stringify([row.date,row.purchased,row.partNumber,financials,row.poNumber,incomplete]);
+        const previous = identity && seen.get(identity);
+        if (previous?.signatures.has(signature)) return;
+        const entry = {row,week,rowIndex,financials,costIncomplete:incomplete,identityConflict:Boolean(previous)};
+        if (previous){ previous.entries.forEach(item=>{item.identityConflict=true;}); }
+        if (identity) seen.set(identity,{signatures:new Set([...(previous?.signatures || []),signature]),entries:[...(previous?.entries || []),entry]});
+        out.push(entry);
+      });
+    }
+    return out;
+  }
+  return Object.freeze({ getPurchaseFinancials, isHistoricalPurchase, normalizePurchaseHistory });
 });

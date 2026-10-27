@@ -413,10 +413,10 @@ body.financial-breakdown-open #content{ overflow-x:clip; }
 .cost-card-value.financial-tone-positive{ color:#2e7d32; }
 .cost-card-hint{ color:#1e3352; font-size:12px; opacity:0.7; }
 
-.cost-chart-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.cost-chart-header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; flex-wrap:wrap; }
 .cost-chart-title{ display:flex; align-items:center; gap:8px; }
-.cost-chart-actions{ display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:wrap; }
-.cost-chart-range{ display:flex; align-items:center; gap:6px; padding:4px; background:#f5f7fb; border-radius:999px; }
+.cost-chart-actions{ display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:wrap; min-width:0; max-width:100%; }
+.cost-chart-range{ display:flex; align-items:center; gap:6px; padding:4px; background:#f5f7fb; border-radius:999px; flex-wrap:wrap; max-width:100%; box-sizing:border-box; }
 .cost-chart-range button{ border:1px solid transparent; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.02em; color:#4a5568; background:transparent; cursor:pointer; transition:background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
 .cost-chart-range button:hover{ background:#e4e9f5; }
 .cost-chart-range button[aria-pressed="true"],
@@ -454,7 +454,9 @@ body.financial-breakdown-open #content{ overflow-x:clip; }
   border-radius:6px;
   font-size:12px;
   line-height:1.4;
-  max-width:240px;
+  width:min(280px, calc(100% - 24px));
+  max-width:280px;
+  box-sizing:border-box;
   box-shadow:0 12px 28px rgba(15,23,42,0.3);
   opacity:0;
   transition:opacity 120ms ease, transform 120ms ease;
@@ -462,18 +464,18 @@ body.financial-breakdown-open #content{ overflow-x:clip; }
   white-space:normal;
 }
 .cost-chart-tooltip[data-placement="above"]{
-  transform:translate(-50%, -110%);
+  transform:translateY(-110%);
 }
 .cost-chart-tooltip[data-placement="above"][data-visible="true"]{
   opacity:1;
-  transform:translate(-50%, -120%);
+  transform:translateY(-120%);
 }
 .cost-chart-tooltip[data-placement="below"]{
-  transform:translate(-50%, 10%);
+  transform:translateY(10%);
 }
 .cost-chart-tooltip[data-placement="below"][data-visible="true"]{
   opacity:1;
-  transform:translate(-50%, 0%);
+  transform:translateY(0%);
 }
 .cost-chart-tooltip[hidden]{
   display:none;

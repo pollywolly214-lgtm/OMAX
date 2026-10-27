@@ -59,7 +59,7 @@ test("week, range and live purchase popup show PO text or N/A without adding his
 });
 test("initial Data Center model and Purchase History agree and preserve cents for totals over 1000",()=>{
   const row=freeze({...recovered(),cost:600,qty:2}),before=JSON.stringify(row);
-  const context=vm.createContext({...api,window:{receiptTrackerWeeks:[{key:"2025-W01",rows:[row]}]},toHistoryDateKey:value=>value});
+  const context=vm.createContext({...api,window:{OMAXFinancialReconciliation:require("../js/financialReconciliation"),receiptTrackerWeeks:[{key:"2025-W01",rows:[row]}]},toHistoryDateKey:value=>value});
   vm.runInContext(extract("  const formatterCurrency =", "  const formatHours")+extract("  const purchaseDataTableRows =", "  const spendByDate")+";this.rows=purchaseDataTable;",context);
   const initial=context.rows[0],rendered=renderPurchase(row),expected=api.getPurchaseFinancials(row);
   assert.equal(initial.costLabel,usd(expected.unitCost));assert.equal(initial.merchandiseSubtotalLabel,usd(expected.merchandiseSubtotal));assert.equal(initial.totalLabel,usd(expected.totalSpend));
