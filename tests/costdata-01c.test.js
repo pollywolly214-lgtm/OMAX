@@ -36,7 +36,7 @@ test("explicit import mirrors collapse; separate same-day imports and V2 roots s
 test("incomplete and explicit zero costs retain different classifications and no fabricated full amount", () => {
   const state = initial(); state.tasksInterval[0].manualHistory = [{ dateISO: "2026-02-15" }, { dateISO: "2026-02-15", partsCostSnapshot: 0, hours: 0 }];
   const audit = [], before = structuredClone(state), result = costs.maintenanceRows([candidate(0), candidate(1)], state, [], audit);
-  assert.equal(result[0].costIncomplete, true); assert.match(result[0].costExclusionReason, /Missing parts price and labor duration/); assert.equal(audit[0].totalCost, null);
+  assert.equal(result[0].costIncomplete, true); assert.match(result[0].costExclusionReason, /Missing parts price/); assert.equal(audit[0].totalCost, null);
   assert.equal(result[1].costIncomplete, false); assert.equal(result[1].totalCost, 0); assert.equal(audit[1].totalCost, 0); assert.deepEqual(state, before);
 });
 test("a removed sibling instance cannot suppress another source task's completion", () => {

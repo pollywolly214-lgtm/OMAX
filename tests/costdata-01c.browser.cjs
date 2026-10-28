@@ -44,8 +44,8 @@ for (const timezoneId of ["America/Chicago", "Pacific/Kiritimati"]) test(`COSTDA
       assert.equal(model.maintenanceCostRows.filter(row => row.dateISO === "2026-04-15").length, 3);
       assert.equal(model.maintenanceCostRows.find(row => row.historySourceTaskId === "old-instance").totalCost, 27);
       const unknown = model.maintenanceDataTable.find(row => row.taskId === "unknown"), zero = model.maintenanceDataTable.find(row => row.taskId === "zero");
-      assert.equal(unknown.totalCostLabel, "Incomplete"); assert.match(unknown.costExclusionReason, /Missing parts price and labor duration/); assert.equal(zero.costIncomplete, false);
-      assert.match(await page.locator('[data-maintenance-row][data-task-id="unknown"]').innerText(), /Incomplete: Missing parts price and labor duration/);
+      assert.equal(unknown.totalCostLabel, "Incomplete"); assert.match(unknown.costExclusionReason, /Missing parts price/); assert.equal(zero.costIncomplete, false);
+      assert.match(await page.locator('[data-maintenance-row][data-task-id="unknown"]').innerText(), /Incomplete: Missing parts price/);
       const report = await page.evaluate(() => document.querySelector("#costChart").__maintenanceCostReconciliation);
       assert.ok(report.some(row => row.historySourceTaskId === "unknown" && row.centralTableIncluded && !row.chartIncluded && row.totalCost === null));
       assert.ok(report.some(row => row.historySourceTaskId === "zero" && row.chartIncluded && row.totalCost === 0));

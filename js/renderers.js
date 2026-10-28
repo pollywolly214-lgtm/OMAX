@@ -13191,10 +13191,11 @@ function resizeCostChartCanvas(canvas){
   if (!parent) return;
   const rect = parent.getBoundingClientRect();
   const fallbackWidth = canvas.width || 720;
-  const rawWidth = rect.width || parent.clientWidth || fallbackWidth;
-  const width = Math.max(360, Math.round(rawWidth || fallbackWidth));
+  const rawWidth = parent.clientWidth || rect.width || fallbackWidth;
+  const width = Math.max(180, Math.round(rawWidth || fallbackWidth));
   const ratio = 240 / 780; // original aspect ratio ~0.3077
-  const minHeight = 220;
+  // At narrow/zoomed widths a readable short tooltip needs more vertical room.
+  const minHeight = rawWidth < 240 ? 520 : 220;
   const height = Math.max(minHeight, Math.round(width * ratio));
   if (canvas.width !== width) canvas.width = width;
   if (canvas.height !== height) canvas.height = height;
@@ -17184,7 +17185,7 @@ const appendEmptyRow = (focusFirst = false)=>{
   const showTooltip = (target, { scaleX, scaleY })=>{
     const tip = ensureTooltip();
     if (!tip || !canvas) return;
-    const label = `${target.datasetLabel} ${target.valueLabel}`;
+    const label = `${target.datasetLabel} ${target.tooltipValueLabel ?? target.valueLabel}`;
     tip.innerHTML = `<strong>${escapeTooltip(label)}</strong><span>${escapeTooltip(target.detail)}</span>`;
     tip.hidden = false;
     tip.dataset.visible = "";
@@ -17193,57 +17194,22 @@ const appendEmptyRow = (focusFirst = false)=>{
     tip.style.left = "0px";
     tip.style.top = "0px";
 
-    const cssScaleX = scaleX > 0 ? 1 / scaleX : 1;
-    const cssScaleY = scaleY > 0 ? 1 / scaleY : 1;
-    const centerX = target.rect.x + (target.rect.width / 2);
-    const canvasWidth = canvas.clientWidth || canvas.width;
-    const canvasHeight = canvas.clientHeight || canvas.height;
-    const margin = 16;
-
-    const tipBox = tip.getBoundingClientRect();
-    const tipWidth = tipBox.width || tip.offsetWidth || 0;
-    const tipHeight = tipBox.height || tip.offsetHeight || 0;
-
-    const halfWidth = tipWidth / 2;
-    const minAnchorX = margin + halfWidth;
-    const maxAnchorX = canvasWidth - margin - halfWidth;
-    const anchorXCss = maxAnchorX < minAnchorX
-      ? canvasWidth / 2
-      : Math.min(maxAnchorX, Math.max(minAnchorX, centerX * cssScaleX));
-
-    const targetTop = target.rect.y;
-    const targetBottom = target.rect.y + target.rect.height;
-    let anchorY = targetTop;
-    let placement = "above";
-
-    const topIfAbove = (targetTop * cssScaleY) - (tipHeight * 1.1);
-    if (topIfAbove < margin){
-      placement = "below";
-      anchorY = targetBottom;
-    }
-
-    let anchorYCss = anchorY * cssScaleY;
-    if (placement === "above"){
-      const minAnchorY = margin + (tipHeight * 1.1);
-      const maxAnchorY = canvasHeight - margin + (tipHeight * 0.1);
-      if (maxAnchorY < minAnchorY){
-        anchorYCss = (minAnchorY + maxAnchorY) / 2;
-      }else{
-        anchorYCss = Math.min(maxAnchorY, Math.max(minAnchorY, anchorYCss));
-      }
-    }else{
-      const minAnchorY = margin - (tipHeight * 0.1);
-      const maxAnchorY = canvasHeight - margin - (tipHeight * 1.1);
-      if (maxAnchorY < minAnchorY){
-        anchorYCss = (minAnchorY + maxAnchorY) / 2;
-      }else{
-        anchorYCss = Math.min(maxAnchorY, Math.max(minAnchorY, anchorYCss));
-      }
-    }
-
-    tip.dataset.placement = placement;
-    tip.style.left = `${anchorXCss - halfWidth}px`;
-    tip.style.top = `${anchorYCss}px`;
+    // Keep overlays inside the canvas and visible viewport, including CSS zoom.
+    const bounds = canvas.getBoundingClientRect();
+    const panel = canvas.closest(".cost-chart-block").getBoundingClientRect();
+    const factorX = canvas.clientWidth / bounds.width || 1;
+    const factorY = canvas.clientHeight / bounds.height || 1;
+    const left = Math.max(8, (Math.max(0,panel.left) - bounds.left) * factorX + 8);
+    const right = Math.min(canvas.clientWidth - 8, (Math.min(window.innerWidth,panel.right) - bounds.left) * factorX - 8);
+    const top = Math.max(8, (Math.max(0,panel.top) - bounds.top) * factorY + 8);
+    const bottom = Math.min(canvas.clientHeight - 8, (Math.min(window.innerHeight,panel.bottom) - bounds.top) * factorY - 8);
+    tip.style.maxWidth = `${Math.max(1, right - left)}px`;
+    tip.style.maxHeight = `${Math.max(1, bottom - top)}px`;
+    const tipWidth = tip.offsetWidth, tipHeight = tip.offsetHeight;
+    const x = (target.rect.x + target.rect.width / 2) / scaleX;
+    const y = target.rect.y / scaleY;
+    tip.style.left = `${Math.max(left, Math.min(right - tipWidth, x - tipWidth / 2))}px`;
+    tip.style.top = `${Math.max(top, Math.min(bottom - tipHeight, y - tipHeight - 10))}px`;
     tip.style.visibility = "";
     tip.dataset.visible = "true";
     canvas.style.cursor = "pointer";
@@ -17256,8 +17222,8 @@ const appendEmptyRow = (focusFirst = false)=>{
     const clientHeight = canvas.clientHeight || rect.height || canvas.height;
     const scaleX = canvas.width / Math.max(1, clientWidth);
     const scaleY = canvas.height / Math.max(1, clientHeight);
-    const pointerX = (Number(clientX) - rect.left) * scaleX;
-    const pointerY = (Number(clientY) - rect.top) * scaleY;
+    const pointerX = (Number(clientX) - rect.left) * canvas.width / Math.max(1, rect.width);
+    const pointerY = (Number(clientY) - rect.top) * canvas.height / Math.max(1, rect.height);
     return { rect, scaleX, scaleY, pointerX, pointerY };
   };
   const resolvePointerTarget = (event, { allowProximity = false } = {})=>{
@@ -17339,9 +17305,16 @@ const appendEmptyRow = (focusFirst = false)=>{
         y: Number(event.clientY)
       };
       const target = resolvePointerTarget(event, { allowProximity: true })?.target || null;
-      if (target?.key === "maintenanceIncomplete"){
-        const list = content.querySelector("[data-incomplete-maintenance-list]");
-        if (list) list.open = true;
+      if (target?.key === "maintenance" || target?.key === "maintenanceIncomplete"){
+        const events = target.events || [];
+        if (events.length > 1){
+          target.eventIndex = ((target.eventIndex ?? 0) + 1) % events.length;
+          const item = events[target.eventIndex];
+          target.datasetLabel = item.datasetLabel;
+          target.tooltipValueLabel = item.valueLabel;
+          target.detail = `${item.detail}\n${target.key === "maintenance" ? `Day total: ${target.valueLabel} · ` : ""}${target.eventIndex + 1}/${events.length} events · click for next`;
+        }
+        handlePointerHover(event);
         return;
       }
       if (!target || !target.rowRef || typeof window === "undefined") return;
@@ -20580,20 +20553,14 @@ function computeCostModel(){
         ? parsedDate
         : new Date(dateISO);
       const dayRows = maintenanceTrendRows.filter(row => toHistoryDateKey(row.dateISO) === dateISO);
-      const taskCount = dayRows.length;
-      const taskNames = Array.from(new Set(dayRows
-        .map(row => String(row?.taskName || "").trim())
-        .filter(Boolean)));
-      const taskPreview = taskNames.length
-        ? taskNames.slice(0, 6).join(", ")
-        : "No task names provided";
-      const taskSuffix = taskNames.length > 6 ? " …" : "";
       return {
         date,
         value: -Math.abs(totalCost),
         dateISO,
         taskId: dayRows.length === 1 ? String(dayRows[0].taskId || "") : null,
-        detail: `${taskCount} completed maintenance ${taskCount === 1 ? "occurrence" : "occurrences"} recorded on ${dateISO}: ${taskPreview}${taskSuffix}.`
+        events: dayRows.map(maintenanceEventTooltip),
+        rowRefs: dayRows.map(row=>({type:"maintenance",dateISO,taskId:row.taskId,sourceEventKey:row.sourceEventKey})),
+        detail: maintenanceEventTooltip(dayRows[0]).detail
       };
     });
   maintenanceSeries = maintenanceSeriesFromDataTable;
@@ -20877,6 +20844,14 @@ function drawWeeklyReportChart(canvas, report){
   ctx.fillText(`Week: ${report.weekLabel || report.weekStartISO || ""}`, outerLeft, 18);
 }
 
+function maintenanceEventTooltip(row){
+  const parts = row.costFields?.parts?.value;
+  const available = !row.costIncomplete && typeof parts === "number" && Number.isFinite(parts);
+  const money = value=>new Intl.NumberFormat(undefined,{style:"currency",currency:"USD"}).format(value);
+  return {datasetLabel:row.taskName || "Maintenance task",valueLabel:row.costEstimated && available ? "· Estimated" : "",
+    detail:available ? `${row.dateISO}\nParts: ${money(parts)}\nLabor: ${row.maintenanceHrs} hr · ${money(row.laborCost)}\nTotal: ${money(row.totalCost)}` : `${row.dateISO}\nCost unavailable`};
+}
+
 function buildIncompleteMaintenanceMarkers(rows){
   const seen = new Set();
   return (rows || []).flatMap(row=>{
@@ -20885,17 +20860,10 @@ function buildIncompleteMaintenanceMarkers(rows){
     const sourceEventKey = row.sourceEventKey;
     if (!dateISO || !sourceEventKey || seen.has(sourceEventKey)) return [];
     seen.add(sourceEventKey);
-    const amount = value=>typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-    const knownParts = amount(row.costFields?.parts?.value);
-    const knownDuration = amount(row.costFields?.duration?.value);
-    const evidence = field=>field?.source === "Occurrence-specific" ? "recorded occurrence input" : field?.source === "Configured default" ? "configured estimate" : field?.source || "source unavailable";
-    const partsLabel = knownParts === null ? "Parts price unknown" : `Known parts $${knownParts.toFixed(2)} (${evidence(row.costFields.parts)}); partial cost only`;
-    const durationLabel = knownDuration === null ? "Missing labor duration" : `Known labor duration ${knownDuration} hr (${evidence(row.costFields.duration)})`;
-    const reason = row.costExclusionReason || `Missing ${[knownParts === null ? "parts price" : null, knownDuration === null ? "labor duration" : null].filter(Boolean).join(" and ")}`;
-    return [{dateISO, date:new Date(dateISO + "T00:00:00"), sourceEventKey, taskId:row.taskId, taskName:row.taskName || "Maintenance task",
-      knownParts, knownDuration, value:knownParts === null ? null : -knownParts, fullCost:null,
-      partsSource:row.costFields?.parts?.source || null, durationSource:row.costFields?.duration?.source || null,
-      detail:`${row.taskName || "Maintenance task"} · completed ${dateISO}. ${partsLabel}. ${durationLabel}. Full event cost unavailable: ${reason}. Excluded from complete expense totals, averages and forecasts.`}];
+    return [{dateISO,date:new Date(dateISO + "T00:00:00"),sourceEventKey,taskId:row.taskId,taskName:row.taskName || "Maintenance task",
+      knownParts:null,knownDuration:row.costFields?.duration?.value ?? null,value:null,fullCost:null,
+      partsSource:row.costFields?.parts?.source || null,durationSource:row.costFields?.duration?.source || null,
+      ...maintenanceEventTooltip(row)}];
   }).sort((a,b)=>a.dateISO.localeCompare(b.dateISO));
 }
 
@@ -20941,10 +20909,7 @@ function drawCostChart(canvas, model, show){
       ys.push(Number(pt.value));
     });
   });
-  incomplete.forEach(pt=>{
-    xs.push(pt.date.getTime());
-    if (pt.knownParts !== null) ys.push(-pt.knownParts);
-  });
+  incomplete.forEach(pt=>xs.push(pt.date.getTime()));
 
   if (!xs.length){
     canvas.__costChartTargets = [];
@@ -21114,10 +21079,13 @@ function drawCostChart(canvas, model, show){
             : `Cutting job result recorded on ${dateLabel}.`);
       }
       hitTargets.push({
+        events: pt.events,
+        rowRefs: pt.rowRefs,
         key: series.key,
-        datasetLabel,
+        datasetLabel: pt.events?.[0]?.datasetLabel || datasetLabel,
         valueLabel,
-        detail,
+        tooltipValueLabel: pt.events?.[0]?.valueLabel,
+        detail: pt.events?.length > 1 ? `${detail}\nDay total: ${valueLabel} · 1/${pt.events.length} events · click for next` : detail,
         rowRef: series.key === "maintenance"
           ? { type: "maintenance", dateISO: pt.dateISO || ymd(pt.date), taskId: pt.taskId || null }
           : (series.key === "spend"
@@ -21129,35 +21097,19 @@ function drawCostChart(canvas, model, show){
 
   });
 
-  // Glyphs sharing a date/parts amount are one cluster, with every source
-  // identity retained. Each tooltip lists that day's events, so dense glyphs
-  // cannot conceal a sibling event; the accessible event list is also complete.
+  // Unknown prices have no monetary Y coordinate. Day indicators retain all
+  // source identities; clicks cycle concise details without opening a long list.
   const clusters = new Map();
-  incomplete.forEach(pt=>{
-    const key = JSON.stringify([pt.dateISO, pt.knownParts]);
-    const group = clusters.get(key) || []; group.push(pt); clusters.set(key, group);
-  });
-  if (incomplete.some(pt=>pt.knownParts === null)){
-    ctx.fillStyle = "#fff7ed"; ctx.fillRect(left, 4, right-left, 30);
-    ctx.fillStyle = "#92400e"; ctx.font = "10px sans-serif"; ctx.textAlign = "left";
-    ctx.fillText("Cost unknown", 2, 22);
-  }
+  incomplete.forEach(pt=>{const group=clusters.get(pt.dateISO)||[];group.push(pt);clusters.set(pt.dateISO,group);});
   for (const points of clusters.values()){
-    const pt = points[0], unknown = pt.knownParts === null;
-    const x = X(pt.date.getTime()), y = unknown ? 20 : Y(-pt.knownParts);
-    ctx.strokeStyle = "#b45309"; ctx.fillStyle = "#fff7ed"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(x, y-5); ctx.lineTo(x+5, y+(unknown ? 4 : 0));
-    if (!unknown) ctx.lineTo(x, y+5);
-    ctx.lineTo(x-5, y+(unknown ? 4 : 0)); ctx.closePath(); ctx.fill(); ctx.stroke();
-    if (points.length > 1){ ctx.fillStyle = "#92400e"; ctx.font = "10px sans-serif"; ctx.textAlign = "left"; ctx.fillText(`×${points.length}`, x+7, y-4); }
-    const sameDay = incomplete.filter(event=>event.dateISO === pt.dateISO);
-    hitTargets.unshift({key:"maintenanceIncomplete", datasetLabel:"Incomplete maintenance",
-      valueLabel:unknown ? "Cost unknown — event indicator" : `$${pt.knownParts.toFixed(2)} known parts only — incomplete`,
-      detail:sameDay.slice(0,3).map(event=>event.detail).join("\n\n") + (sameDay.length > 3 ? ` ${sameDay.length-3} more same-day events; open the incomplete event list for every event.` : ""),
-      rowRef:{type:"maintenanceIncomplete",dateISO:pt.dateISO,sourceEventKey:pt.sourceEventKey},
+    const pt=points[0],x=X(pt.date.getTime()),y=20;
+    ctx.fillStyle=model.chartColors.maintenance;
+    ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();
+    const events=points.map(event=>({datasetLabel:event.taskName,valueLabel:"",detail:event.detail}));
+    hitTargets.unshift({key:"maintenanceIncomplete",datasetLabel:pt.taskName,valueLabel:"",detail:pt.detail,
+      events,rowRef:{type:"maintenanceIncomplete",dateISO:pt.dateISO,taskId:pt.taskId,sourceEventKey:pt.sourceEventKey},
       rowRefs:points.map(event=>({type:"maintenance",dateISO:event.dateISO,taskId:event.taskId,sourceEventKey:event.sourceEventKey})),
-      knownParts:pt.knownParts, fullCost:null, eventLane:unknown,
-      rect:{x:x-7,y:y-7,width:14,height:14}});
+      knownParts:null,fullCost:null,eventLane:true,rect:{x:x-7,y:y-7,width:14,height:14}});
   }
   canvas.__costChartTargets = hitTargets;
 }

@@ -127,16 +127,19 @@
       const configuredTasks=[sourceTask,task,v2.find(member=>String(member.id)===String(row.taskId))].filter(Boolean);
       const configuredParts=configuredTasks.flatMap(member=>[member.price,member.cost,member.calendarPrice]).map(number).find(value=>value!==null);
       const parts=number(rawParts)??number(configuredParts)??number(stream?.costRef);
-      const occurrenceHours=isV2?stream?.loggedHours:durationTask?.occurrenceHours?.[key]??occurrence.loggedHours??occurrence.timeHours??occurrence.hours;
-      const hours=number(occurrenceHours)??configuredTasks.map(member=>number(member.downtimeHours)).find(value=>value!==null)??null;
+      // Exact occurrence evidence precedes task/date overrides and matching
+      // Settings. Missing or invalid values fall through; explicit zero does not.
+      const recordedHours=(isV2?[stream?.loggedHours]:[occurrence.loggedHours,occurrence.timeHours,occurrence.hours,durationTask?.occurrenceHours?.[key]]).map(number).find(value=>value!==null);
+      const configuredHours=configuredTasks.map(member=>number(member.downtimeHours)).find(value=>value!==null);
+      const hours=recordedHours??configuredHours??0;
       const garnetMaterial=!/\b(?:valve|tube|nozzle|liner|hose|seal|inspection|repair|replacement|replace)\b/i.test(row.taskName||task?.name||'')&&/\b(?:garnet|abrasive)\b/i.test(row.taskName||task?.name||'')&&(/\b(?:refill|replenish|purchase|load|add|consumption|fill)\b/i.test(row.taskName||task?.name||'')||/^(?:garnet|abrasive)(?: material)?$/i.test(row.taskName||task?.name||''));
       const partCost=garnetMaterial?0:parts;
-      const incomplete=partCost===null||hours===null;
+      const incomplete=partCost===null;
       const repairTask=sourceFamily.find(member=>number(member.occurrenceHours?.[key])!==null)||sourceFamily.find(member=>(member.manualHistory||[]).includes(occurrence))||sourceFamily.find(member=>(member.completedDates||[]).includes(key))||task;
-      const costFields={parts:{value:partCost,source:garnetMaterial?'Hourly garnet formula':number(rawParts)!==null?'Occurrence-specific':'Configured default'},duration:{value:hours,source:number(occurrenceHours)!==null?'Occurrence-specific':'Configured default'}};
+      const costFields={parts:{value:partCost,source:garnetMaterial?'Hourly garnet formula':number(rawParts)!==null?'Occurrence-specific':'Configured default'},duration:{value:hours,source:recordedHours!=null?'Occurrence-specific':configuredHours!=null?'Configured default':'Zero-hour fallback'}};
       const importedSource=stream?.provenance?.importProvenance?.sourceRecord;
-      const estimated=number(rawParts)===null||number(occurrenceHours)===null||(importedSource&&number(importedSource.parts_cost_snapshot)===null&&!(state.maintenanceOccurrencesV2||[]).some(event=>event.rootOccurrenceId===row.rootOccurrenceId&&event.source==='cut_cost_correction'));
-      const costExclusionReason=incomplete?`Missing ${[partCost===null?'parts price':null,hours===null?'labor duration':null].filter(Boolean).join(' and ')}`:'';
+      const estimated=number(rawParts)===null||recordedHours==null||(importedSource&&number(importedSource.parts_cost_snapshot)===null&&!(state.maintenanceOccurrencesV2||[]).some(event=>event.rootOccurrenceId===row.rootOccurrenceId&&event.source==='cut_cost_correction'));
+      const costExclusionReason=incomplete?'Missing parts price':'';
       const result={...row,sourceEventKey,costExclusionReason,maintenanceHrs:hours??0,partCost:partCost??0,chargeRate:30,laborCost:(hours??0)*30,totalCost:(partCost??0)+(hours??0)*30,costIncomplete:incomplete,costEstimated:Boolean(estimated),costFields,repairTaskId:repairTask?.id??row.taskId,garnetMaterialExcluded:garnetMaterial};
       out.push(result);audit(costExclusionReason,result);
     }
@@ -149,9 +152,10 @@
     const hasWindow=hours.measurementStartDate&&hours.measurementEndDate>hours.measurementStartDate;
     // Without endpoints retain the requested-window repair list, but never offer a rate.
     const events=rows.filter(row=>hasWindow?row.dateISO>hours.measurementStartDate&&row.dateISO<=hours.measurementEndDate:row.dateISO>=range.startDate&&row.dateISO<=range.endDate);
-    const partsCost=events.reduce((sum,row)=>sum+row.partCost,0),laborCost=events.reduce((sum,row)=>sum+row.laborCost,0),maintenanceCost=partsCost+laborCost;
+    const completeEvents=events.filter(row=>!row.costIncomplete);
+    const partsCost=completeEvents.reduce((sum,row)=>sum+row.partCost,0),laborCost=completeEvents.reduce((sum,row)=>sum+row.laborCost,0),maintenanceCost=partsCost+laborCost;
     const incomplete=events.filter(row=>row.costIncomplete).length,estimated=events.filter(row=>row.costEstimated).length;
-    if(incomplete)warnings.push(`${incomplete} completed maintenance event(s) lack a parts price or duration.`);
+    if(incomplete)warnings.push(`${incomplete} completed maintenance event(s) lack a parts price.`);
     if(!events.length)warnings.push('No completed maintenance events were found in this window. Confirm that maintenance history is complete.');
     if(estimated)warnings.push(`${estimated} completed maintenance event(s) use configured/default parts or duration.`);
     if(events.some(row=>row.garnetMaterialExcluded))warnings.push('Garnet refill/purchase material is excluded from maintenance; its labor remains included.');
