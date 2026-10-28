@@ -7,7 +7,7 @@ function constant(name){const start=core.indexOf("const "+name+" =");assert.ok(s
 const bindings=["totalHistory","tasksInterval","tasksAsReq","inventory","cuttingJobs","completedCuttingJobs","orderRequests","garnetCleanings","dailyCutHours","opportunityRollups","weeklyCostReports","receiptTrackerWeeks","maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2","deletedItems","appConfig","jobFolders","orderRequestTab"];
 function harness(options={}){
   let cloud=clone(options.initial||fixture()),listener=clone(cloud),writing=false,commits=0,writeTransactions=0,readTransactions=0,documentReads=0,diagnostics=0,storedBackup=options.backup||null;
-  const window={...clone(cloud),OMAXMaintenanceTaskArchive:archive,OMAXGlobalIdentityRepair:identity,OMAXAtomicPersistence:atomic,CuttingFileContentFirewall:firewall,
+  const window={...clone(cloud),OMAXMaintenanceTaskArchive:archive,OMAXInventoryArchive:require("../js/inventoryArchive"),OMAXGlobalIdentityRepair:identity,OMAXAtomicPersistence:atomic,CuttingFileContentFirewall:firewall,
     __cloudLoadAttemptComplete:true,__initialAdoptComplete:true,__loadedCloudRevisionForSaveGuard:cloud.syncMeta.rev,location:{search:"",hostname:"localhost"},...(options.windowModules||{})};
   let context;
   const snapshot=state=>({exists:!!state,data:()=>clone(state),metadata:{fromCache:false,hasPendingWrites:false}});
@@ -47,7 +47,7 @@ function harness(options={}){
   assert.equal(context.adoptIdentityCheckedAuthoritativeState(clone(cloud)).recovery,options.expectRecovery===true);
   const guardedWriter=context.writeAuthoritativeStateSnapshot;
   context.writeAuthoritativeStateSnapshot=async(...args)=>{writing=true;try{options.pendingMutation?.(args[0]);return await guardedWriter(...args);}finally{writing=false;}};
-  const start=core.indexOf("window.maintenanceTaskDeletionApi=");
+  const start=core.indexOf("window.inventoryDeletionApi=");
   vm.runInContext(core.slice(start,core.indexOf("let inventoryMaterialOwnedSuspension",start)),context);
   return {api:window.maintenanceTaskDeletionApi,window,context,get cloud(){return clone(cloud);},get local(){return clone(context.getInventoryIdentityRepairLocalState());},get commits(){return commits;},get readTransactions(){return readTransactions;},get writeTransactions(){return writeTransactions;},get documentReads(){return documentReads;},get diagnostics(){return diagnostics;}};
 }

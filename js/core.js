@@ -106,6 +106,7 @@ function canWriteCloud(reason = "cloud save"){
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
   if (window.maintenanceCalendarCancellationApi?.isBusy() && reason !== "maintenance calendar cancellation") return blockCloudSave(`${reason}; a maintenance cancellation is being verified.`);
   if (window.maintenanceTaskDeletionApi?.isBusy() && reason !== "maintenance task deletion") return blockCloudSave(`${reason}; a maintenance task archive transfer is being verified.`);
+  if (window.inventoryDeletionApi?.isBusy() && reason !== "inventory archive transfer") return blockCloudSave(`${reason}; an inventory archive transfer is being verified.`);
   if (window.__pumpBaselineMutationPending && reason !== "pump baseline commit") return blockCloudSave(`${reason}; a pump baseline is being verified.`);
   if (window.__pumpLogMutationPending && reason !== "pump log commit") return blockCloudSave(`${reason}; a pump log is being verified.`);
   if (window.__waterQualityMutationPending && reason !== "water quality commit") return blockCloudSave(`${reason}; a water-quality check is being verified.`);
@@ -851,10 +852,10 @@ function sanitizeValueForStorage(value, { dropHeavyHistory = false, provenanceSc
       || (key === "__recoveryProblems" && Array.isArray(v) && v.length === 0)
     );
     if (/^(__|debug|cache|preview)/i.test(key) && !sourceMarker) continue;
-    // Backup builders deliberately retain task archives. Do not discard that
+    // Backup builders deliberately retain task/inventory archives. Do not discard that
     // filtered history a second time through the generic operational-log trim.
-    const taskArchiveBackup = key === "deletedItems" && Array.isArray(v) && v.every(entry=>entry?.type === "task");
-    if (dropHeavyHistory && !taskArchiveBackup && !isProtectedBusinessDataKey(key) && /(syncprocesslog|logs|deleteditems|reports|rollups|savelogs)/i.test(key)) continue;
+    const identityArchiveBackup = key === "deletedItems" && Array.isArray(v) && v.every(entry=>["task","inventory"].includes(entry?.type));
+    if (dropHeavyHistory && !identityArchiveBackup && !isProtectedBusinessDataKey(key) && /(syncprocesslog|logs|deleteditems|reports|rollups|savelogs)/i.test(key)) continue;
     if (typeof v === "string" && (isLikelyEmbeddedFileContent(key, v) || v.length > 200000)){
       if (isSafeMetadataString(key, v)) out[key] = v;
       continue;
@@ -908,7 +909,7 @@ function compactStateForStorage(raw, { forBackup = false } = {}){
   snap.totalHistory = Array.isArray(snap.totalHistory) ? snap.totalHistory.slice() : [];
   snap.dailyCutHours = Array.isArray(snap.dailyCutHours) ? snap.dailyCutHours.slice(-365) : [];
   if (forBackup){
-    snap.deletedItems = (snap.deletedItems || []).filter(entry=>entry?.type === "task");
+    snap.deletedItems = (snap.deletedItems || []).filter(entry=>["task","inventory"].includes(entry?.type));
     delete snap.opportunityRollups;
   }
   return sanitizeValueForStorage(snap, { dropHeavyHistory: forBackup });
@@ -922,7 +923,7 @@ function buildEmergencyBackup(snapshot){
     totalHistory: Array.isArray(src.totalHistory) ? src.totalHistory : [],
     tasksInterval: Array.isArray(src.tasksInterval) ? src.tasksInterval : [],
     tasksAsReq: Array.isArray(src.tasksAsReq) ? src.tasksAsReq : [],
-    deletedItems: (src.deletedItems || []).filter(entry=>entry?.type === "task"),
+    deletedItems: (src.deletedItems || []).filter(entry=>["task","inventory"].includes(entry?.type)),
     maintenanceTasksV2: Array.isArray(src.maintenanceTasksV2) ? src.maintenanceTasksV2 : [],
     maintenanceCalendarInstancesV2: Array.isArray(src.maintenanceCalendarInstancesV2) ? src.maintenanceCalendarInstancesV2 : [],
     maintenanceOccurrencesV2: Array.isArray(src.maintenanceOccurrencesV2) ? src.maintenanceOccurrencesV2 : [],
@@ -956,7 +957,7 @@ function buildTinyCriticalBackup(snapshot, { quiet = false } = {}){
     schema: src.schema || APP_SCHEMA,
     tasksInterval: src.tasksInterval || [],
     tasksAsReq: src.tasksAsReq || [],
-    deletedItems: (src.deletedItems || []).filter(entry=>entry?.type === "task"),
+    deletedItems: (src.deletedItems || []).filter(entry=>["task","inventory"].includes(entry?.type)),
     maintenanceTasksV2: src.maintenanceTasksV2 || [],
     maintenanceOccurrencesV2: src.maintenanceOccurrencesV2 || [],
     maintenanceCalendarInstancesV2: src.maintenanceCalendarInstancesV2 || [],
@@ -2794,7 +2795,7 @@ function startWorkspaceStateListener(){
     if (!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites) return;
     if (isRecoveryMode()) return;
     // The isolated material writer owns adoption until SERVER verification.
-    if (window.maintenanceTaskDeletionApi?.isBusy() || window.maintenanceCalendarCancellationApi?.isBusy() || window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending || window.__pumpLogMutationPending || window.__waterQualityMutationPending) return;
+    if (window.inventoryDeletionApi?.isBusy() || window.maintenanceTaskDeletionApi?.isBusy() || window.maintenanceCalendarCancellationApi?.isBusy() || window.inventoryMaterialMutationApi?.isBusy() || window.__pumpBaselineMutationPending || window.__pumpLogMutationPending || window.__waterQualityMutationPending) return;
     if (!snap.exists){ enterMissingStateRecovery(); return; }
     const incoming = typeof snap.data === "function" ? snap.data() : snap.data;
     if (!stateHasMeaningfulData(incoming)) return;
@@ -3003,7 +3004,7 @@ function normalizeDeletedItem(raw){
   const deletedDate = deletedISO ? new Date(deletedISO) : new Date();
   const deletedMs = deletedDate.getTime();
   if (!Number.isFinite(deletedMs)) return null;
-  if (type !== "task" && (Date.now() - deletedMs) > TRASH_RETENTION_MS) return null;
+  if (!["task","inventory"].includes(type) && (Date.now() - deletedMs) > TRASH_RETENTION_MS) return null;
   const payload = cloneStructured(raw.payload);
   const meta = raw.meta && typeof raw.meta === "object" ? { ...raw.meta } : {};
   const label = typeof raw.label === "string" && raw.label ? raw.label : buildTrashLabel(type, payload, meta);
@@ -3149,7 +3150,7 @@ function removeDeletedItem(id){
   purgeExpiredDeletedItems();
   const idx = deletedItems.findIndex(entry => entry && entry.id === id);
   if (idx < 0) return false;
-  if (deletedItems[idx].type === "task") return false; // Historical identity and evidence are retained indefinitely.
+  if (["task","inventory"].includes(deletedItems[idx].type)) return false; // Historical identity and evidence are retained indefinitely.
   deletedItems.splice(idx, 1);
   window.deletedItems = deletedItems;
   try { saveCloudDebounced(); }
@@ -3164,50 +3165,8 @@ function applyRestoreByType(entry, index){
   switch (type) {
     case "task":
       return { blocked:true, error:"Use the confirmed Restore action in Deleted History to restore this task with its exact original ID and verified history." };
-    case "inventory": {
-      if (!Array.isArray(inventory)) inventory = [];
-      if (!clone.id) clone.id = genId(clone.name || "item");
-      const existing = new Set(inventory.filter(Boolean).map(item => String(item.id)));
-      while (existing.has(String(clone.id))){
-        clone.id = genId(clone.name || "item");
-      }
-      const normalizedInventory = normalizeInventoryItem(clone);
-      if (!normalizedInventory) return { handledRemoval: false, value: { type: "inventory", id: clone.id } };
-      const idx = inventory.findIndex(item => item && String(item.id) === String(normalizedInventory.id));
-      if (idx >= 0) inventory[idx] = normalizedInventory;
-      else inventory.push(normalizedInventory);
-      window.inventory = inventory;
-
-      const linkedTaskIdRaw = clone.linkedTaskId != null ? clone.linkedTaskId : (meta && meta.linkedTaskId != null ? meta.linkedTaskId : null);
-      const linkedTaskId = linkedTaskIdRaw != null ? String(linkedTaskIdRaw) : "";
-      if (linkedTaskId){
-        let task = findTaskByIdLocal(linkedTaskId);
-        if (!task){
-          const restored = restoreLinkedDeletedEntry(entryCandidate => {
-            if (!entryCandidate || entryCandidate.type !== "task") return false;
-            const payload = entryCandidate.payload || {};
-            const metaInfo = entryCandidate.meta || {};
-            const payloadId = payload.id != null ? String(payload.id) : "";
-            if (payloadId && payloadId === linkedTaskId) return true;
-            const metaInventoryId = metaInfo.inventoryId != null ? String(metaInfo.inventoryId) : "";
-            const metaLinkedInventoryId = metaInfo.linkedInventoryId != null ? String(metaInfo.linkedInventoryId) : "";
-            const payloadInventoryId = payload.inventoryId != null ? String(payload.inventoryId) : "";
-            const metaInventoryOriginal = metaInfo.inventoryIdOriginal != null ? String(metaInfo.inventoryIdOriginal) : "";
-            const inventoryIds = [metaInventoryId, metaLinkedInventoryId, payloadInventoryId, metaInventoryOriginal].filter(Boolean);
-            const cloneIdStr = String(clone.id);
-            if (inventoryIds.some(candidate => candidate === cloneIdStr)) return true;
-            return false;
-          }, { skipId: entry.id });
-          if (restored && restored.result && restored.result.value && restored.result.value.type === "task"){
-            task = findTaskByIdLocal(restored.result.value.id);
-          }
-        }
-        if (task){
-          ensureTaskInventoryLink(task, clone);
-        }
-      }
-      return { handledRemoval: false, value: { type: "inventory", id: clone.id } };
-    }
+    case "inventory":
+      return { blocked:true, error:"Use the verified Restore action in Deleted History to restore the original inventory identity." };
     case "job": {
       const gate = window.CuttingJobHistory?.planDirectResequence([...(cuttingJobs || []), clone], window.completedCuttingJobs);
       if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
@@ -3356,6 +3315,13 @@ function applyRestoreByType(entry, index){
 }
 
 function restoreDeletedItem(id, confirmedArchiveKey){
+  const inventoryEntry=window.deletedItems?.find(entry=>entry?.id===id&&entry.type==="inventory");
+  if(inventoryEntry){
+    return (async()=>{
+      const result=await window.inventoryDeletionApi?.restore(inventoryEntry.payload?.id);
+      return result?.saved&&result.verified ? {ok:true,value:{type:"inventory",id:inventoryEntry.payload.id}} : {ok:false,error:result?.error||"Inventory restoration unavailable."};
+    })();
+  }
   // Task restoration never enters the local, ID-regenerating generic path or
   // its linked-entry helper. Confirmation is bound to the exact archived entry.
   if(window.deletedItems?.some(entry=>entry?.id===id&&entry.type==="task")){
@@ -4599,7 +4565,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
   const identityAuthorized=identityProof&&FB.ready&&FB.user&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete&&!window.__localBackupOnlyMode
     &&options.expectedRevision===identityProof.expectedRevision&&stableStringify(state)===identityProof.pendingKey;
-  if (!identityAuthorized && !canWriteCloud(options.maintenanceCalendarCancellation ? "maintenance calendar cancellation" : options.maintenanceTaskDeletionProof ? "maintenance task deletion" : options.waterQualityMutation ? "water quality commit" : options.pumpLogMutation ? "pump log commit" : options.pumpBaselineMutation ? "pump baseline commit" : "authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
+  if (!identityAuthorized && !canWriteCloud(options.inventoryDeletionProof ? "inventory archive transfer" : options.maintenanceCalendarCancellation ? "maintenance calendar cancellation" : options.maintenanceTaskDeletionProof ? "maintenance task deletion" : options.waterQualityMutation ? "water quality commit" : options.pumpLogMutation ? "pump log commit" : options.pumpBaselineMutation ? "pump baseline commit" : "authoritative transaction")) return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, stateWriteAttempted:false, stateWriteCompleted:false, error:"Cloud writes are currently blocked." };
   const deletionProof = options.cuttingJobDeletionProof;
   if (deletionProof){
     if (!cuttingJobDeletionProofs.has(deletionProof) || cuttingJobDeletionTransactions.has(deletionProof)) return cuttingJobDeletionFailure("Cutting-job deletion transaction authorization is invalid or already used.");
@@ -4658,25 +4624,37 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
           ||!window.CuttingJobDateEditing?.dateKey(after[0]?.completedAtISO)||typeof options.validatePreparedState!=="function"||options.validatePreparedState(JSON.parse(JSON.stringify(pending)))!==true)
           throw Object.assign(new Error("Completion must preserve the exact job in completed history."),{definite:true,code:"cutting_job_completion_rejected"});
       }
-      const taskDeletionSafety=baseline=>options.maintenanceTaskDeletionProof ? window.OMAXMaintenanceTaskArchive.safetyBaseline(baseline,pending,options.maintenanceTaskDeletionProof) : baseline;
+      const inventoryDeletionSafety=baseline=>options.inventoryDeletionProof ? window.OMAXInventoryArchive.safetyBaseline(baseline,pending,options.inventoryDeletionProof) : baseline;
+      const taskDeletionSafety=baseline=>inventoryDeletionSafety(options.maintenanceTaskDeletionProof ? window.OMAXMaintenanceTaskArchive.safetyBaseline(baseline,pending,options.maintenanceTaskDeletionProof) : baseline);
       const safetyRemote = taskDeletionSafety(completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...remote, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : remote, pending, deletionProof)));
       const safetyBaseline = taskDeletionSafety(completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...window.__lastLoadedCloudState, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : window.__lastLoadedCloudState, pending, deletionProof)));
       const backup = readLocalStateBackup();
       const matchesTaskEvidence=(evidence,backupOnly=false)=>evidence
         && ["tasksInterval","tasksAsReq"].every(field=>stableStringifyForIntegrity(evidence[field])===stableStringifyForIntegrity(remote[field]))
         && stableStringifyForIntegrity(backupOnly ? (evidence.deletedItems||[]) : evidence.deletedItems)
-          ===stableStringifyForIntegrity(backupOnly ? (remote.deletedItems||[]).filter(entry=>entry?.type==="task") : remote.deletedItems);
+          ===stableStringifyForIntegrity(backupOnly ? (remote.deletedItems||[]).filter(entry=>["task","inventory"].includes(entry?.type)) : remote.deletedItems);
       const projectTaskTransfer=evidence=>({...evidence,tasksInterval:pending.tasksInterval,tasksAsReq:pending.tasksAsReq,deletedItems:pending.deletedItems});
       const matchingTaskBackup=options.maintenanceTaskDeletionProof && backup
         && Number(backup.syncMeta?.rev || 0)<=Number(remote.syncMeta?.rev || 0)
         && matchesTaskEvidence(backup,true);
-      const safetyBackup = matchingTaskBackup
+      let safetyBackup = matchingTaskBackup
         ? projectTaskTransfer(backup)
         : completionSafetyBaseline(cuttingJobDeletionSafetyBaseline(proof ? { ...backup, maintenanceOccurrencesV2:pending.maintenanceOccurrencesV2 } : backup, pending, deletionProof));
       const windowEvidence=completionSafetyBaseline(buildWindowProtectedStateForCoverage());
       // The whole-state transfer was proven above. Coverage may follow it only
       // when this additional evidence has the exact same task records/archives.
-      const safetyWindow=options.maintenanceTaskDeletionProof && matchesTaskEvidence({...windowEvidence,deletedItems:window.deletedItems}) ? projectTaskTransfer(windowEvidence) : windowEvidence;
+      let safetyWindow=options.maintenanceTaskDeletionProof && matchesTaskEvidence({...windowEvidence,deletedItems:window.deletedItems}) ? projectTaskTransfer(windowEvidence) : windowEvidence;
+      if(options.inventoryDeletionProof){
+        // Backups can omit operational Trash, but must contain all retained
+        // task/inventory identities and exactly match the source stock.
+        const retained=state=>(state?.deletedItems||[]).filter(entry=>["task","inventory"].includes(entry?.type));
+        const matchesInventoryEvidence=evidence=>evidence
+          && stableStringifyForIntegrity(evidence.inventory)===stableStringifyForIntegrity(remote.inventory)
+          && stableStringifyForIntegrity(retained(evidence))===stableStringifyForIntegrity(retained(remote));
+        const project=evidence=>({...evidence,inventory:pending.inventory,deletedItems:pending.deletedItems});
+        if(backup&&Number(backup.syncMeta?.rev||0)<=Number(remote.syncMeta?.rev||0)&&matchesInventoryEvidence(backup))safetyBackup=project(backup);
+        if(matchesInventoryEvidence({...windowEvidence,deletedItems:window.deletedItems}))safetyWindow=project(windowEvidence);
+      }
       const preflight = validateProtectedSavePreflight({ baselineState:safetyBaseline, pendingState:pending, latestRemoteState:safetyRemote, localBackupState:safetyBackup, windowState:safetyWindow, coverageReport:getSaveSchemaCoverageReport({ pendingSnapshot:pending }), reason:"atomic authoritative save", revisionConflict:{ blocked:false }, allowFirstRun:false });
       if (preflight.blocked || detectDangerousProtectedFieldReduction(safetyRemote, pending).blocked) throw Object.assign(new Error("Protected-state transaction preflight blocked the write."), { definite:true, code:"protected_preflight_blocked" });
       if (remote.pumpEff?.baselineHistory !== undefined || pending.pumpEff?.baselineHistory !== undefined){
@@ -4714,6 +4692,13 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
         } catch (error){
           throw Object.assign(new Error(String(error?.message || error)), { definite:true, code:options.validateSourceState ? "mutation_state_changed" : "chronology_state_changed" });
         }
+      }
+      // Inventory edits and Trash changes must pass the same FK check as a
+      // reload, before transaction.set can commit a dangling reference.
+      if(window.OMAXGlobalIdentityRepair&&(stableStringifyForIntegrity(remote.inventory)!==stableStringifyForIntegrity(pending.inventory)
+        ||stableStringifyForIntegrity(remote.deletedItems)!==stableStringifyForIntegrity(pending.deletedItems))){
+        const integrity=window.OMAXGlobalIdentityRepair.integrity(pending);
+        if(!integrity.valid)throw Object.assign(Error(integrity.blockers.join(" ")),{definite:true,code:"inventory_identity_rejected"});
       }
       return pending;
     }
@@ -4863,12 +4848,34 @@ async function readMaintenanceTaskAuthoritativeState(target){
   return state;
 }
 
+window.inventoryDeletionApi=window.OMAXInventoryArchive?.createApi({
+  operations:window.OMAXFirebaseOperations,
+  canWrite:()=>FB.ready&&Boolean(FB.user)&&!hasPendingLocalChanges&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete
+    &&!isRecoveryMode()&&!window.__autosaveDisabled&&!window.__localBackupOnlyMode&&!isVercelPreviewRuntime()
+    &&!window.__lastIndeterminateSave&&!window.__globalIdentityVerificationPending&&!window.__lastImportVerificationError&&!window.__lastInventoryIdentityRepairError
+    &&!window.maintenanceTaskDeletionApi?.isBusy()&&!window.maintenanceCalendarCancellationApi?.isBusy()&&!window.__inventoryMaterialMutationPending&&!window.inventoryMaterialMutationApi?.isBusy()&&!window.isCuttingJobChronologySaving?.()
+    &&!window.__pumpBaselineMutationPending&&!window.__pumpLogMutationPending&&!window.__waterQualityMutationPending,
+  settle:async()=>{await cloudSaveQueue;if(hasPendingLocalChanges)throw Error("Other changes are still pending. Wait for their save before moving inventory.");},
+  captureTarget:captureCuttingJobSaveTarget,targetIsCurrent:cuttingJobSaveTargetIsCurrent,
+  version:()=>({revision:window.__loadedCloudRevisionForSaveGuard,mutation:lastLocalMutationAt}),
+  read:readMaintenanceTaskAuthoritativeState,
+  matches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)&&stableStringify(source)===stableStringify(getCuttingJobChronologyLocalState()),
+  newId:()=>genId("trash_inventory"),
+  validate:state=>checkAuthoritativeIdentityIntegrity(state).valid===true,
+  write:(next,expectedRevision,validateSourceState,validatePreparedState,inventoryDeletionProof,target)=>{
+    const queued=cloudSaveQueue.then(()=>writeAuthoritativeStateSnapshot(next,{mergeFields:["inventory","deletedItems","syncMeta"]},{expectedRevision,validateSourceState,validatePreparedState,inventoryDeletionProof,authoritativeTarget:target}));
+    cloudSaveQueue=queued.catch(()=>{});return queued;
+  },
+  adopt:state=>adoptIdentityCheckedAuthoritativeState(state)?.recovery===false,
+  suspend:result=>{window.__autosaveDisabled=true;window.__recoveryInspectMode=true;window.__lastIndeterminateSave=window.__lastIndeterminateSave||result;renderRecoveryDiagnosticsPanel();}
+});
+
 window.maintenanceTaskDeletionApi=window.OMAXMaintenanceTaskArchive?.createApi({
   operations:window.OMAXFirebaseOperations,
   canWrite:()=>FB.ready&&Boolean(FB.user)&&!hasPendingLocalChanges&&window.__cloudLoadAttemptComplete&&window.__initialAdoptComplete
     &&!isRecoveryMode()&&!window.__autosaveDisabled&&!window.__localBackupOnlyMode&&!isVercelPreviewRuntime()
     &&!window.__lastIndeterminateSave&&!window.__globalIdentityVerificationPending&&!window.__lastImportVerificationError&&!window.__lastInventoryIdentityRepairError
-    &&!window.maintenanceCalendarCancellationApi?.isBusy()&&!window.__inventoryMaterialMutationPending&&!window.inventoryMaterialMutationApi?.isBusy()&&!window.isCuttingJobChronologySaving?.()
+    &&!window.inventoryDeletionApi?.isBusy()&&!window.maintenanceCalendarCancellationApi?.isBusy()&&!window.__inventoryMaterialMutationPending&&!window.inventoryMaterialMutationApi?.isBusy()&&!window.isCuttingJobChronologySaving?.()
     &&!window.__pumpBaselineMutationPending&&!window.__pumpLogMutationPending&&!window.__waterQualityMutationPending,
   settle:async()=>{await cloudSaveQueue;if(hasPendingLocalChanges)throw Error("Other changes are still pending. Wait for their save before moving a task.");},
   captureTarget:captureCuttingJobSaveTarget,targetIsCurrent:cuttingJobSaveTargetIsCurrent,
@@ -5431,7 +5438,7 @@ function captureHistoryState(nextSnapshot){
 
 async function applyHistorySnapshot(json, onConfirmed = null){
   if (!json) return false;
-  if(window.maintenanceCalendarCancellationApi?.isBusy()||window.maintenanceTaskDeletionApi?.isBusy()){toast("A verified maintenance operation is pending; history was not changed.");return false;}
+  if(window.inventoryDeletionApi?.isBusy()||window.maintenanceCalendarCancellationApi?.isBusy()||window.maintenanceTaskDeletionApi?.isBusy()){toast("A verified archive/calendar operation is pending; history was not changed.");return false;}
   if (cuttingJobDeletionInProgress){ toast("A cutting-job operation is still saving; history was not changed."); return false; }
   let data;
   try {
@@ -6511,6 +6518,7 @@ function ensureInventoryForAllMaintenanceTasks(){
       if (!taskId) return;
       let linked = null;
       const invId = task.inventoryId != null ? String(task.inventoryId) : "";
+      if(window.OMAXInventoryArchive?.archivedForTask({inventory,deletedItems:window.deletedItems},task))return;
       if (invId){
         linked = inventory.find(item => item && String(item.id) === invId) || null;
       }
