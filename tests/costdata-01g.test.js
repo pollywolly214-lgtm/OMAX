@@ -17,7 +17,7 @@ function client(options={}){const h=harness({initial:fixture(),...options,window
 const operation={kind:"legacy",taskId:"recorded-parts",scope:"single",dateISO:"2026-01-02"};
 test("01G actual CAS cancellation, archive and exact-ID restore conserve COSTDATA financial inputs and incomplete source identities",async()=>{
   const h=client(),before=h.cloud,inputs=financialInputs(before),api=h.window.maintenanceCalendarCancellationApi;
-  assert.equal(identity.integrity(before).valid,true);assert.equal(inputs.complete.reduce((sum,[,value])=>sum+value,0),226);
+  assert.equal(identity.integrity(before).valid,true);assert.equal(inputs.complete.reduce((sum,[,value])=>sum+value,0),256);
   const result=await api.run(api.review(operation));assert.equal(result.verified,true,result.error);assert.equal(h.window.__recoveryInspectMode,false);
   assert.deepEqual(financialInputs(h.cloud),inputs);assert.deepEqual(h.cloud.tasksInterval[0].manualHistory,before.tasksInterval[0].manualHistory);
   assert.equal(h.cloud.tasksInterval[0].calendarCancellations.length,1);assert.equal(cancel.integrity(h.cloud).valid,true);

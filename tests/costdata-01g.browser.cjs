@@ -18,7 +18,7 @@ test("01G integrated period-independent History and verified cancellation/archiv
   const snapshot=()=>p.evaluate(()=>{const m=computeCostModel();return {series:m.maintenanceSeries.map(({events,...row})=>row),markers:m.incompleteMaintenanceMarkers.map(row=>[row.sourceEventKey,row.dateISO,row.knownParts,row.knownDuration,row.fullCost]),
     maintenance:m.financialReconciliation.maintenance,totals:m.financialReconciliation.totals,purchases:m.totalSpendSeries,jobs:m.jobSeries,forecast:m.financialReconciliation.forecast,
     layout:window.cloudCostLayout,config:window.appConfig.cutCostFeedback};});
-  const baseline=await snapshot();assert.equal(baseline.maintenance.knownSubtotal,216);assert.equal(baseline.markers.length,2);
+  const baseline=await snapshot();assert.equal(baseline.maintenance.knownSubtotal,246);assert.equal(baseline.markers.length,0);
   await p.evaluate(()=>{window.__costdata01gWrites=0;window.__costdata01gFunctions={};for(const name of ["saveCloudNow","saveCloudDebounced","markLocalMutation","persistLocalStateBackup"]){window.__costdata01gFunctions[name]=window[name];window[name]=()=>{window.__costdata01gWrites++;throw Error("Display must not save: "+name);};}});
   await p.selectOption("#costFinancialPeriod","30d");assert.equal(await p.evaluate(()=>computeCostModel().incompleteMaintenanceMarkers.length),0);
   await p.evaluate(()=>{location.hash="#/settings";});await p.locator('details.task[data-task-id="recorded-parts"]').evaluate(node=>{for(let parent=node;parent;parent=parent.parentElement)if(parent.tagName==="DETAILS")parent.open=true;});

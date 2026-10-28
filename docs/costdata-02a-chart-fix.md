@@ -1,5 +1,11 @@
 # COSTDATA-02A: maintenance estimates and chart interaction
 
+**Superseded behavior:** COSTDATA-02B now treats a blank price on a valid,
+unambiguous linked task as estimated zero, and chart clicks navigate to exact
+Central Data Table events instead of cycling tooltips. See
+[COSTDATA-02B](costdata-02b-zero-cost-navigation.md) for current rules and tests.
+The 02A results below describe the earlier implementation and integrations.
+
 Current integrated main: `c28c18869562805ec5ae776d73d0f07b2c9b5efd` (including #529).
 Initial implementation base: `7edc7ea5e986cb6ffaeb8203ece5755b168b00d3` (merged #519).
 Branch: `codex/costdata-02a-chart-fix`. This is a new PR; #519 is unchanged.

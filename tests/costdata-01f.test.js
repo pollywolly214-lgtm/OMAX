@@ -13,7 +13,7 @@ const model=markers=>({incompleteMaintenanceMarkers:markers,maintenanceSeries:[]
 test("02A supersedes 01F glyphs with compact unknown-price circles and preserves nullable evidence",()=>{
   const rows=[row("unknown",null,0),row("duration-only",null,1)],before=JSON.stringify(rows),markers=plain(build(rows));
   assert.deepEqual(markers.map(pt=>pt.knownParts),[null,null]);assert.ok(markers.every(pt=>pt.fullCost===null&&pt.value===null));
-  assert.equal(markers[0].detail,"2026-01-02\nCost unavailable");assert.equal(JSON.stringify(rows),before);
+  assert.equal(markers[0].detail,"2026-01-02\nReview parts price");assert.equal(JSON.stringify(rows),before);
 });
 test("02A same-day unknown prices retain all identities without duplicate source markers or invented dollars",()=>{
   const rows=[row("one",null,0),row("two",null,1),row("three",null,0)],markers=build([...rows,rows[0]]),c=canvas();

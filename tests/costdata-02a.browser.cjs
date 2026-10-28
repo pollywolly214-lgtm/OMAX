@@ -18,13 +18,13 @@ test("02A concise blue maintenance tooltips, same-day identities, zoom, resize a
   await p.evaluate(async source=>{if(!OMAXDevSafe.active||typeof firebase!=="undefined")throw Error("Disposable backend required");await FB.docRef.set({...window.__lastLoadedCloudState,...source,syncMeta:window.__lastLoadedCloudState.syncMeta});},chartFixture());await load();
   const baseline=await p.evaluate(async()=>(await FB.docRef.get()).data());
   await p.evaluate(()=>{window.__displayWrites=0;window.__displaySource=JSON.stringify(getCuttingJobImporterState());for(const name of ["saveCloudNow","saveCloudDebounced","markLocalMutation","persistLocalStateBackup"])window[name]=()=>{window.__displayWrites++;throw Error("Chart view must not save: "+name);};});
-  const model=await p.evaluate(()=>computeCostModel());assert.equal(model.financialReconciliation.maintenance.knownSubtotal,459);
-  assert.equal(-model.maintenanceSeries.reduce((sum,pt)=>sum+pt.value,0),459);
-  assert.equal(model.maintenanceAverageValue,-459/9,"Daily aggregate average retains its original basis");
-  assert.ok(Math.abs(model.financialReconciliation.forecast.annual-459/299*365)<1e-9,"YTD forecast uses the same resolved complete costs");
+  const model=await p.evaluate(()=>computeCostModel());assert.equal(model.financialReconciliation.maintenance.knownSubtotal,489);
+  assert.equal(-model.maintenanceSeries.reduce((sum,pt)=>sum+pt.value,0),489);
+  assert.equal(model.maintenanceAverageValue,-489/11,"Daily aggregate average retains its original basis");
+  assert.ok(Math.abs(model.financialReconciliation.forecast.annual-489/299*365)<1e-9,"YTD forecast uses the same resolved complete costs");
   const rate=await p.evaluate(()=>OMAXCutCostFeedback.calculate({state:window,rows:computeCostModel().maintenanceCostRows,today:"2026-10-26",config:{...OMAXCutCostFeedback.DEFAULTS,days:"custom",startDate:"2026-01-01",endDate:"2026-01-15"}}));
   assert.equal(rate.maintenanceCost,255);assert.equal(rate.maintenanceCostPerHour,25.5,"Resolved Jan costs share the cumulative meter's 10-hour denominator");
-  assert.equal(model.incompleteMaintenanceMarkers.length,2);assert.equal(model.maintenanceCostRows.find(row=>row.dateISO==="2026-01-02").totalCost,185);
+  assert.equal(model.incompleteMaintenanceMarkers.length,0);assert.equal(model.maintenanceCostRows.find(row=>row.dateISO==="2026-01-02").totalCost,185);
   const canvas=p.locator("#costChart");
   const point=async(date,key="maintenance")=>{
     await canvas.scrollIntoViewIfNeeded();
@@ -44,15 +44,15 @@ test("02A concise blue maintenance tooltips, same-day identities, zoom, resize a
     assert.ok(geometry.tip.x>=0&&geometry.tip.right<=geometry.width+1&&geometry.tip.y>=0&&geometry.tip.bottom<=geometry.height+1,JSON.stringify(geometry));
     assert.equal(await tip.evaluate(el=>el.scrollHeight<=el.clientHeight+1),true,"All cost lines must remain visible at this zoom");
     if(process.env.OMAX_COSTDATA_SCREENSHOT_DIR){await fs.mkdir(process.env.OMAX_COSTDATA_SCREENSHOT_DIR,{recursive:true});await p.waitForFunction(()=>getComputedStyle(document.querySelector(".cost-chart-tooltip")).opacity==="1");await p.screenshot({path:path.join(process.env.OMAX_COSTDATA_SCREENSHOT_DIR,`costdata-02a-${width}-${zoom}.png`)});}
-    assert.ok((await tip.innerText()).length<220);await p.mouse.click(...Object.values(await point("2026-01-02")));
+    assert.ok((await tip.innerText()).length<220);
     assert.equal(await p.locator("[data-incomplete-maintenance-list],[data-incomplete-maintenance-legend]").count(),0);
   }
   await p.evaluate(()=>{document.documentElement.style.zoom="1";});await p.setViewportSize({width:1440,height:1100});await p.waitForTimeout(100);
-  const sameDay=await point("2026-04-15");await p.mouse.move(sameDay.x,sameDay.y);const details=new Set([await tip.innerText()]);
-  for(let i=0;i<3;i++){await p.mouse.click(sameDay.x,sameDay.y);details.add(await tip.innerText());}
-  assert.equal(details.size,3);assert.ok([...details].every(text=>text.length<220));
-  const unknown=await point("2026-03-10","maintenanceIncomplete");await p.mouse.click(unknown.x,unknown.y);
-  assert.match(await tip.innerText(),/Synthetic unknown.*2026-03-10.*Cost unavailable/s);assert.doesNotMatch(await tip.innerText(),/\$|duration|excluded|forecast/i);
+  const sameDay=await point("2026-04-15");await p.mouse.click(sameDay.x,sameDay.y);
+  assert.equal(await p.locator("#costDataCenterModal [data-maintenance-row]:visible").count(),3);
+  await p.locator("#costDataCenterModal button[data-close-data-center]").first().click();
+  const zero=await point("2026-03-10");await p.mouse.move(zero.x,zero.y);
+  assert.match(await tip.innerText(),/Synthetic unknown.*2026-03-10.*Total: \$0.00/s);assert.doesNotMatch(await tip.innerText(),/unavailable/);
   await p.locator("#toggleCostMaintenance").uncheck();assert.equal(await canvas.evaluate(el=>el.__costChartTargets.some(pt=>pt.key.startsWith("maintenance"))),false);await p.locator("#toggleCostMaintenance").check();
   // Rapid financial controls and timeline buttons stay synchronized.
   for(const range of ["30d","90d","182d","365d","ytd","all"]){await p.selectOption("#costFinancialPeriod",range);const m=await p.evaluate(()=>computeCostModel());assert.equal(m.financialReconciliation.maintenance.knownSubtotal,-m.maintenanceSeries.reduce((sum,pt)=>sum+pt.value,0));}
@@ -69,6 +69,6 @@ test("02A concise blue maintenance tooltips, same-day identities, zoom, resize a
   assert.equal(await p.evaluate(()=>__displayWrites),0);assert.equal(await p.evaluate(()=>JSON.stringify(getCuttingJobImporterState())===__displaySource),true);
   assert.deepEqual(await p.evaluate(async()=>(await FB.docRef.get()).data()),baseline);
   if(process.env.OMAX_COSTDATA_SCREENSHOT_DIR){await fs.mkdir(process.env.OMAX_COSTDATA_SCREENSHOT_DIR,{recursive:true});const pos=await point("2026-01-02");await p.mouse.move(pos.x,pos.y);await p.waitForFunction(()=>getComputedStyle(document.querySelector(".cost-chart-tooltip")).opacity==="1");await p.screenshot({path:path.join(process.env.OMAX_COSTDATA_SCREENSHOT_DIR,"costdata-02a-desktop.png")});}
-  await load();assert.equal(await p.evaluate(()=>computeCostModel().financialReconciliation.maintenance.knownSubtotal),459);
+  await load();assert.equal(await p.evaluate(()=>computeCostModel().financialReconciliation.maintenance.knownSubtotal),489);
   assert.deepEqual(await p.evaluate(async()=>(await FB.docRef.get()).data()),baseline);assert.deepEqual(errors,[]);
 });

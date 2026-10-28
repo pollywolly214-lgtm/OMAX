@@ -11327,7 +11327,7 @@ function renderSettings(){
             <label data-field="storeLink">Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label data-field="pn">Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
             <label data-field="price">Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
-            <label data-field="downtimeHours">Time to complete (hrs)<input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${t.id}" data-list="${type}" value="${t.downtimeHours!=null?t.downtimeHours:1}" placeholder="e.g. 1"></label>
+            <label data-field="downtimeHours">Time to complete (hrs)<input type="number" step="0.25" min="0" data-k="downtimeHours" data-id="${t.id}" data-list="${type}" value="${t.downtimeHours!=null?t.downtimeHours:""}" placeholder="e.g. 1"></label>
             <label class="task-note" data-field="note">Note<textarea data-k="note" data-id="${t.id}" data-list="${type}" rows="2" placeholder="Optional note">${escapeHtml(t.note||"")}</textarea></label>
           </div>
           <div class="inventory-link-row" data-inventory-link-row="${t.id}">
@@ -12615,7 +12615,7 @@ function renderSettings(){
       if (value == null){
         meta.task.downtimeHours = null;
       }else{
-        const normalized = Math.max(0.25, Math.round(Number(value) * 100) / 100);
+        const normalized = Math.max(0, Math.round(Number(value) * 100) / 100);
         meta.task.downtimeHours = normalized;
         target.value = String(normalized);
       }
@@ -13899,27 +13899,14 @@ function renderCosts(){
       }
       if (sourceSystem === "v2" && rootOccurrenceId){
         const v2Sel = `[data-source-system="v2"][data-v2-root-occurrence-id="${String(rootOccurrenceId)}"]`;
-        const v2AltSel = instanceId ? `[data-source-system="v2"][data-v2-instance-id="${String(instanceId)}"]` : "";
-        const v2Chip = cell.querySelector(v2Sel) || (v2AltSel ? cell.querySelector(v2AltSel) : null);
+        const v2Chip = cell.querySelector(v2Sel);
         if (v2Chip instanceof HTMLElement){
           v2Chip.click();
           return true;
         }
         if (typeof toast === "function") toast("This V2 completed record is not visible on the calendar.");
-        const orphanCtx = {
-          sourceSystem: "v2",
-          taskId: String(taskId || ""),
-          instanceId,
-          rootOccurrenceId,
-          displayDateISO: dueISO,
-          dateISO: dueISO,
-          originalDateISO: String(options.originalDateISO || dueISO || ""),
-          taskName: String(options.taskName || "")
-        };
-        if (window.DEBUG_MODE) console.debug("[maintenance-v2-orphan-row-detected]", orphanCtx);
-        if (typeof window.repairV2OrphanCompletedRow === "function"){
-          window.repairV2OrphanCompletedRow(orphanCtx);
-        }
+        // Navigation is read-only. A missing chip must never launch an
+        // occurrence-removal repair or fall back to a different root.
         return false;
       }
       const anchor = taskId ? (cell.querySelector(`[data-cal-task="${String(taskId)}"]`) || cell) : cell;
@@ -14141,25 +14128,24 @@ function renderCosts(){
         }
         row = panelRoot.querySelector("[data-spend-row]");
       }else{
-        const taskId = String(payload.taskId || "");
-        const dateISO = String(payload.dateISO || "");
-        if (dateISO){
-          const selector = taskId
-            ? `[data-maintenance-row][data-task-id="${escapeForSelector(taskId)}"][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`
-            : `[data-maintenance-row][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`;
-          const matchingRows = Array.from(panelRoot.querySelectorAll(selector))
-            .filter(item => item instanceof HTMLElement);
-          if (matchingRows.length){
-            matchingRows[0].scrollIntoView({ behavior: "smooth", block: "center" });
-            matchingRows.forEach((item, idx) => {
-              setTimeout(()=> pulseRow(item), idx * 90);
-            });
-            return true;
-          }
-        }
-        row = (taskId && dateISO && panelRoot.querySelector(`[data-maintenance-row][data-task-id="${escapeForSelector(taskId)}"][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`))
-          || (dateISO && panelRoot.querySelector(`[data-maintenance-row][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`))
-          || panelRoot.querySelector("[data-maintenance-row]");
+        resetMaintenanceFilters();
+        const refs=Array.isArray(payload.rowRefs)&&payload.rowRefs.length?payload.rowRefs:[payload];
+        const candidates=Array.from(panelRoot.querySelectorAll("[data-maintenance-row]"));
+        const matchingRows=candidates.filter(item=>refs.some(ref=>{
+          if(ref.sourceEventKey)return item.dataset.sourceEventKey===String(ref.sourceEventKey);
+          if(ref.rootOccurrenceId)return item.dataset.v2RootOccurrenceId===String(ref.rootOccurrenceId)&&(!ref.instanceId||item.dataset.v2InstanceId===String(ref.instanceId));
+          return ref.taskId&&ref.dateISO&&item.dataset.taskId===String(ref.taskId)&&item.dataset.maintenanceDateIso===String(ref.dateISO);
+        }));
+        const selection=panelRoot.querySelector("[data-maintenance-chart-selection]");
+        if(selection){selection.hidden=false;selection.querySelector("span").textContent=matchingRows.length?`${matchingRows.length} chart event${matchingRows.length===1?"":"s"}`:"Selected event is unavailable in this period. Review task links.";}
+        candidates.forEach(item=>{item.hidden=!matchingRows.includes(item);});
+        if(!matchingRows.length)return false;
+        matchingRows[0].scrollIntoView({behavior:"smooth",block:"center"});
+        matchingRows.forEach(item=>{
+          item.setAttribute("data-maintenance-row-link-highlight","1");
+          setTimeout(()=>item.removeAttribute("data-maintenance-row-link-highlight"),2400);
+        });
+        return true;
       }
       if (!(row instanceof HTMLElement)) return false;
       pulseRow(row);
@@ -14249,6 +14235,8 @@ function renderCosts(){
     };
     const applySearchFilter = ()=>{
       if (!(modal instanceof HTMLElement)) return;
+      const selection=modal.querySelector("[data-maintenance-chart-selection]");
+      if(selection)selection.hidden=true;
       const term = String(searchInput instanceof HTMLInputElement ? searchInput.value : "").trim().toLowerCase();
       const categoryValue = String(categoryFilter instanceof HTMLSelectElement ? categoryFilter.value : "").trim();
       const taskValue = String(taskFilter instanceof HTMLSelectElement ? taskFilter.value : "").trim().toLowerCase();
@@ -14286,6 +14274,7 @@ function renderCosts(){
       applySearchFilter();
       renderSuggestions();
     };
+    modal.querySelector("[data-maintenance-chart-show-all]")?.addEventListener("click",resetMaintenanceFilters);
     if (v2SafetyBtn instanceof HTMLElement){
       v2SafetyBtn.addEventListener("click", ()=>{
         if (typeof window.runMaintenanceV2SafetyChecks !== "function") return;
@@ -14488,13 +14477,22 @@ function renderCosts(){
         const taskName = String(btn.getAttribute("data-task-name") || "");
         if (destination === "settings"){
           closeDataCenter();
-          if (taskId){
-            window.pendingMaintenanceFocus = { taskIds: [taskId] };
+          const settingsTaskId=String(btn.getAttribute("data-settings-task-id")||"");
+          const resolved=window.OMAXMaintenanceTaskArchive?.resolve(window,settingsTaskId);
+          if(resolved?.status==="archived"){
+            openMaintenanceTaskHistory(resolved.task);
+            toast("Archived task: review History; use Deleted History to restore before editing Settings.");
+            return;
           }
-          location.hash = "#/settings";
+          if(resolved?.status!=="active"){toast("Review this task link before editing Maintenance Settings.");return;}
+          window.pendingMaintenanceFocus = { taskIds: [settingsTaskId] };
+          location.hash = `#/settings?taskId=${encodeURIComponent(settingsTaskId)}`;
           return;
         }
         closeDataCenter();
+        const settingsTaskId=String(btn.getAttribute("data-settings-task-id")||"");
+        const archived=window.OMAXMaintenanceTaskArchive?.resolve(window,settingsTaskId);
+        if(archived?.status==="archived"){openMaintenanceTaskHistory(archived.task);return;}
         focusCalendarAtOccurrence(taskId, dateISO, { sourceSystem, rootOccurrenceId, instanceId, displayDateISO, originalDateISO, taskName });
       });
     });
@@ -17311,22 +17309,10 @@ const appendEmptyRow = (focusFirst = false)=>{
         y: Number(event.clientY)
       };
       const target = resolvePointerTarget(event, { allowProximity: true })?.target || null;
-      if (target?.key === "maintenance" || target?.key === "maintenanceIncomplete"){
-        const events = target.events || [];
-        if (events.length > 1){
-          target.eventIndex = ((target.eventIndex ?? 0) + 1) % events.length;
-          const item = events[target.eventIndex];
-          target.datasetLabel = item.datasetLabel;
-          target.tooltipValueLabel = item.valueLabel;
-          target.detail = `${item.detail}\n${target.key === "maintenance" ? `Day total: ${target.valueLabel} · ` : ""}${target.eventIndex + 1}/${events.length} events · click for next`;
-        }
-        handlePointerHover(event);
-        return;
-      }
       if (!target || !target.rowRef || typeof window === "undefined") return;
       const focusFn = window.__focusCostDataCenterRow;
       if (typeof focusFn === "function"){
-        focusFn(target.rowRef);
+        focusFn({...target.rowRef,rowRefs:target.rowRefs});
       }
     };
     const pointerLeave = ()=>{
@@ -20070,7 +20056,7 @@ function computeCostModel(){
   });
 
   if (window.OMAXCutCostFeedback){
-    const corrected = window.OMAXCutCostFeedback.maintenanceRows(maintenanceDataTableRows, window, compatibilityRows, maintenanceCostReconciliation);
+    const corrected = window.OMAXCutCostFeedback.maintenanceRows(maintenanceDataTableRows, window.__lastLoadedCloudState || window, compatibilityRows, maintenanceCostReconciliation);
     maintenanceDataTableRows.splice(0, maintenanceDataTableRows.length, ...corrected);
   }
 
@@ -20421,6 +20407,8 @@ function computeCostModel(){
     id: `${row.taskId}_${row.dateISO}_${idx}`,
     taskId: row.taskId,
     sourceEventKey: row.sourceEventKey,
+    settingsTaskId: row.settingsTaskId,
+    settingsArchived: row.settingsArchived,
     costExclusionReason: row.costExclusionReason || '',
     taskName: row.taskName,
     maintenanceHrsLabel: row.costFields?.duration.value === null ? "Unknown" : (formatHoursValue(row.maintenanceHrs) || "0"),
@@ -20561,7 +20549,7 @@ function computeCostModel(){
       const dayRows = maintenanceTrendRows.filter(row => toHistoryDateKey(row.dateISO) === dateISO);
       return {
         date,
-        value: -Math.abs(totalCost),
+        value: totalCost === 0 ? 0 : -Math.abs(totalCost),
         dateISO,
         taskId: dayRows.length === 1 ? String(dayRows[0].taskId || "") : null,
         events: dayRows.map(maintenanceEventTooltip),
@@ -20855,7 +20843,7 @@ function maintenanceEventTooltip(row){
   const available = !row.costIncomplete && typeof parts === "number" && Number.isFinite(parts);
   const money = value=>new Intl.NumberFormat(undefined,{style:"currency",currency:"USD"}).format(value);
   return {datasetLabel:row.taskName || "Maintenance task",valueLabel:row.costEstimated && available ? "· Estimated" : "",
-    detail:available ? `${row.dateISO}\nParts: ${money(parts)}\nLabor: ${row.maintenanceHrs} hr · ${money(row.laborCost)}\nTotal: ${money(row.totalCost)}` : `${row.dateISO}\nCost unavailable`};
+    detail:available ? `${row.dateISO}\nParts: ${money(parts)}\nLabor: ${row.maintenanceHrs} hr · ${money(row.laborCost)}\nTotal: ${money(row.totalCost)}` : `${row.dateISO}\n${row.costExclusionReason?.includes("identity") ? "Review task link" : "Review parts price"}`};
 }
 
 function buildIncompleteMaintenanceMarkers(rows){
@@ -21091,9 +21079,9 @@ function drawCostChart(canvas, model, show){
         datasetLabel: pt.events?.[0]?.datasetLabel || datasetLabel,
         valueLabel,
         tooltipValueLabel: pt.events?.[0]?.valueLabel,
-        detail: pt.events?.length > 1 ? `${detail}\nDay total: ${valueLabel} · 1/${pt.events.length} events · click for next` : detail,
+        detail: pt.events?.length > 1 ? `${detail}\nDay total: ${valueLabel} · ${pt.events.length} events · click to view` : detail,
         rowRef: series.key === "maintenance"
-          ? { type: "maintenance", dateISO: pt.dateISO || ymd(pt.date), taskId: pt.taskId || null }
+          ? (pt.rowRefs?.[0] || { type: "maintenance", dateISO: pt.dateISO || ymd(pt.date), taskId: pt.taskId || null })
           : (series.key === "spend"
             ? { type: "spend", dateISO: pt.dateISO || ymd(pt.date) }
             : { type: "cutting", jobId: pt.jobId || null, dateISO: pt.dateISO || ymd(pt.date) }),

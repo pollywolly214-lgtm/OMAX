@@ -18,7 +18,7 @@ test('02A missing and invalid durations everywhere use derived zero; recorded an
   const {row}=resolve({}, {downtimeHours:0});assert.equal(row.totalCost,170);assert.equal(row.costFields.duration.source,'Configured default');
 });
 test('02A unknown parts remain unknown and cannot contribute a partial monetary total or rate',()=>{
-  const {row}=resolve({}, {price:null});assert.equal(row.costIncomplete,true);assert.equal(row.costFields.parts.value,null);assert.equal(row.costFields.duration.value,.5);
+  const {row}=resolve({}, {price:-1});assert.equal(row.costIncomplete,true);assert.equal(row.costFields.parts.value,null);assert.equal(row.costFields.duration.value,.5);
   const state={totalHistory:[{dateISO:'2026-01-01',hours:100},{dateISO:'2026-01-03',hours:110}]};
   const output=costs.calculate({state,rows:[row],today:'2026-01-03',config:{...costs.DEFAULTS,days:'custom',startDate:'2026-01-01',endDate:'2026-01-03'}});
   assert.equal(output.partsCost,0);assert.equal(output.laborCost,0);assert.equal(output.maintenanceCost,0);assert.equal(output.maintenanceCostPerHour,null);

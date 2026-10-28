@@ -17,9 +17,9 @@ test(`02A supersedes 01F partial glyphs while preserving all histories, identiti
   await load();assert.equal(await p.evaluate(()=>typeof firebase),"undefined");assert.equal((await p.evaluate(()=>saveCloudNow())).saved,true);await load();assert.equal((await p.evaluate(()=>saveCloudNow())).saved,true);await load();
   const seed=async source=>p.evaluate(async source=>{if(!OMAXDevSafe.active||typeof firebase!=="undefined")throw Error("Disposable backend required");const state=(await FB.docRef.get()).data();await FB.docRef.set({...state,...source});},source);
   await seed(productionShape());await load();const patternBefore=await p.evaluate(async()=>(await FB.docRef.get()).data()),pattern=await p.evaluate(()=>computeCostModel());
-  assert.equal(pattern.maintenanceDataTable.length,84);assert.equal(pattern.incompleteMaintenanceMarkers.length,2);
-  assert.equal(pattern.maintenanceCostRows.filter(row=>!row.costIncomplete).length,82);
-  assert.equal(pattern.maintenanceCostRows.filter(row=>row.dateISO<"2026-06-18"&&!row.costIncomplete).length,20);
+  assert.equal(pattern.maintenanceDataTable.length,84);assert.equal(pattern.incompleteMaintenanceMarkers.length,0);
+  assert.equal(pattern.maintenanceCostRows.filter(row=>!row.costIncomplete).length,84);
+  assert.equal(pattern.maintenanceCostRows.filter(row=>row.dateISO<"2026-06-18"&&!row.costIncomplete).length,22);
   assert.equal(pattern.maintenanceSeries[0].dateISO,"2026-01-02");assert.equal(pattern.financialReconciliation.maintenance.knownSubtotal,2530);
   assert.deepEqual(await p.evaluate(async()=>(await FB.docRef.get()).data()),patternBefore);
   await seed(fixture());await load();assert.equal(await p.evaluate(()=>isRecoveryMode()),false);
@@ -28,9 +28,9 @@ test(`02A supersedes 01F partial glyphs while preserving all histories, identiti
   for(const range of ["all","ytd","365d","182d","90d","30d"]){
     await p.selectOption("#costFinancialPeriod",range);const m=await p.evaluate(()=>computeCostModel()),period=m.financialReconciliation.window;
     const eligible=date=>(!period.startISO||date>=period.startISO)&&date<=period.endISO;
-    const unknown=["2026-03-10","2026-05-25"].filter(eligible);
+    const unknown=[];
     assert.deepEqual(m.incompleteMaintenanceMarkers.map(pt=>pt.dateISO).sort(),unknown);
-    const complete=[["2026-01-02",-12],["2026-02-04",-25],["2026-04-15",-35],["2026-05-12",0],["2026-06-18",-90],["2026-10-10",-9],["2026-10-20",-45]].filter(([date])=>eligible(date));
+    const complete=[["2026-01-02",-12],["2026-02-04",-25],["2026-03-10",0],["2026-04-15",-35],["2026-05-12",0],["2026-05-25",-30],["2026-06-18",-90],["2026-10-10",-9],["2026-10-20",-45]].filter(([date])=>eligible(date));
     assert.deepEqual(m.maintenanceSeries.map(pt=>[pt.dateISO,pt.value||0]),complete);
     assert.equal(m.financialReconciliation.maintenance.knownSubtotal,-complete.reduce((sum,[,value])=>sum+value,0));
     const targets=await p.evaluate(()=>document.querySelector("#costChart").__costChartTargets);
@@ -53,7 +53,7 @@ test(`02A supersedes 01F partial glyphs while preserving all histories, identiti
   assert.equal(await p.evaluate(()=>__costdata01fWrites),0);assert.equal(await p.evaluate(()=>JSON.stringify(getCuttingJobImporterState())===__costdata01fBusiness),true);
   assert.deepEqual(await p.evaluate(async()=>(await FB.docRef.get()).data()),baseline);
   await p.evaluate(()=>{location.hash="#/inventory";});await p.waitForFunction(()=>!document.querySelector("#costChart"));await p.evaluate(()=>{location.hash="#/costs";});await p.waitForSelector("#costChart");
-  assert.equal(await p.evaluate(()=>computeCostModel().incompleteMaintenanceMarkers.length),2);
-  await load();assert.equal(await p.evaluate(()=>computeCostModel().incompleteMaintenanceMarkers.length),2);
+  assert.equal(await p.evaluate(()=>computeCostModel().incompleteMaintenanceMarkers.length),0);
+  await load();assert.equal(await p.evaluate(()=>computeCostModel().incompleteMaintenanceMarkers.length),0);
   assert.deepEqual(await p.evaluate(async()=>(await FB.docRef.get()).data()),baseline);assert.deepEqual(errors,[]);
 });
