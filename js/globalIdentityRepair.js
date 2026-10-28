@@ -1,8 +1,9 @@
 (function(root,factory){
-  const api=factory(typeof module==="object"&&module.exports?require("./inventoryIdentityRepair"):root.OMAXInventoryIdentityRepair);
+  const api=factory(typeof module==="object"&&module.exports?require("./inventoryIdentityRepair"):root.OMAXInventoryIdentityRepair,
+    typeof module==="object"&&module.exports?require("./inventoryArchive"):root.OMAXInventoryArchive);
   if(typeof module==="object"&&module.exports)module.exports=api;
   if(root)root.OMAXGlobalIdentityRepair=api;
-})(typeof window==="undefined"?null:window,function(inventoryRepair){
+})(typeof window==="undefined"?null:window,function(inventoryRepair,inventoryArchive){
   "use strict";
   const {key,business,counts}=inventoryRepair,clone=value=>JSON.parse(JSON.stringify(value));
   const taskCollection="maintenanceTasksV2",instanceCollection="maintenanceCalendarInstancesV2",eventCollection="maintenanceOccurrencesV2";
@@ -48,6 +49,15 @@
     };
     for(const name of requiredIds)if(Object.hasOwn(state,name)&&!Array.isArray(state[name]))block(`${name} must be an array.`);
     discover(state);
+    // Historical inventory FKs resolve through the original typed Trash
+    // payload. These identities never enter the active stock array.
+    for(const [index,entry]of (Array.isArray(state.deletedItems)?state.deletedItems:[]).entries()){
+      if(entry?.type!=="inventory")continue;
+      const owner=byPath.get(pathText(["deletedItems",index,"payload"]));
+      if(!inventoryArchive?.validEntry(entry)||!owner){block(`Invalid archived inventory at $.deletedItems[${index}].payload.`);continue;}
+      owner.collection="inventory";owner.archived=true;
+      const items=byNamespace.get("inventory")||[];items.push(owner);byNamespace.set("inventory",items);
+    }
     // A task in existing Trash retains its exact historical identity. Admit
     // only typed, dated, unambiguous archives, never a name or metadata-only ID.
     for(const [index,entry]of (Array.isArray(state.deletedItems)?state.deletedItems:[]).entries()){
@@ -72,6 +82,7 @@
       for(const [id,group]of groups)if(group.length>1){
         const report={collection:ns,id,indexes:group.map(record=>record.path.filter(part=>typeof part==="number")),records:group.map(record=>({collection:record.collection,path:pathText(record.path),evidence:clone(record.row)})),references:[],repairProvable:false,proposedIds:[]};plan.duplicateGroups.push(report);
         group.forEach(record=>record.group=report);
+        if(ns==="inventory"&&group.some(record=>record.archived))block(`Ambiguous active/archived inventory ID ${id}; archive evidence cannot be repaired automatically.`);
         if(!["inventory",taskCollection,instanceCollection,eventCollection].includes(ns))block(`Duplicate ID ${id} in ${ns} requires separate reviewed mapping.`);
       }
     }
@@ -187,7 +198,7 @@
       if(name===instanceCollection&&record.instance)options=options.filter(other=>other===record.instance);
       if(name===eventCollection&&record.instance)options=options.filter(other=>other.instance===record.instance);
       if(options.length!==1){block(`Foreign key ${pathText(path)} has ${options.length} exact logical targets.`);return;}
-      const target=options[0];plan.references.push({path:pathText(path),target:pathText(target.path),value,proposedId:target.proposedId,...(target.archived?{resolution:"archived_task"}:{})});supported.add(pathText(path));patch(path,value,target.proposedId);
+      const target=options[0];plan.references.push({path:pathText(path),target:pathText(target.path),value,proposedId:target.proposedId,...(target.archived?{resolution:target.collection==="inventory"?"archived_inventory":"archived_task"}:{})});supported.add(pathText(path));patch(path,value,target.proposedId);
       if(name===eventCollection&&field==="rootOccurrenceId"&&target.row.rootOccurrenceId)block(`Occurrence root at ${pathText(path)} does not point to a base event.`);
       if(name===eventCollection&&field==="supersedesEventId"&&(!record.row.rootOccurrenceId||(target.row.rootOccurrenceId||target.id)!==record.row.rootOccurrenceId))block(`Supersedes event at ${pathText(path)} belongs to a different root chain.`);
       if(target.group)target.group.references.push(pathText(path));

@@ -11218,6 +11218,8 @@ function renderSettings(){
       const label = parts.length ? `Linked to ${parts.join(" · ")}` : "Linked to inventory item";
       return { label, item: linked };
     }
+    const archived=window.OMAXInventoryArchive?.resolve(window,targetId);
+    if(archived?.status==="archived")return {label:`Deleted inventory: ${archived.item.name||targetId} (history only)`,item:null};
     return { label: "No inventory link", item: null };
   }
 
@@ -11235,6 +11237,8 @@ function renderSettings(){
       })
       .sort((a, b)=> a.localeCompare(b));
     options.unshift(`<option value="" ${target ? "" : "selected"}>No inventory link</option>`);
+    const archived=window.OMAXInventoryArchive?.resolve(window,target);
+    if(archived?.status==="archived")options.unshift(`<option value="${escapeAttr(target)}" selected disabled>Deleted: ${escapeHtml(archived.item.name||target)} (history only)</option>`);
     return options.join("");
   }
 
@@ -11972,7 +11976,8 @@ function renderSettings(){
       return;
     }
 
-    const existingIds = new Set(Array.isArray(inventory) ? inventory.filter(Boolean).map(item => String(item.id)) : []);
+    const existingIds = new Set([...(Array.isArray(inventory) ? inventory.filter(Boolean).map(item => String(item.id)) : []),
+      ...(window.OMAXInventoryArchive?.entries(window)||[]).map(entry=>entry.payload?.id)]);
     let newId = task && task.id ? `inv_${task.id}` : "";
     if (!newId || existingIds.has(newId)){
       do {
@@ -12407,6 +12412,7 @@ function renderSettings(){
 
   function findInventoryMatchesForTask(task){
     if (!task || !Array.isArray(inventory)) return [];
+    if(window.OMAXInventoryArchive?.archivedForTask(window,task))return [];
     const matches = [];
     const seen = new Set();
     const candidateIds = new Set();
@@ -26259,173 +26265,27 @@ function findTasksLinkedToInventoryItem(item){
 
 async function deleteInventoryItem(id, options){
   const opts = options || {};
-  const skipConfirm = opts.skipConfirm === true;
-  const suppressToast = opts.suppressToast === true;
-  const suppressRender = opts.suppressRender === true;
-  const linkedTaskIdOpt = opts.linkedTaskId != null ? String(opts.linkedTaskId) : null;
-  const removeLinkedTasksOpt = opts.removeLinkedTasks === true;
-  const idx = inventory.findIndex(item => item && item.id === id);
-  if (idx < 0){ toast("Inventory item not found."); return false; }
-
-  const item = inventory[idx];
-  const label = item && item.name ? `"${item.name}"` : "this item";
-  const linkedTasks = findTasksLinkedToInventoryItem(item);
-
-  let removeLinkedTasks = removeLinkedTasksOpt;
-  if (!skipConfirm){
-    if (linkedTasks.length){
-      const count = linkedTasks.length;
-      const choice = await showConfirmChoices({
-        title: "Remove inventory item?",
-        message: count === 1
-          ? `Delete ${label}? It's linked to the maintenance task below.`
-          : `Delete ${label}? It's linked to these ${count} maintenance tasks.`,
-        items: linkedTasks.map(task => task && task.name ? task.name : "Unnamed maintenance task"),
-        cancelText: "Cancel",
-        confirmText: "Delete inventory & tasks",
-        confirmVariant: "danger",
-        secondaryText: "Inventory only",
-        secondaryVariant: "secondary"
-      });
-      if (choice === "cancel") return false;
-      removeLinkedTasks = choice === "confirm";
-    }else{
-      const confirmed = await showConfirmModal({
-        title: "Remove inventory item?",
-        message: `Delete ${label}? This will remove it from inventory and maintenance settings.`,
-        cancelText: "Cancel",
-        confirmText: "Delete inventory item",
-        confirmVariant: "danger"
-      });
-      if (!confirmed) return false;
-    }
-  }
-
-  const findTaskMetaLocal = (taskId)=>{
-    const tid = String(taskId);
-    if (Array.isArray(window.tasksInterval)){
-      const intervalIndex = window.tasksInterval.findIndex(t => t && String(t.id) === tid);
-      if (intervalIndex >= 0){
-        return { task: window.tasksInterval[intervalIndex], mode: "interval", index: intervalIndex };
-      }
-    }
-    if (Array.isArray(window.tasksAsReq)){
-      const asReqIndex = window.tasksAsReq.findIndex(t => t && String(t.id) === tid);
-      if (asReqIndex >= 0){
-        return { task: window.tasksAsReq[asReqIndex], mode: "asreq", index: asReqIndex };
-      }
-    }
-    return null;
-  };
-
-  if (removeLinkedTasks && linkedTasks.length){
-    const idsToRemove = Array.from(new Set(linkedTasks
-      .map(task => task && task.id != null ? String(task.id) : null)
-      .filter(Boolean)));
-    if (idsToRemove.length){
-      const metas = idsToRemove
-        .map(taskId => findTaskMetaLocal(taskId))
-        .filter(meta => meta && meta.task);
-      if (metas.length){
-        const idSet = new Set(metas.map(meta => String(meta.task.id)));
-        metas.forEach(meta => {
-          try {
-            if (typeof recordDeletedItem === "function"){
-              const task = meta.task;
-              const deletionMeta = {
-                list: meta.mode,
-                cat: task?.cat ?? null,
-                parentTask: task?.parentTask ?? null,
-                inventoryId: task?.inventoryId ?? null,
-                linkedInventoryId: task?.inventoryId ?? null,
-                inventoryIdOriginal: task?.inventoryId ?? null
-              };
-              recordDeletedItem("task", task, deletionMeta);
-            }
-          } catch (err) {
-            console.warn("Failed to record deleted task", err);
-          }
-        });
-        const clearParentRefs = (list)=>{
-          if (!Array.isArray(list)) return;
-          list.forEach(task => {
-            if (!task) return;
-            const parentId = task.parentTask != null ? String(task.parentTask) : null;
-            if (parentId && idSet.has(parentId)) task.parentTask = null;
-          });
-        };
-        clearParentRefs(window.tasksInterval);
-        clearParentRefs(window.tasksAsReq);
-        if (Array.isArray(window.tasksInterval)){
-          window.tasksInterval = window.tasksInterval.filter(task => {
-            if (!task) return true;
-            const tid = task.id != null ? String(task.id) : "";
-            if (idSet.has(tid)) return false;
-            if (isInstanceTask(task) && task.templateId != null && idSet.has(String(task.templateId))) return false;
-            return true;
-          });
-        }
-        if (Array.isArray(window.tasksAsReq)){
-          window.tasksAsReq = window.tasksAsReq.filter(task => {
-            if (!task) return true;
-            const tid = task.id != null ? String(task.id) : "";
-            if (idSet.has(tid)) return false;
-            if (isInstanceTask(task) && task.templateId != null && idSet.has(String(task.templateId))) return false;
-            return true;
-          });
-        }
-        try {
-          if (typeof saveTasks === "function") saveTasks();
-        } catch (err) {
-          console.warn("Failed to persist tasks after linked task removal", err);
-        }
-      }
-    }
-  }
-
-  try {
-    if (typeof recordDeletedItem === "function"){
-      const deletionMeta = {
-        linkedTaskId: linkedTaskIdOpt || (item && item.linkedTaskId != null ? item.linkedTaskId : null),
-        originalId: item && item.id != null ? item.id : null
-      };
-      recordDeletedItem("inventory", item, deletionMeta);
-    }
-  } catch (err) {
-    console.warn("Failed to record deleted inventory item", err);
-  }
-
-  const itemIdStr = item && item.id != null ? String(item.id) : null;
-  if (itemIdStr){
-    const lists = [window.tasksInterval, window.tasksAsReq];
-    let touched = false;
-    lists.forEach(list => {
-      if (!Array.isArray(list)) return;
-      list.forEach(task => {
-        if (!task) return;
-        if (String(task.inventoryId || "") === itemIdStr){
-          task.inventoryId = null;
-          touched = true;
-        }
-      });
+  const item = inventory.find(entry=>entry && entry.id === id);
+  if (!item){ toast("Inventory item not found."); return false; }
+  if (!opts.skipConfirm){
+    const confirmed = await showConfirmModal({
+      title:"Remove inventory item?",
+      message:'Remove "'+(item.name||"this item")+'" from available stock? Maintenance tasks, schedules, completion history and purchases will be preserved. The original item remains in Deleted History.',
+      cancelText:"Cancel",confirmText:"Delete inventory item",confirmVariant:"danger"
     });
-    if (touched){
-      try { if (typeof saveTasks === "function") saveTasks(); }
-      catch (err) { console.warn("Failed to persist tasks after inventory unlink", err); }
-    }
+    if (!confirmed) return false;
   }
-
-  inventory.splice(idx, 1);
-  window.inventory = inventory;
-  saveCloudDebounced();
-  if (!suppressToast) toast("Inventory item removed");
-
-  if (!suppressRender){
+  const result = await window.inventoryDeletionApi?.remove(id);
+  if (!result?.saved || !result.verified){
+    toast(result?.error || "Inventory deletion is unavailable.");
+    return false;
+  }
+  if (!opts.suppressToast) toast("Inventory item removed");
+  if (!opts.suppressRender){
     const hash = (location.hash || "#").toLowerCase();
-    if (hash === "#/settings" || hash === "#settings"){ renderSettings(); }
-    if (hash === "#/dashboard" || hash === "#dashboard" || hash === "#/" || hash === "#"){ renderDashboard(); }
+    if (hash === "#/settings" || hash === "#settings") renderSettings();
+    if (["#/dashboard","#dashboard","#/","#"].includes(hash)) renderDashboard();
   }
-
   return true;
 }
 
@@ -26765,7 +26625,7 @@ function computeDeletedItemsModel(){
     typeLabel: describeDeletedType(entry.type),
     deletedAt: formatTrashDate(entry.deletedAt),
     deletedAtISO: entry.deletedAt || null,
-    expiresAt: entry.type === "task" ? "Retained for history" : entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
+    expiresAt: ["task","inventory"].includes(entry.type) ? "Retained for history" : entry.expiresAt ? formatTrashDate(entry.expiresAt) : "—",
     expiresAtISO: entry.expiresAt || null
   }));
   const filtered = searchTerm
@@ -26794,8 +26654,8 @@ function renderDeletedItems(options){
   content.innerHTML = viewDeletedItems(model);
 
   content.querySelectorAll("[data-trash-delete]").forEach(btn=>{
-    if(window.deletedItems?.some(entry=>entry.id===btn.getAttribute("data-trash-delete")&&entry.type==="task")){
-      btn.disabled=true;btn.title="Maintenance history cannot be permanently deleted.";
+    if(window.deletedItems?.some(entry=>entry.id===btn.getAttribute("data-trash-delete")&&["task","inventory"].includes(entry.type))){
+      btn.disabled=true;btn.title="Historical identities cannot be permanently deleted.";
     }
   });
   content.querySelectorAll("[data-trash-restore]").forEach(btn=>{

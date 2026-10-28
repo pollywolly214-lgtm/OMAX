@@ -703,6 +703,8 @@ function viewSettings(){
       })
       .sort((a, b)=> a.localeCompare(b));
     options.unshift(`<option value="" ${selectedStr ? "" : "selected"}>No inventory link</option>`);
+    const archived=window.OMAXInventoryArchive?.resolve(window,selectedStr);
+    if(archived?.status==="archived")options.unshift(`<option value="${esc(selectedStr)}" selected disabled>Deleted: ${esc(archived.item.name||selectedStr)} (history only)</option>`);
     return options.join("");
   };
 

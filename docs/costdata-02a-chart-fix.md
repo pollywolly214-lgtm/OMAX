@@ -1,6 +1,7 @@
 # COSTDATA-02A: maintenance estimates and chart interaction
 
-Base: `7edc7ea5e986cb6ffaeb8203ece5755b168b00d3` (latest main, including merged #519).
+Current integrated main: `c28c18869562805ec5ae776d73d0f07b2c9b5efd` (including #529).
+Initial implementation base: `7edc7ea5e986cb6ffaeb8203ece5755b168b00d3` (merged #519).
 Branch: `codex/costdata-02a-chart-fix`. This is a new PR; #519 is unchanged.
 
 ## Findings and calculation precedence
@@ -91,7 +92,7 @@ Synthetic examples exercised in the browser:
   blank list area or saved layout changes are introduced. ResizeObserver and
   existing layout-resize behavior remain in use.
 
-## Regression testing
+## Initial implementation regression testing
 
 There is no package.json or package-script runner in this checkout. Tests use the
 existing Node test runner and Playwright/Edge harness. Commands run from the new
@@ -183,3 +184,34 @@ short saved dashboard layouts and absence of view-triggered writes. Configured
 duration is today's preserved task setting, not proof of historical labor; the
 Estimated designation communicates this limitation. Do not merge until that
 preview review is complete.
+
+
+## Latest main integration — October 28, 2026
+
+Integrated main `c28c18869562805ec5ae776d73d0f07b2c9b5efd`, which adds #529
+(MDEL-01C inventory deletion and archive-aware inventory references). The merge
+was clean: no conflicts or manual application changes were required. The core
+writer, identity validator, inventory archive module, script registration and
+shared maintenance harness match this main revision exactly. The COSTDATA labor
+fallback, chart presentation and styling remain intact. No production state was
+accessed or modified.
+
+Tests were run on the combined worktree before committing the integration:
+
+```powershell
+$integrationTests=@(rg --files tests -g '*.test.js')
+node --test --test-concurrency=4 --test-reporter=tap $integrationTests > artifacts/costdata-02a-main-update-all-unit.tap
+$integrationCritical=@(rg --files tests -g '*.test.js' | Where-Object {$_ -match '[\\/](costdata-|mdel|mhist|rfs|maintenance-|financial-reconciliation|cut-cost-|atomic-persistence|global-identity|inventory-identity|firebase-|recovery-import|purchase-financials)'})
+node --test --test-concurrency=4 --test-reporter=tap $integrationCritical > artifacts/costdata-02a-main-update-critical-unit.tap
+# With the same Playwright runtime environment shown above:
+node --test --test-concurrency=2 --test-reporter=tap tests/costdata-01a.browser.cjs tests/costdata-01b.browser.cjs tests/costdata-01c.browser.cjs tests/costdata-01d.browser.cjs tests/costdata-01f.browser.cjs tests/costdata-01g.browser.cjs tests/costdata-02a.browser.cjs tests/financial-reconciliation.browser.cjs tests/mdel01c-inventory-deletion.browser.cjs tests/mdel01-task-deletion.browser.cjs tests/mdel01c-restoration.browser.cjs tests/maintenance-history-reconciliation.browser.cjs tests/mhist01c-integration.browser.cjs tests/rfs01-save-reliability.browser.cjs tests/rfs02-save-audit.browser.cjs tests/rfs02b-cancellation.browser.cjs > artifacts/costdata-02a-main-update-browser.tap
+```
+
+Results: **573 critical unit/integration/safety tests passed**, **33 browser tests
+passed**, with no failures or skips in either selection. The full unit suite has
+**2,002 passed / 10 failed / 2,012 total**, with exactly the same ten previously
+documented failures listed above. This integration did not rerun unrelated
+POLISHv2 browser scenarios or create a new independent main baseline; the
+previous baseline evidence remains historical. Syntax checks for incoming JS/CJS,
+staged/unstaged whitespace checks and binary policy checks pass. Authenticated
+preview/F12 verification remains outstanding. PR #528 stays draft and unmerged.
