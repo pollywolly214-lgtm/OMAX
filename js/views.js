@@ -2286,8 +2286,6 @@ function viewCosts(model){
           <div class="cost-chart-canvas">
             <canvas id="costChart" width="780" height="240"></canvas>
           </div>
-          ${(data.incompleteMaintenanceMarkers || []).length ? `<div class="small" data-incomplete-maintenance-legend style="color:#92400e;margin-top:8px;">◇ Known parts only (incomplete) · △ Cost unknown (event lane, no dollar value). Markers are excluded from complete totals, averages and forecasts. Hover or tap for details.</div>
-          <details data-incomplete-maintenance-list><summary>Incomplete maintenance events (${data.incompleteMaintenanceMarkers.length})</summary><ul>${data.incompleteMaintenanceMarkers.map(event=>`<li data-incomplete-event-key="${esc(event.sourceEventKey)}">${esc(event.detail)}</li>`).join("")}</ul></details>` : ""}
           <div class="small muted" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;">
             <span style="color:${esc(chartColors.maintenance)};"><strong>Avg maintenance cost/cut hr:</strong> <span data-maint-cost-per-cut-label>${esc(data.maintenanceCostPerCutLabel || "$0")}</span></span>
             <span style="color:${esc(chartColors.spend)};"><strong>Avg total spend/cut hr:</strong> <span data-spend-cost-per-cut-label>${esc(data.totalSpendPerCutLabel || "$0")}</span></span>
@@ -2453,6 +2451,7 @@ function viewCosts(model){
               </div>
               <div class="cost-data-center-panel-content" data-dc-panel="maintenance">
               <p class="small muted" data-cost-history-period>${esc(data.financialReconciliation?.window.description || "All recorded history")}. Event costs retain recorded, estimated/default and incomplete classifications.</p>
+              <p class="small" data-maintenance-chart-selection hidden><span></span> · <button type="button" data-maintenance-chart-show-all>Show all maintenance</button></p>
               <details data-machine-hour-history>
                 <summary>Machine / cut-hour evidence (${(data.machineHourHistory || []).length} readings)</summary>
                 <p class="small muted">Partial coverage: sparse meter deltas span readings; daily hours use existing manual/automatic precedence. Missing days are unknown. Machine hours do not establish job revenue or profit.</p>
@@ -2530,10 +2529,11 @@ function viewCosts(model){
                       <label class="sr-only" for="maintenanceLinkMode_${esc(row.id || "")}">Destination</label>
                       <select id="maintenanceLinkMode_${esc(row.id || "")}" data-maintenance-link-mode>
                         <option value="calendar">Calendar</option>
-                        <option value="settings">Maintenance Settings</option>
+                        <option value="settings" ${row.settingsTaskId ? "" : "disabled"}>Maintenance Settings${row.settingsTaskId ? "" : " (no linked setting)"}</option>
                       </select>
                       <button type="button"
                         data-maintenance-open-task
+                        data-settings-task-id="${esc(row.settingsTaskId || "")}"
                         data-task-id="${esc(row.taskId || "")}"
                         data-date-iso="${esc(row.dateISO || "")}"
                         data-source-system="${esc(String(row.sourceSystem || "legacy"))}"

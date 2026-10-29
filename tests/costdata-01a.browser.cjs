@@ -34,7 +34,7 @@ test(`COSTDATA-01A historical source-to-display reconciliation (${timezoneId})`,
     assert.equal(m.maintenanceDataTable.length,6,JSON.stringify(m.maintenanceDataTable));
     assert.equal(m.purchaseDataTable.length,6);
     assert.equal(m.financialReconciliation.maintenance.knownSubtotal,230);
-    assert.equal(m.financialReconciliation.maintenance.incomplete,1);
+    assert.equal(m.financialReconciliation.maintenance.incomplete,0);
     assert.equal(m.financialReconciliation.purchases.total,131);
     assert.equal(m.financialReconciliation.purchases.incomplete,1);
     assert.equal(m.maintenanceSeries[0].dateISO,"2026-01-15");assert.equal(m.totalSpendSeries[0].dateISO,"2026-01-15");
@@ -45,7 +45,7 @@ test(`COSTDATA-01A historical source-to-display reconciliation (${timezoneId})`,
     assert.equal(m.machineHourHistory.find(row=>row.dateISO==="2026-01-16").usageHours,3);
     assert.equal(m.maintenanceDataTable.filter(row=>row.dateISO==="2026-04-15").length,2,"distinct same-day event IDs survive");
     assert.equal(m.maintenanceDataTable.filter(row=>row.dateISO==="2026-07-15").length,1,"legacy/V2 mirrored completion counts once");
-    assert.equal(m.maintenanceDataTable.find(row=>row.dateISO==="2026-01-20").totalCostLabel,"Incomplete");
+    assert.equal(m.maintenanceDataTable.find(row=>row.dateISO==="2026-01-20").totalCostLabel,"$0.00");
     assert.equal(m.purchaseDataTable.find(row=>row.purchased==="Unknown price").totalLabel,"Incomplete");
     assert.equal(await page.locator('[data-maintenance-date-iso="2026-01-15"][data-maintenance-row]').count(),1);
     assert.equal(await page.locator('[data-spend-row][data-spend-date-iso="2026-01-15"]').count(),1);

@@ -41,7 +41,7 @@ test('configured zero cost and duration are valid nonblocking estimates; occurre
  const config={...api.DEFAULTS,days:'custom',startDate:'2026-07-21',endDate:'2026-10-19'};
  let rows=api.maintenanceRows([row],state),result=api.calculate({state,rows,config,today:'2026-10-19'});assert.equal(result.valid,true);assert.equal(result.maintenanceCost,0);assert.equal(result.dataCompleteness.estimatedEvents,1);
  state.tasksInterval[0].price=100;state.tasksInterval[0].downtimeHours=2;state.tasksInterval[0].manualHistory=[{dateISO:row.dateISO,partsCostSnapshot:0,loggedHours:0}];rows=api.maintenanceRows([row],state);assert.equal(rows[0].totalCost,0);assert.equal(rows[0].costEstimated,false);
- delete state.tasksInterval[0].manualHistory;state.tasksInterval[0].price=null;rows=api.maintenanceRows([row],state);assert.equal(rows[0].costIncomplete,true);assert.equal(api.calculate({state,rows,config,today:'2026-10-19'}).cutCostPerHour,null);
+ delete state.tasksInterval[0].manualHistory;state.tasksInterval[0].price=null;rows=api.maintenanceRows([row],state);assert.equal(rows[0].costIncomplete,false);assert.equal(rows[0].totalCost,60);assert.equal(rows[0].costFields.parts.source,"Blank setting assumed zero");assert.equal(api.calculate({state,rows,config,today:'2026-10-19'}).valid,true);
 });
 test('valid settings fields are considered individually without losing explicit zero',()=>{
  const state={tasksInterval:[{id:'task',price:'',cost:0,calendarPrice:100,downtimeHours:0}]};const rows=api.maintenanceRows([{taskId:'task',dateISO:'2026-10-18'}],state);assert.equal(rows[0].costIncomplete,false);assert.equal(rows[0].totalCost,0);

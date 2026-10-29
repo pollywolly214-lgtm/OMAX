@@ -2,7 +2,7 @@
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),vm=require("node:vm");
 const cancel=require("../js/maintenanceCalendarCancellation"),archive=require("../js/maintenanceTaskArchive"),identity=require("../js/globalIdentityRepair"),costs=require("../js/cutCostFeedback"),financial=require("../js/financialReconciliation");
 const {fixture}=require("./fixtures/costdata-01g.cjs"),{harness}=require("./mdel01-harness.cjs"),{harness:historyHarness}=require("./mhist-harness.cjs");
-const renderers=fs.readFileSync("js/renderers.js","utf8"),start=renderers.indexOf("function buildIncompleteMaintenanceMarkers("),end=renderers.indexOf("function drawCostChart(",start),context=vm.createContext({window:{OMAXFinancialReconciliation:financial},Date});
+const renderers=fs.readFileSync("js/renderers.js","utf8"),start=renderers.indexOf("function maintenanceEventTooltip("),end=renderers.indexOf("function drawCostChart(",start),context=vm.createContext({window:{OMAXFinancialReconciliation:financial},Date});
 vm.runInContext(renderers.slice(start,end),context);
 function financialInputs(state){
   const tasks=[...state.tasksInterval,...state.tasksAsReq,...state.deletedItems.filter(row=>row.type==="task").map(row=>row.payload)];
@@ -17,7 +17,7 @@ function client(options={}){const h=harness({initial:fixture(),...options,window
 const operation={kind:"legacy",taskId:"recorded-parts",scope:"single",dateISO:"2026-01-02"};
 test("01G actual CAS cancellation, archive and exact-ID restore conserve COSTDATA financial inputs and incomplete source identities",async()=>{
   const h=client(),before=h.cloud,inputs=financialInputs(before),api=h.window.maintenanceCalendarCancellationApi;
-  assert.equal(identity.integrity(before).valid,true);assert.equal(inputs.complete.reduce((sum,[,value])=>sum+value,0),135);
+  assert.equal(identity.integrity(before).valid,true);assert.equal(inputs.complete.reduce((sum,[,value])=>sum+value,0),256);
   const result=await api.run(api.review(operation));assert.equal(result.verified,true,result.error);assert.equal(h.window.__recoveryInspectMode,false);
   assert.deepEqual(financialInputs(h.cloud),inputs);assert.deepEqual(h.cloud.tasksInterval[0].manualHistory,before.tasksInterval[0].manualHistory);
   assert.equal(h.cloud.tasksInterval[0].calendarCancellations.length,1);assert.equal(cancel.integrity(h.cloud).valid,true);

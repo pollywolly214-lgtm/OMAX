@@ -29,5 +29,5 @@ function fixture(){
   state.receiptTrackerWeeks.unshift({ key: "2025-W51", year: 2025, week: 51, rows: [{ date: "2025-12-15", purchased: "Earlier purchase", cost: 5, qty: 1 }] });
   return state;
 }
-const expectedByDate = { "2026-01-15": 40, "2026-01-20": 27, "2026-01-26": 0, "2026-02-15": 120, "2026-04-15": 81 };
+const expectedByDate = { "2026-01-15": 40, "2026-01-20": 27, "2026-01-25": 0, "2026-01-26": 0, "2026-02-15": 120, "2026-04-15": 81 };
 module.exports = { fixture, expectedByDate };

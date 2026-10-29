@@ -429,7 +429,8 @@ body.financial-breakdown-open #content{ overflow-x:clip; }
 .cost-chart-toggle-link:focus-visible{ outline:2px solid #0a63c2; outline-offset:2px; border-radius:2px; }
 .cost-chart-toggle-link:active{ color:#0a63c2; }
 .cost-chart-toggle .dot{ display:inline-block; width:12px; height:12px; border-radius:999px; }
-.cost-chart-canvas { position: relative; }
+.cost-chart-canvas { position:relative; isolation:isolate; overflow:hidden; min-width:0; }
+.cost-chart-block > * { flex-shrink:0; }
 .cost-chart-canvas canvas { width: 100%; height: auto; display: block; }
 .chart-info{ position:relative; display:inline-flex; align-items:center; }
 .chart-info-button{ display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:999px; border:1px solid rgba(19, 41, 74, 0.2); background:#f4f7fb; color:#0b2e6b; font-size:14px; line-height:1; cursor:pointer; transition:background 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
@@ -461,22 +462,11 @@ body.financial-breakdown-open #content{ overflow-x:clip; }
   opacity:0;
   transition:opacity 120ms ease, transform 120ms ease;
   z-index:5;
-  white-space:normal;
+  overflow:hidden;
+  overflow-wrap:anywhere;
+  white-space:pre-line;
 }
-.cost-chart-tooltip[data-placement="above"]{
-  transform:translateY(-110%);
-}
-.cost-chart-tooltip[data-placement="above"][data-visible="true"]{
-  opacity:1;
-  transform:translateY(-120%);
-}
-.cost-chart-tooltip[data-placement="below"]{
-  transform:translateY(10%);
-}
-.cost-chart-tooltip[data-placement="below"][data-visible="true"]{
-  opacity:1;
-  transform:translateY(0%);
-}
+.cost-chart-tooltip[data-visible="true"]{ opacity:1; }
 .cost-chart-tooltip[hidden]{
   display:none;
   opacity:0;
@@ -490,23 +480,6 @@ body.financial-breakdown-open #content{ overflow-x:clip; }
 .cost-chart-tooltip span{
   display:block;
   color:#e5e7eb;
-}
-.cost-chart-tooltip::after{
-  content:"";
-  position:absolute;
-  left:50%;
-  transform:translateX(-50%);
-  border-style:solid;
-}
-.cost-chart-tooltip[data-placement="above"]::after{
-  bottom:-6px;
-  border-width:6px 6px 0 6px;
-  border-color:#111827 transparent transparent transparent;
-}
-.cost-chart-tooltip[data-placement="below"]::after{
-  top:-6px;
-  border-width:0 6px 6px 6px;
-  border-color:transparent transparent #111827 transparent;
 }
 
 .forecast-modal{ position:fixed; inset:0; z-index:1400; display:flex; align-items:center; justify-content:center; padding:32px 20px; }

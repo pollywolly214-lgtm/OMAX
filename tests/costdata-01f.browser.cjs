@@ -2,7 +2,7 @@
 const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs/promises"),path=require("node:path"),http=require("node:http");
 const {chromium}=require(process.env.OMAX_PLAYWRIGHT_PATH||"playwright"),{fixture,productionShape}=require("./fixtures/costdata-01f.cjs");
 for(const timezoneId of ["America/Chicago","Pacific/Kiritimati"])
-test(`01F incomplete history markers preserve complete costs, identities and state (${timezoneId})`,{timeout:90000},async t=>{
+test(`02A supersedes 01F partial glyphs while preserving all histories, identities and state (${timezoneId})`,{timeout:90000},async t=>{
   const root=path.resolve(__dirname,".."),server=http.createServer(async(req,res)=>{
     const pathname=new URL(req.url,"http://localhost").pathname,file=path.resolve(root,"."+pathname+(pathname.endsWith("/")?"index.html":""));
     if(!file.startsWith(root+path.sep)||pathname.split("/").some(part=>part.startsWith("."))){res.writeHead(403).end();return;}
@@ -17,56 +17,43 @@ test(`01F incomplete history markers preserve complete costs, identities and sta
   await load();assert.equal(await p.evaluate(()=>typeof firebase),"undefined");assert.equal((await p.evaluate(()=>saveCloudNow())).saved,true);await load();assert.equal((await p.evaluate(()=>saveCloudNow())).saved,true);await load();
   const seed=async source=>p.evaluate(async source=>{if(!OMAXDevSafe.active||typeof firebase!=="undefined")throw Error("Disposable backend required");const state=(await FB.docRef.get()).data();await FB.docRef.set({...state,...source});},source);
   await seed(productionShape());await load();const patternBefore=await p.evaluate(async()=>(await FB.docRef.get()).data()),pattern=await p.evaluate(()=>computeCostModel());
-  assert.equal(pattern.maintenanceDataTable.length,84);assert.equal(pattern.incompleteMaintenanceMarkers.length,34);assert.equal(pattern.maintenanceCostRows.filter(row=>!row.costIncomplete).length,50);
-  assert.equal(pattern.incompleteMaintenanceMarkers.filter(pt=>pt.dateISO<"2026-06-18").length,22);assert.equal(pattern.incompleteMaintenanceMarkers.filter(pt=>pt.dateISO<"2026-06-18"&&pt.knownParts!==null&&pt.knownDuration===null).length,20);
-  assert.equal(pattern.incompleteMaintenanceMarkers.filter(pt=>pt.knownParts===null&&pt.knownDuration===null).length,2);assert.equal(pattern.incompleteMaintenanceMarkers[0].dateISO,"2026-01-02");
-  assert.equal(pattern.maintenanceSeries[0].dateISO,"2026-06-18");assert.equal(pattern.financialReconciliation.maintenance.knownSubtotal,2000);assert.deepEqual(await p.evaluate(async()=>(await FB.docRef.get()).data()),patternBefore);
-  await seed(fixture());await load();
-  assert.equal(await p.evaluate(()=>isRecoveryMode()),false);const baseline=await p.evaluate(async()=>(await FB.docRef.get()).data());
-  await p.evaluate(()=>{window.__costdata01fWrites=0;window.__costdata01fBusiness=JSON.stringify(getCuttingJobImporterState());for(const name of ["saveCloudNow","saveCloudDebounced","markLocalMutation","persistLocalStateBackup"])window[name]=()=>{window.__costdata01fWrites++;throw Error("Marker display must not save: "+name);};});
+  assert.equal(pattern.maintenanceDataTable.length,84);assert.equal(pattern.incompleteMaintenanceMarkers.length,0);
+  assert.equal(pattern.maintenanceCostRows.filter(row=>!row.costIncomplete).length,84);
+  assert.equal(pattern.maintenanceCostRows.filter(row=>row.dateISO<"2026-06-18"&&!row.costIncomplete).length,22);
+  assert.equal(pattern.maintenanceSeries[0].dateISO,"2026-01-02");assert.equal(pattern.financialReconciliation.maintenance.knownSubtotal,2530);
+  assert.deepEqual(await p.evaluate(async()=>(await FB.docRef.get()).data()),patternBefore);
+  await seed(fixture());await load();assert.equal(await p.evaluate(()=>isRecoveryMode()),false);
+  const baseline=await p.evaluate(async()=>(await FB.docRef.get()).data());
+  await p.evaluate(()=>{window.__costdata01fWrites=0;window.__costdata01fBusiness=JSON.stringify(getCuttingJobImporterState());for(const name of ["saveCloudNow","saveCloudDebounced","markLocalMutation","persistLocalStateBackup"])window[name]=()=>{window.__costdata01fWrites++;throw Error("Chart display must not save: "+name);};});
   for(const range of ["all","ytd","365d","182d","90d","30d"]){
     await p.selectOption("#costFinancialPeriod",range);const m=await p.evaluate(()=>computeCostModel()),period=m.financialReconciliation.window;
     const eligible=date=>(!period.startISO||date>=period.startISO)&&date<=period.endISO;
-    const expectedDates=["2026-01-02","2026-02-04","2026-03-10","2026-04-15","2026-04-15","2026-04-15","2026-05-12","2026-05-25","2026-10-10"].filter(eligible);
-    assert.deepEqual(m.incompleteMaintenanceMarkers.map(pt=>pt.dateISO).sort(),expectedDates);
-    assert.equal(new Set(m.incompleteMaintenanceMarkers.map(pt=>pt.sourceEventKey)).size,expectedDates.length);
-    const complete=[["2026-06-18",-90],["2026-10-20",-45]].filter(([date])=>eligible(date));assert.deepEqual(m.maintenanceSeries.map(pt=>[pt.dateISO,pt.value]),complete);
+    const unknown=[];
+    assert.deepEqual(m.incompleteMaintenanceMarkers.map(pt=>pt.dateISO).sort(),unknown);
+    const complete=[["2026-01-02",-12],["2026-02-04",-25],["2026-03-10",0],["2026-04-15",-35],["2026-05-12",0],["2026-05-25",-30],["2026-06-18",-90],["2026-10-10",-9],["2026-10-20",-45]].filter(([date])=>eligible(date));
+    assert.deepEqual(m.maintenanceSeries.map(pt=>[pt.dateISO,pt.value||0]),complete);
     assert.equal(m.financialReconciliation.maintenance.knownSubtotal,-complete.reduce((sum,[,value])=>sum+value,0));
-    const targets=await p.evaluate(()=>document.querySelector("#costChart").__costChartTargets),incomplete=targets.filter(pt=>pt.key==="maintenanceIncomplete");
-    assert.equal(incomplete.flatMap(pt=>pt.rowRefs).length,expectedDates.length);
-    assert.ok(incomplete.every(pt=>pt.fullCost===null));assert.equal(targets.filter(pt=>pt.key==="maintenance").length,complete.length);
-    assert.equal(await p.locator("[data-incomplete-event-key]").count(),expectedDates.length);
+    const targets=await p.evaluate(()=>document.querySelector("#costChart").__costChartTargets);
+    assert.equal(targets.filter(pt=>pt.key==="maintenanceIncomplete").flatMap(pt=>pt.rowRefs).length,unknown.length);
+    assert.ok(targets.filter(pt=>pt.key==="maintenanceIncomplete").every(pt=>pt.fullCost===null&&pt.knownParts===null));
+    assert.equal(targets.filter(pt=>pt.key==="maintenance").length,complete.length);
     if(range==="all"){
-      assert.equal(m.incompleteMaintenanceMarkers[0].dateISO,"2026-01-02");assert.equal(m.maintenanceSeries[0].dateISO,"2026-06-18");
-      assert.equal(incomplete.find(pt=>pt.knownParts===8).rowRefs.length,2);assert.equal(incomplete.filter(pt=>pt.eventLane).length,2);
-      assert.ok(incomplete.filter(pt=>pt.eventLane).every(pt=>!pt.valueLabel.includes("$0")));
-      assert.match(m.incompleteMaintenanceMarkers.find(pt=>pt.knownParts===25).detail,/configured estimate/);
-      assert.match(m.incompleteMaintenanceMarkers.find(pt=>pt.dateISO==="2026-01-02").detail,/recorded occurrence input.*Missing labor duration/);
-      assert.ok(m.maintenanceCostReconciliation.some(row=>row.dateISO==="2026-01-02"&&row.incompleteMarkerIncluded&&!row.chartIncluded&&row.totalCost===null));
+      assert.equal(targets.find(pt=>pt.key==="maintenance"&&pt.rowRef.dateISO==="2026-04-15").rowRefs.length,3);
+      assert.ok(m.maintenanceCostReconciliation.some(row=>row.dateISO==="2026-01-02"&&row.chartIncluded&&row.totalCost===12));
     }
+    assert.equal(await p.locator("[data-incomplete-maintenance-list],[data-incomplete-maintenance-legend]").count(),0);
   }
   await p.selectOption("#costFinancialPeriod","all");
   const unchanged=await p.evaluate(()=>{
-    const snapshot=m=>({cards:m.summaryCards,totals:m.financialReconciliation.totals,maintenance:m.financialReconciliation.maintenance,forecast:m.financialReconciliation.forecast,
-      maintenanceSeries:m.maintenanceSeries,purchases:m.totalSpendSeries,jobs:m.jobSeries,feedback:m.cutCostFeedback,average:m.maintenanceAverageValue});
+    const snapshot=m=>({cards:m.summaryCards,totals:m.financialReconciliation.totals,maintenance:m.financialReconciliation.maintenance,forecast:m.financialReconciliation.forecast,series:m.maintenanceSeries,feedback:m.cutCostFeedback});
     const withMarkers=snapshot(computeCostModel()),build=buildIncompleteMaintenanceMarkers;let withoutMarkers;
     try{buildIncompleteMaintenanceMarkers=()=>[];withoutMarkers=snapshot(computeCostModel());}finally{buildIncompleteMaintenanceMarkers=build;}
     return JSON.stringify(withMarkers)===JSON.stringify(withoutMarkers);
-  });assert.equal(unchanged,true,"marker projection cannot affect calculations");
-  const canvas=p.locator("#costChart");await canvas.scrollIntoViewIfNeeded();
-  const hover=async predicate=>{const targets=await p.evaluate(()=>document.querySelector("#costChart").__costChartTargets),target=targets.find(predicate),box=await canvas.boundingBox(),size=await canvas.evaluate(el=>({width:el.width,height:el.height}));assert.ok(target);
-    await p.mouse.move(box.x+(target.rect.x+target.rect.width/2)*box.width/size.width,box.y+(target.rect.y+target.rect.height/2)*box.height/size.height);return p.locator(".cost-chart-tooltip[data-visible='true']");};
-  let tip=await hover(pt=>pt.key==="maintenanceIncomplete"&&pt.knownParts===12);assert.match(await tip.innerText(),/Synthetic recorded-parts.*2026-01-02.*Known parts \$12.00.*Missing labor duration/s);
-  tip=await hover(pt=>pt.key==="maintenanceIncomplete"&&pt.rowRef.dateISO==="2026-03-10");assert.match(await tip.innerText(),/Cost unknown.*Parts price unknown.*Missing labor duration/s);assert.doesNotMatch(await tip.innerText(),/\$0\.00/);
-  await p.locator("#toggleCostMaintenance").uncheck();assert.equal(await p.evaluate(()=>document.querySelector("#costChart").__costChartTargets.some(pt=>pt.key.startsWith("maintenance"))),false);await p.locator("#toggleCostMaintenance").check();
-  await p.locator("[data-incomplete-maintenance-list] > summary").click();assert.equal(await p.locator("[data-incomplete-maintenance-list] li").count(),9);
-  await p.setViewportSize({width:390,height:844});await canvas.scrollIntoViewIfNeeded();tip=await hover(pt=>pt.key==="maintenanceIncomplete"&&pt.knownParts===12);assert.match(await tip.innerText(),/Known parts \$12.00/);
-  assert.equal(await p.evaluate(()=>document.querySelector(".cost-chart-canvas").scrollWidth<=document.querySelector(".cost-chart-canvas").clientWidth),true);
-  assert.equal(await p.evaluate(()=>document.querySelector(".cost-chart-header").scrollWidth<=document.querySelector(".cost-chart-header").clientWidth),true);
-  await p.waitForFunction(()=>getComputedStyle(document.querySelector(".cost-chart-tooltip")).opacity==="1");
-  const tipBounds=await tip.boundingBox();assert.ok(tipBounds.x>=0&&tipBounds.x+tipBounds.width<=390);
-  if(process.env.OMAX_COSTDATA_SCREENSHOT_DIR){await fs.mkdir(process.env.OMAX_COSTDATA_SCREENSHOT_DIR,{recursive:true});await p.screenshot({path:path.join(process.env.OMAX_COSTDATA_SCREENSHOT_DIR,`incomplete-${timezoneId.replaceAll("/","_")}.png`)});}
-  assert.equal(await p.evaluate(()=>__costdata01fWrites),0);assert.equal(await p.evaluate(()=>JSON.stringify(getCuttingJobImporterState())===__costdata01fBusiness),true);assert.deepEqual(await p.evaluate(async()=>(await FB.docRef.get()).data()),baseline);
-  await p.evaluate(()=>{location.hash="#/inventory";});await p.waitForFunction(()=>!document.querySelector("#costChart"));await p.evaluate(()=>{location.hash="#/costs";});await p.waitForSelector("#costChart");assert.equal(await p.evaluate(()=>computeCostModel().incompleteMaintenanceMarkers.length),9);
-  await load();assert.equal(await p.evaluate(()=>computeCostModel().incompleteMaintenanceMarkers.length),9);assert.deepEqual(await p.evaluate(async()=>(await FB.docRef.get()).data()),baseline);assert.deepEqual(errors,[]);
+  });assert.equal(unchanged,true,"unknown-price indicators cannot affect financial calculations");
+  assert.equal(await p.evaluate(()=>__costdata01fWrites),0);assert.equal(await p.evaluate(()=>JSON.stringify(getCuttingJobImporterState())===__costdata01fBusiness),true);
+  assert.deepEqual(await p.evaluate(async()=>(await FB.docRef.get()).data()),baseline);
+  await p.evaluate(()=>{location.hash="#/inventory";});await p.waitForFunction(()=>!document.querySelector("#costChart"));await p.evaluate(()=>{location.hash="#/costs";});await p.waitForSelector("#costChart");
+  assert.equal(await p.evaluate(()=>computeCostModel().incompleteMaintenanceMarkers.length),0);
+  await load();assert.equal(await p.evaluate(()=>computeCostModel().incompleteMaintenanceMarkers.length),0);
+  assert.deepEqual(await p.evaluate(async()=>(await FB.docRef.get()).data()),baseline);assert.deepEqual(errors,[]);
 });

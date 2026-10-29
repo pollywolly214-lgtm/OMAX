@@ -15,12 +15,12 @@ test("01G integrated period-independent History and verified cancellation/archiv
   await load();assert.equal((await p.evaluate(()=>saveCloudNow())).verified,true);await load();assert.equal((await p.evaluate(()=>saveCloudNow())).verified,true);await load();
   await p.evaluate(async source=>{if(!OMAXDevSafe.active||typeof firebase!=="undefined")throw Error("Disposable backend required");await FB.docRef.set({...window.__lastLoadedCloudState,...source,syncMeta:window.__lastLoadedCloudState.syncMeta});},fixture());await load();
   const cloud=()=>p.evaluate(async()=>(await FB.docRef.get()).data());const before=await cloud();
-  const snapshot=()=>p.evaluate(()=>{const m=computeCostModel();return {series:m.maintenanceSeries,markers:m.incompleteMaintenanceMarkers.map(row=>[row.sourceEventKey,row.dateISO,row.knownParts,row.knownDuration,row.fullCost]),
+  const snapshot=()=>p.evaluate(()=>{const m=computeCostModel();return {series:m.maintenanceSeries.map(({events,...row})=>row),markers:m.incompleteMaintenanceMarkers.map(row=>[row.sourceEventKey,row.dateISO,row.knownParts,row.knownDuration,row.fullCost]),
     maintenance:m.financialReconciliation.maintenance,totals:m.financialReconciliation.totals,purchases:m.totalSpendSeries,jobs:m.jobSeries,forecast:m.financialReconciliation.forecast,
     layout:window.cloudCostLayout,config:window.appConfig.cutCostFeedback};});
-  const baseline=await snapshot();assert.equal(baseline.maintenance.knownSubtotal,135);assert.equal(baseline.markers.length,9);
+  const baseline=await snapshot();assert.equal(baseline.maintenance.knownSubtotal,246);assert.equal(baseline.markers.length,0);
   await p.evaluate(()=>{window.__costdata01gWrites=0;window.__costdata01gFunctions={};for(const name of ["saveCloudNow","saveCloudDebounced","markLocalMutation","persistLocalStateBackup"]){window.__costdata01gFunctions[name]=window[name];window[name]=()=>{window.__costdata01gWrites++;throw Error("Display must not save: "+name);};}});
-  await p.selectOption("#costFinancialPeriod","30d");assert.equal(await p.evaluate(()=>computeCostModel().incompleteMaintenanceMarkers.length),1);
+  await p.selectOption("#costFinancialPeriod","30d");assert.equal(await p.evaluate(()=>computeCostModel().incompleteMaintenanceMarkers.length),0);
   await p.evaluate(()=>{location.hash="#/settings";});await p.locator('details.task[data-task-id="recorded-parts"]').evaluate(node=>{for(let parent=node;parent;parent=parent.parentElement)if(parent.tagName==="DETAILS")parent.open=true;});
   await p.locator('[data-task-history="recorded-parts"]').click();const modal=p.locator('[data-maintenance-history="recorded-parts"]');
   assert.match(await modal.innerText(),/2026-01-02/);await modal.locator("[data-close]").click();assert.deepEqual(await cloud(),before);
@@ -39,5 +39,5 @@ test("01G integrated period-independent History and verified cancellation/archiv
   assert.equal(await p.evaluate(()=>isRecoveryMode()),false);await load();assert.deepEqual(await snapshot(),baseline);
   const final=await cloud();assert.deepEqual(final.inventory,before.inventory);assert.deepEqual(final.maintenanceOccurrencesV2,before.maintenanceOccurrencesV2);assert.deepEqual(final.receiptTrackerWeeks,before.receiptTrackerWeeks);
   assert.deepEqual(final.completedCuttingJobs,before.completedCuttingJobs);assert.deepEqual(final.appConfig,before.appConfig);
-  assert.match(await p.locator('[data-card-key="cuttingJobs"]').innerText(),/Modeled Cutting Job Contribution/);assert.equal(await p.locator("[data-incomplete-event-key]").count(),9);assert.deepEqual(errors,[]);
+  assert.match(await p.locator('[data-card-key="cuttingJobs"]').innerText(),/Modeled Cutting Job Contribution/);assert.equal(await p.locator("[data-incomplete-event-key]").count(),0);assert.deepEqual(errors,[]);
 });

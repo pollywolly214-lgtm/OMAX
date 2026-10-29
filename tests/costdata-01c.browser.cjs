@@ -39,15 +39,15 @@ for (const timezoneId of ["America/Chicago", "Pacific/Kiritimati"]) test(`COSTDA
     assert.equal(purchaseTotal, model.financialReconciliation.purchases.total);
     if (range === "all"){
       assert.equal(model.maintenanceSeries[0].dateISO, "2026-01-15"); assert.equal(model.totalSpendSeries[0].dateISO, "2025-12-15"); assert.equal(purchaseTotal, 136);
-      assert.equal(model.maintenanceDataTable.length, 9); assert.equal(model.financialReconciliation.maintenance.incomplete, 1);
+      assert.equal(model.maintenanceDataTable.length, 9); assert.equal(model.financialReconciliation.maintenance.incomplete, 0);
       assert.equal(model.maintenanceCostRows.filter(row => row.dateISO === "2026-02-15").length, 2);
       assert.equal(model.maintenanceCostRows.filter(row => row.dateISO === "2026-04-15").length, 3);
       assert.equal(model.maintenanceCostRows.find(row => row.historySourceTaskId === "old-instance").totalCost, 27);
       const unknown = model.maintenanceDataTable.find(row => row.taskId === "unknown"), zero = model.maintenanceDataTable.find(row => row.taskId === "zero");
-      assert.equal(unknown.totalCostLabel, "Incomplete"); assert.match(unknown.costExclusionReason, /Missing parts price and labor duration/); assert.equal(zero.costIncomplete, false);
-      assert.match(await page.locator('[data-maintenance-row][data-task-id="unknown"]').innerText(), /Incomplete: Missing parts price and labor duration/);
+      assert.equal(unknown.totalCostLabel, "$0.00"); assert.equal(unknown.costExclusionReason, ""); assert.equal(zero.costIncomplete, false);
+      assert.match(await page.locator('[data-maintenance-row][data-task-id="unknown"]').innerText(), /Estimated\/default inputs/);
       const report = await page.evaluate(() => document.querySelector("#costChart").__maintenanceCostReconciliation);
-      assert.ok(report.some(row => row.historySourceTaskId === "unknown" && row.centralTableIncluded && !row.chartIncluded && row.totalCost === null));
+      assert.ok(report.some(row => row.historySourceTaskId === "unknown" && row.centralTableIncluded && row.chartIncluded && row.totalCost === 0));
       assert.ok(report.some(row => row.historySourceTaskId === "zero" && row.chartIncluded && row.totalCost === 0));
       assert.ok(report.some(row => row.historySourceTaskId === "apr" && !row.normalizationIncluded && /Mirrored/.test(row.exclusionReason)));
       assert.ok(report.some(row => row.historySourceTaskId === "scheduled" && !row.centralTableIncluded && /eligible completion/.test(row.exclusionReason)));

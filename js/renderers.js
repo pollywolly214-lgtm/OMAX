@@ -11327,7 +11327,7 @@ function renderSettings(){
             <label data-field="storeLink">Store link<input type="url" data-k="storeLink" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.storeLink||"")}" placeholder="https://..."></label>
             <label data-field="pn">Part #<input data-k="pn" data-id="${t.id}" data-list="${type}" value="${escapeHtml(t.pn||"")}" placeholder="Part number"></label>
             <label data-field="price">Price ($)<input type="number" step="0.01" min="0" data-k="price" data-id="${t.id}" data-list="${type}" value="${t.price!=null?t.price:""}" placeholder="optional"></label>
-            <label data-field="downtimeHours">Time to complete (hrs)<input type="number" step="0.25" min="0.25" data-k="downtimeHours" data-id="${t.id}" data-list="${type}" value="${t.downtimeHours!=null?t.downtimeHours:1}" placeholder="e.g. 1"></label>
+            <label data-field="downtimeHours">Time to complete (hrs)<input type="number" step="0.25" min="0" data-k="downtimeHours" data-id="${t.id}" data-list="${type}" value="${t.downtimeHours!=null?t.downtimeHours:""}" placeholder="e.g. 1"></label>
             <label class="task-note" data-field="note">Note<textarea data-k="note" data-id="${t.id}" data-list="${type}" rows="2" placeholder="Optional note">${escapeHtml(t.note||"")}</textarea></label>
           </div>
           <div class="inventory-link-row" data-inventory-link-row="${t.id}">
@@ -12615,7 +12615,7 @@ function renderSettings(){
       if (value == null){
         meta.task.downtimeHours = null;
       }else{
-        const normalized = Math.max(0.25, Math.round(Number(value) * 100) / 100);
+        const normalized = Math.max(0, Math.round(Number(value) * 100) / 100);
         meta.task.downtimeHours = normalized;
         target.value = String(normalized);
       }
@@ -13197,10 +13197,11 @@ function resizeCostChartCanvas(canvas){
   if (!parent) return;
   const rect = parent.getBoundingClientRect();
   const fallbackWidth = canvas.width || 720;
-  const rawWidth = rect.width || parent.clientWidth || fallbackWidth;
-  const width = Math.max(360, Math.round(rawWidth || fallbackWidth));
+  const rawWidth = parent.clientWidth || rect.width || fallbackWidth;
+  const width = Math.max(180, Math.round(rawWidth || fallbackWidth));
   const ratio = 240 / 780; // original aspect ratio ~0.3077
-  const minHeight = 220;
+  // At narrow/zoomed widths a readable short tooltip needs more vertical room.
+  const minHeight = rawWidth < 240 ? 520 : 220;
   const height = Math.max(minHeight, Math.round(width * ratio));
   if (canvas.width !== width) canvas.width = width;
   if (canvas.height !== height) canvas.height = height;
@@ -13898,27 +13899,14 @@ function renderCosts(){
       }
       if (sourceSystem === "v2" && rootOccurrenceId){
         const v2Sel = `[data-source-system="v2"][data-v2-root-occurrence-id="${String(rootOccurrenceId)}"]`;
-        const v2AltSel = instanceId ? `[data-source-system="v2"][data-v2-instance-id="${String(instanceId)}"]` : "";
-        const v2Chip = cell.querySelector(v2Sel) || (v2AltSel ? cell.querySelector(v2AltSel) : null);
+        const v2Chip = cell.querySelector(v2Sel);
         if (v2Chip instanceof HTMLElement){
           v2Chip.click();
           return true;
         }
         if (typeof toast === "function") toast("This V2 completed record is not visible on the calendar.");
-        const orphanCtx = {
-          sourceSystem: "v2",
-          taskId: String(taskId || ""),
-          instanceId,
-          rootOccurrenceId,
-          displayDateISO: dueISO,
-          dateISO: dueISO,
-          originalDateISO: String(options.originalDateISO || dueISO || ""),
-          taskName: String(options.taskName || "")
-        };
-        if (window.DEBUG_MODE) console.debug("[maintenance-v2-orphan-row-detected]", orphanCtx);
-        if (typeof window.repairV2OrphanCompletedRow === "function"){
-          window.repairV2OrphanCompletedRow(orphanCtx);
-        }
+        // Navigation is read-only. A missing chip must never launch an
+        // occurrence-removal repair or fall back to a different root.
         return false;
       }
       const anchor = taskId ? (cell.querySelector(`[data-cal-task="${String(taskId)}"]`) || cell) : cell;
@@ -14140,25 +14128,24 @@ function renderCosts(){
         }
         row = panelRoot.querySelector("[data-spend-row]");
       }else{
-        const taskId = String(payload.taskId || "");
-        const dateISO = String(payload.dateISO || "");
-        if (dateISO){
-          const selector = taskId
-            ? `[data-maintenance-row][data-task-id="${escapeForSelector(taskId)}"][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`
-            : `[data-maintenance-row][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`;
-          const matchingRows = Array.from(panelRoot.querySelectorAll(selector))
-            .filter(item => item instanceof HTMLElement);
-          if (matchingRows.length){
-            matchingRows[0].scrollIntoView({ behavior: "smooth", block: "center" });
-            matchingRows.forEach((item, idx) => {
-              setTimeout(()=> pulseRow(item), idx * 90);
-            });
-            return true;
-          }
-        }
-        row = (taskId && dateISO && panelRoot.querySelector(`[data-maintenance-row][data-task-id="${escapeForSelector(taskId)}"][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`))
-          || (dateISO && panelRoot.querySelector(`[data-maintenance-row][data-maintenance-date-iso="${escapeForSelector(dateISO)}"]`))
-          || panelRoot.querySelector("[data-maintenance-row]");
+        resetMaintenanceFilters();
+        const refs=Array.isArray(payload.rowRefs)&&payload.rowRefs.length?payload.rowRefs:[payload];
+        const candidates=Array.from(panelRoot.querySelectorAll("[data-maintenance-row]"));
+        const matchingRows=candidates.filter(item=>refs.some(ref=>{
+          if(ref.sourceEventKey)return item.dataset.sourceEventKey===String(ref.sourceEventKey);
+          if(ref.rootOccurrenceId)return item.dataset.v2RootOccurrenceId===String(ref.rootOccurrenceId)&&(!ref.instanceId||item.dataset.v2InstanceId===String(ref.instanceId));
+          return ref.taskId&&ref.dateISO&&item.dataset.taskId===String(ref.taskId)&&item.dataset.maintenanceDateIso===String(ref.dateISO);
+        }));
+        const selection=panelRoot.querySelector("[data-maintenance-chart-selection]");
+        if(selection){selection.hidden=false;selection.querySelector("span").textContent=matchingRows.length?`${matchingRows.length} chart event${matchingRows.length===1?"":"s"}`:"Selected event is unavailable in this period. Review task links.";}
+        candidates.forEach(item=>{item.hidden=!matchingRows.includes(item);});
+        if(!matchingRows.length)return false;
+        matchingRows[0].scrollIntoView({behavior:"smooth",block:"center"});
+        matchingRows.forEach(item=>{
+          item.setAttribute("data-maintenance-row-link-highlight","1");
+          setTimeout(()=>item.removeAttribute("data-maintenance-row-link-highlight"),2400);
+        });
+        return true;
       }
       if (!(row instanceof HTMLElement)) return false;
       pulseRow(row);
@@ -14248,6 +14235,8 @@ function renderCosts(){
     };
     const applySearchFilter = ()=>{
       if (!(modal instanceof HTMLElement)) return;
+      const selection=modal.querySelector("[data-maintenance-chart-selection]");
+      if(selection)selection.hidden=true;
       const term = String(searchInput instanceof HTMLInputElement ? searchInput.value : "").trim().toLowerCase();
       const categoryValue = String(categoryFilter instanceof HTMLSelectElement ? categoryFilter.value : "").trim();
       const taskValue = String(taskFilter instanceof HTMLSelectElement ? taskFilter.value : "").trim().toLowerCase();
@@ -14285,6 +14274,7 @@ function renderCosts(){
       applySearchFilter();
       renderSuggestions();
     };
+    modal.querySelector("[data-maintenance-chart-show-all]")?.addEventListener("click",resetMaintenanceFilters);
     if (v2SafetyBtn instanceof HTMLElement){
       v2SafetyBtn.addEventListener("click", ()=>{
         if (typeof window.runMaintenanceV2SafetyChecks !== "function") return;
@@ -14487,13 +14477,22 @@ function renderCosts(){
         const taskName = String(btn.getAttribute("data-task-name") || "");
         if (destination === "settings"){
           closeDataCenter();
-          if (taskId){
-            window.pendingMaintenanceFocus = { taskIds: [taskId] };
+          const settingsTaskId=String(btn.getAttribute("data-settings-task-id")||"");
+          const resolved=window.OMAXMaintenanceTaskArchive?.resolve(window,settingsTaskId);
+          if(resolved?.status==="archived"){
+            openMaintenanceTaskHistory(resolved.task);
+            toast("Archived task: review History; use Deleted History to restore before editing Settings.");
+            return;
           }
-          location.hash = "#/settings";
+          if(resolved?.status!=="active"){toast("Review this task link before editing Maintenance Settings.");return;}
+          window.pendingMaintenanceFocus = { taskIds: [settingsTaskId] };
+          location.hash = `#/settings?taskId=${encodeURIComponent(settingsTaskId)}`;
           return;
         }
         closeDataCenter();
+        const settingsTaskId=String(btn.getAttribute("data-settings-task-id")||"");
+        const archived=window.OMAXMaintenanceTaskArchive?.resolve(window,settingsTaskId);
+        if(archived?.status==="archived"){openMaintenanceTaskHistory(archived.task);return;}
         focusCalendarAtOccurrence(taskId, dateISO, { sourceSystem, rootOccurrenceId, instanceId, displayDateISO, originalDateISO, taskName });
       });
     });
@@ -17190,7 +17189,7 @@ const appendEmptyRow = (focusFirst = false)=>{
   const showTooltip = (target, { scaleX, scaleY })=>{
     const tip = ensureTooltip();
     if (!tip || !canvas) return;
-    const label = `${target.datasetLabel} ${target.valueLabel}`;
+    const label = `${target.datasetLabel} ${target.tooltipValueLabel ?? target.valueLabel}`;
     tip.innerHTML = `<strong>${escapeTooltip(label)}</strong><span>${escapeTooltip(target.detail)}</span>`;
     tip.hidden = false;
     tip.dataset.visible = "";
@@ -17199,57 +17198,22 @@ const appendEmptyRow = (focusFirst = false)=>{
     tip.style.left = "0px";
     tip.style.top = "0px";
 
-    const cssScaleX = scaleX > 0 ? 1 / scaleX : 1;
-    const cssScaleY = scaleY > 0 ? 1 / scaleY : 1;
-    const centerX = target.rect.x + (target.rect.width / 2);
-    const canvasWidth = canvas.clientWidth || canvas.width;
-    const canvasHeight = canvas.clientHeight || canvas.height;
-    const margin = 16;
-
-    const tipBox = tip.getBoundingClientRect();
-    const tipWidth = tipBox.width || tip.offsetWidth || 0;
-    const tipHeight = tipBox.height || tip.offsetHeight || 0;
-
-    const halfWidth = tipWidth / 2;
-    const minAnchorX = margin + halfWidth;
-    const maxAnchorX = canvasWidth - margin - halfWidth;
-    const anchorXCss = maxAnchorX < minAnchorX
-      ? canvasWidth / 2
-      : Math.min(maxAnchorX, Math.max(minAnchorX, centerX * cssScaleX));
-
-    const targetTop = target.rect.y;
-    const targetBottom = target.rect.y + target.rect.height;
-    let anchorY = targetTop;
-    let placement = "above";
-
-    const topIfAbove = (targetTop * cssScaleY) - (tipHeight * 1.1);
-    if (topIfAbove < margin){
-      placement = "below";
-      anchorY = targetBottom;
-    }
-
-    let anchorYCss = anchorY * cssScaleY;
-    if (placement === "above"){
-      const minAnchorY = margin + (tipHeight * 1.1);
-      const maxAnchorY = canvasHeight - margin + (tipHeight * 0.1);
-      if (maxAnchorY < minAnchorY){
-        anchorYCss = (minAnchorY + maxAnchorY) / 2;
-      }else{
-        anchorYCss = Math.min(maxAnchorY, Math.max(minAnchorY, anchorYCss));
-      }
-    }else{
-      const minAnchorY = margin - (tipHeight * 0.1);
-      const maxAnchorY = canvasHeight - margin - (tipHeight * 1.1);
-      if (maxAnchorY < minAnchorY){
-        anchorYCss = (minAnchorY + maxAnchorY) / 2;
-      }else{
-        anchorYCss = Math.min(maxAnchorY, Math.max(minAnchorY, anchorYCss));
-      }
-    }
-
-    tip.dataset.placement = placement;
-    tip.style.left = `${anchorXCss - halfWidth}px`;
-    tip.style.top = `${anchorYCss}px`;
+    // Keep overlays inside the canvas and visible viewport, including CSS zoom.
+    const bounds = canvas.getBoundingClientRect();
+    const panel = canvas.closest(".cost-chart-block").getBoundingClientRect();
+    const factorX = canvas.clientWidth / bounds.width || 1;
+    const factorY = canvas.clientHeight / bounds.height || 1;
+    const left = Math.max(8, (Math.max(0,panel.left) - bounds.left) * factorX + 8);
+    const right = Math.min(canvas.clientWidth - 8, (Math.min(window.innerWidth,panel.right) - bounds.left) * factorX - 8);
+    const top = Math.max(8, (Math.max(0,panel.top) - bounds.top) * factorY + 8);
+    const bottom = Math.min(canvas.clientHeight - 8, (Math.min(window.innerHeight,panel.bottom) - bounds.top) * factorY - 8);
+    tip.style.maxWidth = `${Math.max(1, right - left)}px`;
+    tip.style.maxHeight = `${Math.max(1, bottom - top)}px`;
+    const tipWidth = tip.offsetWidth, tipHeight = tip.offsetHeight;
+    const x = (target.rect.x + target.rect.width / 2) / scaleX;
+    const y = target.rect.y / scaleY;
+    tip.style.left = `${Math.max(left, Math.min(right - tipWidth, x - tipWidth / 2))}px`;
+    tip.style.top = `${Math.max(top, Math.min(bottom - tipHeight, y - tipHeight - 10))}px`;
     tip.style.visibility = "";
     tip.dataset.visible = "true";
     canvas.style.cursor = "pointer";
@@ -17262,8 +17226,8 @@ const appendEmptyRow = (focusFirst = false)=>{
     const clientHeight = canvas.clientHeight || rect.height || canvas.height;
     const scaleX = canvas.width / Math.max(1, clientWidth);
     const scaleY = canvas.height / Math.max(1, clientHeight);
-    const pointerX = (Number(clientX) - rect.left) * scaleX;
-    const pointerY = (Number(clientY) - rect.top) * scaleY;
+    const pointerX = (Number(clientX) - rect.left) * canvas.width / Math.max(1, rect.width);
+    const pointerY = (Number(clientY) - rect.top) * canvas.height / Math.max(1, rect.height);
     return { rect, scaleX, scaleY, pointerX, pointerY };
   };
   const resolvePointerTarget = (event, { allowProximity = false } = {})=>{
@@ -17345,15 +17309,10 @@ const appendEmptyRow = (focusFirst = false)=>{
         y: Number(event.clientY)
       };
       const target = resolvePointerTarget(event, { allowProximity: true })?.target || null;
-      if (target?.key === "maintenanceIncomplete"){
-        const list = content.querySelector("[data-incomplete-maintenance-list]");
-        if (list) list.open = true;
-        return;
-      }
       if (!target || !target.rowRef || typeof window === "undefined") return;
       const focusFn = window.__focusCostDataCenterRow;
       if (typeof focusFn === "function"){
-        focusFn(target.rowRef);
+        focusFn({...target.rowRef,rowRefs:target.rowRefs});
       }
     };
     const pointerLeave = ()=>{
@@ -20097,7 +20056,7 @@ function computeCostModel(){
   });
 
   if (window.OMAXCutCostFeedback){
-    const corrected = window.OMAXCutCostFeedback.maintenanceRows(maintenanceDataTableRows, window, compatibilityRows, maintenanceCostReconciliation);
+    const corrected = window.OMAXCutCostFeedback.maintenanceRows(maintenanceDataTableRows, window.__lastLoadedCloudState || window, compatibilityRows, maintenanceCostReconciliation);
     maintenanceDataTableRows.splice(0, maintenanceDataTableRows.length, ...corrected);
   }
 
@@ -20448,6 +20407,8 @@ function computeCostModel(){
     id: `${row.taskId}_${row.dateISO}_${idx}`,
     taskId: row.taskId,
     sourceEventKey: row.sourceEventKey,
+    settingsTaskId: row.settingsTaskId,
+    settingsArchived: row.settingsArchived,
     costExclusionReason: row.costExclusionReason || '',
     taskName: row.taskName,
     maintenanceHrsLabel: row.costFields?.duration.value === null ? "Unknown" : (formatHoursValue(row.maintenanceHrs) || "0"),
@@ -20586,20 +20547,14 @@ function computeCostModel(){
         ? parsedDate
         : new Date(dateISO);
       const dayRows = maintenanceTrendRows.filter(row => toHistoryDateKey(row.dateISO) === dateISO);
-      const taskCount = dayRows.length;
-      const taskNames = Array.from(new Set(dayRows
-        .map(row => String(row?.taskName || "").trim())
-        .filter(Boolean)));
-      const taskPreview = taskNames.length
-        ? taskNames.slice(0, 6).join(", ")
-        : "No task names provided";
-      const taskSuffix = taskNames.length > 6 ? " …" : "";
       return {
         date,
-        value: -Math.abs(totalCost),
+        value: totalCost === 0 ? 0 : -Math.abs(totalCost),
         dateISO,
         taskId: dayRows.length === 1 ? String(dayRows[0].taskId || "") : null,
-        detail: `${taskCount} completed maintenance ${taskCount === 1 ? "occurrence" : "occurrences"} recorded on ${dateISO}: ${taskPreview}${taskSuffix}.`
+        events: dayRows.map(maintenanceEventTooltip),
+        rowRefs: dayRows.map(row=>({type:"maintenance",dateISO,taskId:row.taskId,sourceEventKey:row.sourceEventKey})),
+        detail: maintenanceEventTooltip(dayRows[0]).detail
       };
     });
   maintenanceSeries = maintenanceSeriesFromDataTable;
@@ -20883,6 +20838,14 @@ function drawWeeklyReportChart(canvas, report){
   ctx.fillText(`Week: ${report.weekLabel || report.weekStartISO || ""}`, outerLeft, 18);
 }
 
+function maintenanceEventTooltip(row){
+  const parts = row.costFields?.parts?.value;
+  const available = !row.costIncomplete && typeof parts === "number" && Number.isFinite(parts);
+  const money = value=>new Intl.NumberFormat(undefined,{style:"currency",currency:"USD"}).format(value);
+  return {datasetLabel:row.taskName || "Maintenance task",valueLabel:row.costEstimated && available ? "· Estimated" : "",
+    detail:available ? `${row.dateISO}\nParts: ${money(parts)}\nLabor: ${row.maintenanceHrs} hr · ${money(row.laborCost)}\nTotal: ${money(row.totalCost)}` : `${row.dateISO}\n${row.costExclusionReason?.includes("identity") ? "Review task link" : "Review parts price"}`};
+}
+
 function buildIncompleteMaintenanceMarkers(rows){
   const seen = new Set();
   return (rows || []).flatMap(row=>{
@@ -20891,17 +20854,10 @@ function buildIncompleteMaintenanceMarkers(rows){
     const sourceEventKey = row.sourceEventKey;
     if (!dateISO || !sourceEventKey || seen.has(sourceEventKey)) return [];
     seen.add(sourceEventKey);
-    const amount = value=>typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-    const knownParts = amount(row.costFields?.parts?.value);
-    const knownDuration = amount(row.costFields?.duration?.value);
-    const evidence = field=>field?.source === "Occurrence-specific" ? "recorded occurrence input" : field?.source === "Configured default" ? "configured estimate" : field?.source || "source unavailable";
-    const partsLabel = knownParts === null ? "Parts price unknown" : `Known parts $${knownParts.toFixed(2)} (${evidence(row.costFields.parts)}); partial cost only`;
-    const durationLabel = knownDuration === null ? "Missing labor duration" : `Known labor duration ${knownDuration} hr (${evidence(row.costFields.duration)})`;
-    const reason = row.costExclusionReason || `Missing ${[knownParts === null ? "parts price" : null, knownDuration === null ? "labor duration" : null].filter(Boolean).join(" and ")}`;
-    return [{dateISO, date:new Date(dateISO + "T00:00:00"), sourceEventKey, taskId:row.taskId, taskName:row.taskName || "Maintenance task",
-      knownParts, knownDuration, value:knownParts === null ? null : -knownParts, fullCost:null,
-      partsSource:row.costFields?.parts?.source || null, durationSource:row.costFields?.duration?.source || null,
-      detail:`${row.taskName || "Maintenance task"} · completed ${dateISO}. ${partsLabel}. ${durationLabel}. Full event cost unavailable: ${reason}. Excluded from complete expense totals, averages and forecasts.`}];
+    return [{dateISO,date:new Date(dateISO + "T00:00:00"),sourceEventKey,taskId:row.taskId,taskName:row.taskName || "Maintenance task",
+      knownParts:null,knownDuration:row.costFields?.duration?.value ?? null,value:null,fullCost:null,
+      partsSource:row.costFields?.parts?.source || null,durationSource:row.costFields?.duration?.source || null,
+      ...maintenanceEventTooltip(row)}];
   }).sort((a,b)=>a.dateISO.localeCompare(b.dateISO));
 }
 
@@ -20947,10 +20903,7 @@ function drawCostChart(canvas, model, show){
       ys.push(Number(pt.value));
     });
   });
-  incomplete.forEach(pt=>{
-    xs.push(pt.date.getTime());
-    if (pt.knownParts !== null) ys.push(-pt.knownParts);
-  });
+  incomplete.forEach(pt=>xs.push(pt.date.getTime()));
 
   if (!xs.length){
     canvas.__costChartTargets = [];
@@ -21120,12 +21073,15 @@ function drawCostChart(canvas, model, show){
             : `Cutting job result recorded on ${dateLabel}.`);
       }
       hitTargets.push({
+        events: pt.events,
+        rowRefs: pt.rowRefs,
         key: series.key,
-        datasetLabel,
+        datasetLabel: pt.events?.[0]?.datasetLabel || datasetLabel,
         valueLabel,
-        detail,
+        tooltipValueLabel: pt.events?.[0]?.valueLabel,
+        detail: pt.events?.length > 1 ? `${detail}\nDay total: ${valueLabel} · ${pt.events.length} events · click to view` : detail,
         rowRef: series.key === "maintenance"
-          ? { type: "maintenance", dateISO: pt.dateISO || ymd(pt.date), taskId: pt.taskId || null }
+          ? (pt.rowRefs?.[0] || { type: "maintenance", dateISO: pt.dateISO || ymd(pt.date), taskId: pt.taskId || null })
           : (series.key === "spend"
             ? { type: "spend", dateISO: pt.dateISO || ymd(pt.date) }
             : { type: "cutting", jobId: pt.jobId || null, dateISO: pt.dateISO || ymd(pt.date) }),
@@ -21135,35 +21091,19 @@ function drawCostChart(canvas, model, show){
 
   });
 
-  // Glyphs sharing a date/parts amount are one cluster, with every source
-  // identity retained. Each tooltip lists that day's events, so dense glyphs
-  // cannot conceal a sibling event; the accessible event list is also complete.
+  // Unknown prices have no monetary Y coordinate. Day indicators retain all
+  // source identities; clicks cycle concise details without opening a long list.
   const clusters = new Map();
-  incomplete.forEach(pt=>{
-    const key = JSON.stringify([pt.dateISO, pt.knownParts]);
-    const group = clusters.get(key) || []; group.push(pt); clusters.set(key, group);
-  });
-  if (incomplete.some(pt=>pt.knownParts === null)){
-    ctx.fillStyle = "#fff7ed"; ctx.fillRect(left, 4, right-left, 30);
-    ctx.fillStyle = "#92400e"; ctx.font = "10px sans-serif"; ctx.textAlign = "left";
-    ctx.fillText("Cost unknown", 2, 22);
-  }
+  incomplete.forEach(pt=>{const group=clusters.get(pt.dateISO)||[];group.push(pt);clusters.set(pt.dateISO,group);});
   for (const points of clusters.values()){
-    const pt = points[0], unknown = pt.knownParts === null;
-    const x = X(pt.date.getTime()), y = unknown ? 20 : Y(-pt.knownParts);
-    ctx.strokeStyle = "#b45309"; ctx.fillStyle = "#fff7ed"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(x, y-5); ctx.lineTo(x+5, y+(unknown ? 4 : 0));
-    if (!unknown) ctx.lineTo(x, y+5);
-    ctx.lineTo(x-5, y+(unknown ? 4 : 0)); ctx.closePath(); ctx.fill(); ctx.stroke();
-    if (points.length > 1){ ctx.fillStyle = "#92400e"; ctx.font = "10px sans-serif"; ctx.textAlign = "left"; ctx.fillText(`×${points.length}`, x+7, y-4); }
-    const sameDay = incomplete.filter(event=>event.dateISO === pt.dateISO);
-    hitTargets.unshift({key:"maintenanceIncomplete", datasetLabel:"Incomplete maintenance",
-      valueLabel:unknown ? "Cost unknown — event indicator" : `$${pt.knownParts.toFixed(2)} known parts only — incomplete`,
-      detail:sameDay.slice(0,3).map(event=>event.detail).join("\n\n") + (sameDay.length > 3 ? ` ${sameDay.length-3} more same-day events; open the incomplete event list for every event.` : ""),
-      rowRef:{type:"maintenanceIncomplete",dateISO:pt.dateISO,sourceEventKey:pt.sourceEventKey},
+    const pt=points[0],x=X(pt.date.getTime()),y=20;
+    ctx.fillStyle=model.chartColors.maintenance;
+    ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();
+    const events=points.map(event=>({datasetLabel:event.taskName,valueLabel:"",detail:event.detail}));
+    hitTargets.unshift({key:"maintenanceIncomplete",datasetLabel:pt.taskName,valueLabel:"",detail:pt.detail,
+      events,rowRef:{type:"maintenanceIncomplete",dateISO:pt.dateISO,taskId:pt.taskId,sourceEventKey:pt.sourceEventKey},
       rowRefs:points.map(event=>({type:"maintenance",dateISO:event.dateISO,taskId:event.taskId,sourceEventKey:event.sourceEventKey})),
-      knownParts:pt.knownParts, fullCost:null, eventLane:unknown,
-      rect:{x:x-7,y:y-7,width:14,height:14}});
+      knownParts:null,fullCost:null,eventLane:true,rect:{x:x-7,y:y-7,width:14,height:14}});
   }
   canvas.__costChartTargets = hitTargets;
 }
