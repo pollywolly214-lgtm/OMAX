@@ -3004,7 +3004,6 @@ function normalizeDeletedItem(raw){
   const deletedDate = deletedISO ? new Date(deletedISO) : new Date();
   const deletedMs = deletedDate.getTime();
   if (!Number.isFinite(deletedMs)) return null;
-  if (!["task","inventory"].includes(type) && (Date.now() - deletedMs) > TRASH_RETENTION_MS) return null;
   const payload = cloneStructured(raw.payload);
   const meta = raw.meta && typeof raw.meta === "object" ? { ...raw.meta } : {};
   const label = typeof raw.label === "string" && raw.label ? raw.label : buildTrashLabel(type, payload, meta);
@@ -3121,10 +3120,18 @@ function purgeExpiredDeletedItems(){
 
 function listDeletedItems(){
   purgeExpiredDeletedItems();
-  return deletedItems.map(entry => ({
-    ...entry,
-    expiresAt: entry.type === "task" ? null : computeTrashExpiresAt(entry.deletedAt)
-  }));
+  const now = Date.now();
+  return deletedItems
+    .filter(entry => {
+      if (!entry) return false;
+      if (["task","inventory"].includes(entry.type)) return true;
+      const deletedMs = Date.parse(entry.deletedAt || "");
+      return Number.isFinite(deletedMs) && (now - deletedMs) <= TRASH_RETENTION_MS;
+    })
+    .map(entry => ({
+      ...entry,
+      expiresAt: entry.type === "task" ? null : computeTrashExpiresAt(entry.deletedAt)
+    }));
 }
 
 function addDeletedItem(type, payload, meta){
