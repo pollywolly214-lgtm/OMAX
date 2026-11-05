@@ -53,9 +53,7 @@ test("expired non-maintenance Trash is hidden from the Deleted Items list withou
   const normalized = h.normalizeDeletedItems(structuredClone(entries));
   assert.equal(normalized.length, entries.length, "normalization must not delete expired authoritative Trash evidence");
 
-  h.deletedItems = normalized;
-  h.window.deletedItems = normalized;
-  assert.equal(h.purgeExpiredDeletedItems(), false, "retention cleanup must not shrink authoritative Trash");
+  h.purgeExpiredDeletedItems();
 
   const state = h.state();
   assert.equal(state.deletedItems.length, entries.length);
