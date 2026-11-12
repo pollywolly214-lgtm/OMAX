@@ -674,7 +674,10 @@ const CUT_FILE_STORAGE_BUCKET = "wj-tracker-v2.firebasestorage.app";
 
 const FIRESTORE_WARN_BYTES = 850000;
 const FIRESTORE_STRONG_WARN_BYTES = 900000;
-const FIRESTORE_BLOCK_BYTES = 975000;
+// Firestore's hard 1 MiB document limit is 1,048,576 bytes. Keep at least
+// 32 KiB of additional safety room, measured using Firestore field/map sizing,
+// not the UTF-8 size of an exported JSON representation.
+const FIRESTORE_BLOCK_BYTES = 1048576 - 32768;
 const SAVE_LOG_THROTTLE_MS = 30000;
 let lastSaveLogWriteAt = 0;
 const REQUIRED_PROTECTED_DATA_PATHS = [
@@ -798,6 +801,42 @@ function estimatePayloadBytes(payload){
     if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(json).length;
     return new Blob([json]).size;
   } catch (_err){
+    return Number.MAX_SAFE_INTEGER;
+  }
+}
+
+/**
+ * Estimate native Cloud Firestore document storage size (not JSON export bytes).
+ * Document name and nested map overhead are part of Firestore's 1 MiB limit.
+ * Any unrepresentable/unknown value fails closed. The ordinary size guard keeps
+ * 32 KiB headroom beyond the estimate for unanticipated serializer overhead.
+ * Official sizing: https://firebase.google.com/docs/firestore/storage-size
+ */
+function estimateFirestoreDocumentBytes(data, documentPath = null){
+  try {
+    const encoded = new TextEncoder();
+    const stringBytes = value => encoded.encode(value).length + 1;
+    const sizeValue = (value, depth)=>{
+      if (depth > 20) return Number.MAX_SAFE_INTEGER;
+      if (value === null) return 1;
+      if (typeof value === "string") return stringBytes(value);
+      if (typeof value === "number") return Number.isFinite(value) ? 8 : Number.MAX_SAFE_INTEGER;
+      if (typeof value === "boolean") return 1;
+      if (Array.isArray(value)) return value.reduce((sum,entry)=>sum+sizeValue(entry,depth+1),0);
+      if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype){
+        // Nested Firestore maps have 32 bytes of fixed overhead, plus entries.
+        return 32+Object.entries(value).reduce((sum,[name,entry])=>sum+stringBytes(name)+sizeValue(entry,depth+1),0);
+      }
+      return Number.MAX_SAFE_INTEGER;
+    };
+    if (!data || typeof data !== "object" || Array.isArray(data)) return Number.MAX_SAFE_INTEGER;
+    const path = documentPath || (typeof FB !== "undefined" ? FB.docRef?.path : "") || "";
+    if (!path || path.split("/").length % 2 !== 0) return Number.MAX_SAFE_INTEGER;
+    const nameBytes = 16 + path.split("/").reduce((sum,segment)=>sum+stringBytes(segment),0);
+    const fieldBytes = Object.entries(data).reduce((sum,[name,value])=>sum+stringBytes(name)+sizeValue(value,1),0);
+    const estimate = nameBytes + 32 + fieldBytes;
+    return Number.isSafeInteger(estimate) ? estimate : Number.MAX_SAFE_INTEGER;
+  } catch (_error){
     return Number.MAX_SAFE_INTEGER;
   }
 }
@@ -4601,7 +4640,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       }
       if(identityAuthorized){
         if(stableStringify(remote)!==identityProof.sourceKey||stableStringify(pending)!==identityProof.pendingKey)throw Object.assign(new Error("Inventory repair source or exact authorized changes no longer match."),{definite:true,code:"inventory_repair_conflict"});
-        if(estimatePayloadBytes(pending)>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
+        if((typeof estimateFirestoreDocumentBytes === "function" ? estimateFirestoreDocumentBytes(pending) : estimatePayloadBytes(pending))>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
         return pending;
       }
       const proof = options.repairProof;
@@ -4689,7 +4728,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
             throw Object.assign(Error("Pump log change differs from the selected record."), {definite:true,code:"pump_log_mutation_rejected"});
         } else pending.pumpEff = mergeUnlessIdentical("pumpEff",mergePumpEffForSave);
       }
-      if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
+      if ((typeof estimateFirestoreDocumentBytes === "function" ? estimateFirestoreDocumentBytes(pending) : estimatePayloadBytes(pending)) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
       // Additional restriction after all existing protected merges. Validation
       // receives an isolated copy and cannot alter the guarded save or bypass
       // CAS, identity, content, size or protected-state gates.
@@ -7258,7 +7297,7 @@ async function performCloudSave(saveOptions = {}){
       console.error("Cloud save blocked: core business data would be reduced unexpectedly.", { pendingCore, baselineCore });
       return cloudSaveNoWriteFailure("core_business_reduction_blocked", "Core business data reduction was blocked.");
     }
-    const sizeBytes = estimatePayloadBytes(snap);
+    const sizeBytes = typeof estimateFirestoreDocumentBytes === "function" ? estimateFirestoreDocumentBytes(snap) : estimatePayloadBytes(snap);
     if (sizeBytes >= FIRESTORE_WARN_BYTES){
       console.warn("Cloud state size warning", { sizeBytes, warnAt: FIRESTORE_WARN_BYTES, strongWarnAt: FIRESTORE_STRONG_WARN_BYTES, blockAt: FIRESTORE_BLOCK_BYTES });
       logStateSizeDiagnostics(snap, "before-save");
@@ -8280,7 +8319,7 @@ function checkAuthoritativeIdentityIntegrity(data){
     if((entry.expectedShape==="array"&&!array)||(entry.expectedShape==="object"&&!object)||(entry.expectedShape==="arrayOrObject"&&!array&&!object))blockers.push(`Protected field ${entry.path} has invalid shape.`);
   }
   if(scanAuthoritativeCutFileContent(data).contaminated)blockers.push("Protected cutting-file content firewall rejected authoritative state.");
-  if(estimatePayloadBytes(data)>=FIRESTORE_BLOCK_BYTES)blockers.push("Protected authoritative payload exceeds the save limit.");
+  if((typeof estimateFirestoreDocumentBytes === "function" ? estimateFirestoreDocumentBytes(data) : estimatePayloadBytes(data))>=FIRESTORE_BLOCK_BYTES)blockers.push("Protected authoritative payload exceeds the save limit.");
   if(check.valid&&!blockers.length){
     // Assess the authoritative document itself, without treating local caches
     // as restore sources. This runs the existing registry/coverage/compaction
