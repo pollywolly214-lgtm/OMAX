@@ -4920,6 +4920,7 @@ window.maintenanceCalendarCancellationApi=window.OMAXMaintenanceCalendarCancella
   matches:source=>stableStringify(source)===stableStringify(window.__lastLoadedCloudState)&&stableStringify(source)===stableStringify(getCuttingJobChronologyLocalState()),
   actor:()=>String(FB.user?.uid||""),newId:()=>genId("calendar_cancel"),now:()=>new Date().toISOString(),
   validate:state=>checkAuthoritativeIdentityIntegrity(state).valid===true,
+  validationBlockers:state=>checkAuthoritativeIdentityIntegrity(state).blockers,
   backup:source=>{
     persistLocalStateBackup(source);
     if(stableStringifyForIntegrity(readLocalStateBackup())!==stableStringifyForIntegrity(compactStateForStorage(source,{forBackup:true})))

@@ -100,7 +100,14 @@
         const unchanged=()=>env.canWrite()&&env.targetIsCurrent(target)&&version===key(env.version())&&env.matches(source);
         if(!unchanged()||reviewed.confirmation!==authorization(source,operation)||!env.validate(source))throw Error("The confirmed maintenance source changed. Review it again; no write was attempted.");
         const stamp={id:env.newId(),actorUid:env.actor(),atISO:env.now()},prepared=plan(source,operation,stamp),next=prepared.state;
-        if(!env.validate(next))throw Error("Cancellation would violate maintenance identity or protected-data rules.");
+        if(!env.validate(next)){
+          // Explain a rejected proposal without weakening any existing integrity,
+          // protected-data, or document-size guard. No mutation was attempted.
+          const blockers=typeof env.validationBlockers==="function" ? env.validationBlockers(next) : [];
+          if(Array.isArray(blockers)&&blockers.length===1&&blockers[0]==="Protected authoritative payload exceeds the save limit.")
+            throw Error("Cancellation cannot be saved because the workspace document is at its protected-size limit. No records were changed; maintenance history must be separated into verified storage before adding more occurrences.");
+          throw Error("Cancellation would violate maintenance identity or protected-data rules.");
+        }
         if(prepared.noChange)return {saved:true,verified:true,noChange:true};
         transactionEvidence={version:1,operation:clone(operation),operationId:stamp.id,sourceRevision:source.syncMeta.rev,target:{path:target.path,projectId:target.projectId,backend:target.backend},changes:clone(prepared.changes)};
         invoked=true;
