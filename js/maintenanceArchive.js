@@ -52,7 +52,7 @@
     const path="workspaces/"+workspaceId+"/maintenance-history/v1/"+archiveId+"/"+checksum+".json";
     const descriptor={schemaVersion:VERSION,archiveId,path,checksum,recordCount:records.length,
       firstId:records[0].id,lastId:records[records.length-1].id,sourceRevision:state.syncMeta.rev,
-      sourcePrefixIds:records.map(row=>row.id)};
+      idsChecksum:await sha256(canonical(records.map(row=>row.id)),cryptoApi)};
     return {serialized,descriptor,records};
   }
   async function verify({serialized,descriptor,cryptoApi}){
@@ -67,7 +67,7 @@
     if(actual!==descriptor.checksum)fail("SHA-256 mismatch.");
     const ids=assertRecords(body.records);
     if(ids.size!==descriptor.recordCount||body.records[0]?.id!==descriptor.firstId||body.records.at(-1)?.id!==descriptor.lastId
-      ||!Array.isArray(descriptor.sourcePrefixIds)||canonical(body.records.map(row=>row.id))!==canonical(descriptor.sourcePrefixIds))
+      ||!validDigest(descriptor.idsChecksum)||await sha256(canonical(body.records.map(row=>row.id)),cryptoApi)!==descriptor.idsChecksum)
       fail("archive record count/order/identity mismatch.");
     const path="workspaces/"+body.workspaceId+"/maintenance-history/v1/"+body.archiveId+"/"+actual+".json";
     if(path!==descriptor.path)fail("archive path mismatch.");
@@ -80,7 +80,7 @@
     archived.forEach((rows,index)=>{
       const descriptor=descriptors[index];
       assertRecords(rows);
-      if(!descriptor||descriptor.recordCount!==rows.length||canonical(rows.map(row=>row.id))!==canonical(descriptor.sourcePrefixIds))
+      if(!descriptor||descriptor.recordCount!==rows.length||rows[0]?.id!==descriptor.firstId||rows.at(-1)?.id!==descriptor.lastId)
         fail("archive segment does not match its verified descriptor.");
       rows.forEach(row=>{if(seen.has(row.id))fail("overlapping archive identity.");seen.add(row.id);merged.push(clone(row));});
     });
