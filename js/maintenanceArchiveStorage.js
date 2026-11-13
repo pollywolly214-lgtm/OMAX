@@ -18,7 +18,7 @@
     if(!safeId(workspaceId)||!safeId(descriptor?.archiveId)||!safeDigest(descriptor?.checksum)
       ||!Number.isSafeInteger(descriptor?.recordCount)||descriptor.recordCount<1||descriptor.recordCount>100000
       ||!Number.isSafeInteger(descriptor?.sourceRevision)||descriptor.sourceRevision<0
-      ||!safeId(actorUid)||typeof createdAtISO!=="string"||!/^\\d{4}-\\d{2}-\\d{2}T.*Z$/.test(createdAtISO))
+      ||!safeId(actorUid)||typeof createdAtISO!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z$/.test(createdAtISO))
       fail("invalid bounded metadata.");
     if(descriptor.path!==expectedPath(workspaceId,descriptor.archiveId,descriptor.checksum))
       fail("archive is not in the designated immutable path.");
@@ -75,6 +75,9 @@
     try{response=await context.fetchImpl(privateUrl,{credentials:"omit",cache:"no-store"});}
     catch(_){fail("independent Storage download failed.");}
     if(!response?.ok)fail("Storage download HTTP request failed.");
+    const declaredLength=response.headers?.get?.('content-length');
+    if(declaredLength!==null&&declaredLength!==undefined&&Number(declaredLength)>MAX_BYTES)
+      fail('Storage download declared an oversized object.');
     const data=await response.arrayBuffer();
     if(data.byteLength!==found.size||data.byteLength>MAX_BYTES||data.byteLength<1)fail("downloaded object length mismatch.");
     let serialized;
