@@ -1,6 +1,6 @@
 # MCAP-STORAGE-ARCHITECTURE
 
-Status: **BLOCKED — archive foundation only, not a production migration or capacity fix** (2026-11-13).
+Status: **BLOCKED — archive preparation plus isolated Storage transport, not an integrated capacity fix** (2026-11-13).
 Branch: `feature/mcap-storage-01a-foundation`.
 
 ## Observed failure
@@ -36,7 +36,7 @@ Firestore retains a bounded **active suffix** of maintenance events, workspace r
 
 `tests/mcap-storage-foundation.test.js` adds Node built-in test cases. These are source-level tests; they do **not** prove Firebase interaction, upload readback, CAS commitment, complete production record preservation, or end-to-end maintenance removal.
 
-**Important:** The proposal function does not commit anything; passing arbitrary records to it is not independent Storage verification. The caller must independently fetch and run `verify` on the downloaded bytes first. Likewise `reconstruct` must only be called with segments already checked by `verify`. There is no operator migration control or Cloud Storage integration on this branch. Existing production code does not load `maintenanceArchive.js`.
+**Important:** The proposal function does not commit anything; passing arbitrary records to it is not independent Storage verification. The caller must independently fetch and run `verify` on the downloaded bytes first. Likewise `reconstruct` must only be called with segments already checked by `verify`. There is no operator migration control or integrated maintenance save/load architecture. Existing production code does not load `maintenanceArchive.js` or `maintenanceArchiveStorage.js`.
 
 ## Protected invariants / missing integration
 
@@ -62,3 +62,12 @@ Firestore retains a bounded **active suffix** of maintenance events, workspace r
 ## Verdict and next action
 
 **BLOCKED / NOT READY FOR MERGE.** The code is a safe, isolated foundation, not a working Firebase Cloud Storage history implementation. No production migration, live document mutation, or rules deployment has been performed. Complete the integration and disposable end-to-end acceptance work before the branch can become a capacity-fix PR.
+
+
+## Additional isolated transport work (2026-11-13)
+
+- `js/maintenanceArchiveStorage.js` targets only `wj-tracker-v2` and `wj-tracker-v2.firebasestorage.app`. It offers an explicitly invoked, non-wired upload with readback/metadata/content SHA-256 verification and a read-only archive download. It does **not** alter Firestore.
+- `storage.rules` has a proposed create-only/get-only maintenance-history path, scoped to the production workspace and existing authenticated membership roles. The existing cutting-file rule remains unchanged. These rule edits are **not deployed or emulator-verified**.
+- `tests/mcap-storage-transport.test.js` adds mock Storage round-trip, cross-project, corruption, missing access, immutability, and no-Firestore-mutation tests. Tests were authored but **not run** in this session.
+- **Transport cannot authorize a migration.** A successful Storage upload is not an atomic Firestore commit. Complete the CAS manifest transaction, independently verified logical reload, guarded active-suffix save path, and end-to-end disposable browser tests before enabling this from the main application.
+- **Confirmed from operator screenshots:** On 2026-11-13, WJ TRACKER-V2 visibly showed Blaze pay-as-you-go, $300 remaining promotional credit, and approximately 4.11 MB / 36 objects in Cloud Storage. This confirms the account plan and Storage service are available, but does not imply the historical data is already archived. Historical records continue to fill `workspaces/github-prod/app/state`.
