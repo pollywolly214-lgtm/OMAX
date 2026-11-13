@@ -100,46 +100,36 @@ service firebase.storage {
         && request.time < resource.timeCreated + duration.value(15, 'm');
       allow update, list: if false;
     }
-    // MCAP-STORAGE-01A: immutable, bounded maintenance-history archives.
-    // No list, overwrite, or client delete. Firestore manifest transactions
-    // remain separately revision checked; this rule does not authorize cutover.
-    function archivePathAllowed(workspaceId, archiveId, fileName) {
+    // MCAP: immutable versioned maintenance archives; not deployed.
+    function validArchive(workspaceId, operationId, fileName, item) {
       return bucket == 'wj-tracker-v2.firebasestorage.app'
         && workspaceId == 'github-prod'
-        && archiveId.size() >= 1 && archiveId.size() <= 128
-        && archiveId.matches('[A-Za-z0-9][A-Za-z0-9_-]*')
-        && fileName.matches('[0-9a-f]{64}\\.json');
-    }
-    function validArchiveObject(workspaceId, archiveId, fileName, item) {
-      return item.size > 0 && item.size <= 524288
+        && operationId.size() >= 1 && operationId.size() <= 128
+        && operationId.matches('[A-Za-z0-9][A-Za-z0-9_-]*')
+        && fileName.matches('[0-9a-f]{64}\\.json')
+        && item.size > 0 && item.size <= 524288
         && item.contentType == 'application/json'
         && item.metadata.keys().hasOnly(['schemaVersion','workspaceId','archiveId','sha256','recordCount','sourceRevision','createdBy','createdAtISO','storagePath'])
         && item.metadata.keys().hasAll(['schemaVersion','workspaceId','archiveId','sha256','recordCount','sourceRevision','createdBy','createdAtISO','storagePath'])
         && item.metadata.schemaVersion == '1'
         && item.metadata.workspaceId == workspaceId
-        && item.metadata.archiveId == archiveId
-        && item.metadata.sha256 == fileName.replace('\\.json { allow read, write: if false; }
-  }
-}
-, '')
+        && item.metadata.archiveId == operationId
+        && fileName == item.metadata.sha256 + '.json'
         && item.metadata.sha256.matches('[0-9a-f]{64}')
         && item.metadata.recordCount.matches('[1-9][0-9]{0,5}')
         && item.metadata.sourceRevision.matches('(0|[1-9][0-9]{0,15})')
-        && item.metadata.createdBy.size() > 0
-        && item.metadata.createdBy.size() <= 128
+        && item.metadata.createdBy.size() >= 1 && item.metadata.createdBy.size() <= 128
         && item.metadata.createdBy.matches('[A-Za-z0-9][A-Za-z0-9_-]*')
         && item.metadata.createdAtISO.size() <= 30
-        && item.metadata.storagePath == 'workspaces/' + workspaceId + '/maintenance-history/v1/' + archiveId + '/' + fileName;
+        && item.metadata.storagePath == 'workspaces/' + workspaceId + '/maintenance-history/v1/' + operationId + '/' + fileName;
     }
-    match /workspaces/{workspaceId}/maintenance-history/v1/{archiveId}/{fileName} {
-      allow create: if archivePathAllowed(workspaceId, archiveId, fileName)
-        && resource == null
+    match /workspaces/{workspaceId}/maintenance-history/v1/{operationId}/{fileName} {
+      allow create: if resource == null
         && activeRole(workspaceId, ['owner','admin','operator'])
-        && validArchiveObject(workspaceId, archiveId, fileName, request.resource)
+        && validArchive(workspaceId, operationId, fileName, request.resource)
         && request.resource.metadata.createdBy == request.auth.uid;
-      allow get: if archivePathAllowed(workspaceId, archiveId, fileName)
-        && activeRole(workspaceId, ['owner','admin','operator','viewer'])
-        && validArchiveObject(workspaceId, archiveId, fileName, resource);
+      allow get: if activeRole(workspaceId, ['owner','admin','operator','viewer'])
+        && resource != null && validArchive(workspaceId, operationId, fileName, resource);
       allow update, delete, list: if false;
     }
     match /{allPaths=**} { allow read, write: if false; }
