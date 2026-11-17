@@ -71,3 +71,34 @@ Firestore retains a bounded **active suffix** of maintenance events, workspace r
 - `tests/mcap-storage-transport.test.js` adds mock Storage round-trip, cross-project, corruption, missing access, immutability, and no-Firestore-mutation tests. Tests were authored but **not run** in this session.
 - **Transport cannot authorize a migration.** A successful Storage upload is not an atomic Firestore commit. Complete the CAS manifest transaction, independently verified logical reload, guarded active-suffix save path, and end-to-end disposable browser tests before enabling this from the main application.
 - **Confirmed from operator screenshots:** On 2026-11-13, WJ TRACKER-V2 visibly showed Blaze pay-as-you-go, $300 remaining promotional credit, and approximately 4.11 MB / 36 objects in Cloud Storage. This confirms the account plan and Storage service are available, but does not imply the historical data is already archived. Historical records continue to fill `workspaces/github-prod/app/state`.
+
+## Working-folder verified copy milestone (2026-11-17)
+
+The user provided `OMAX_FULL_BACKUP_2026-11-17T21-27-25-664Z_rev1794576947956.json`, a SHA-256-verified, **main Firestore document** backup. The document has 35 top-level fields, 188 maintenance occurrence events, 164 calendar instances, 180 completed cutting jobs, 34 inventory rows, 25 receipt-tracker weeks, and 33 weekly cost reports. Its `syncMeta.rev` is `1794576947956` (last server update 2026-11-13), so it is **not** evidence of any subsequent live edits. Keep the user's original desktop copy separate; this GitHub branch contains no copy of those business records.
+
+### Implemented, not yet deployed
+
+- `js/omaxWorkingStorage.js`: an explicit, inactive, single-pass `probe` and `snapshot` staging adapter targeting **only** `wj-tracker-v2` / `wj-tracker-v2.firebasestorage.app` / `workspaces/github-prod`. It never calls Firestore writes or deletes. Before an immutable snapshot upload it independently reads and compares the complete current Firestore source twice. After upload it independently downloads, verifies byte length, SHA-256, original serialized bytes, exact metadata/path, then rereads the current source and refuses to claim migration readiness if a concurrent edit occurred. Failed/ambiguous attempts are preserved for manual investigation; no automatic retries or deletes.
+- `index.html`: loads the staging adapter as a module, but never invokes it.
+- `storage.rules`: **undelployed proposal** for create/get-only access under `workspaces/github-prod/working/v1/{probe|snapshot}/{operationId}/{sha256}.json`, with size, metadata, ownership and membership checks; no client update/delete/list.
+- `tests/omax-working-storage.test.js`: synthetic tests for benign probe, entire-state byte equality, rejected wrong project/confirmation, missing fields, denied Storage read, corrupted download, concurrent edit after upload, immutable source; **tests not executed by the connector**.
+
+**Important distinction:** successful staging verifies a recoverable immutable **copy** of the whole state, not a live data migration or an app capacity fix. The existing Firestore state remains authoritative and unmodified, so ordinary OMAX operations still face the 975 KB write gate.
+
+### Next engineering integration required for full functionality
+
+1. Build a versioned immutable **field/collection-sharded store**, not an ever-growing copy of the entire state on each save. Preserve all original row IDs and nested history, including deleted/trash and rarely touched fields.
+2. Establish a small Firestore CAS-controlled manifest/commit envelope with a safe read-through cache that validates every referenced shard and reconstructs the **entire** old logical state before adoption. Validate logical state against the original complete backup and current production revision; missing/corrupt/unreadable shards must stop adoption and writes.
+3. Centralize normal, specialized, and background writes: compare the exact source revision and changed business paths, upload/verify changed shards, commit the new manifest through guarded Firestore transaction, independently reread the manifest and its content, and only then announce success. Keep old immutable shards for rollback and avoid orphan cleanup until explicitly reviewed.
+4. Update every `FB.docRef.onSnapshot` listener, `loadFromCloud`, backend transaction read, protected-data integrity check, local backup/restore, audit, import/export, cutting-job actions, maintenance-calendar actions, material/pump/water-quality writers, and history/cost calculation to consume the same verified logical state. The existing 975,000-byte gate must remain for inline Firestore payloads. A logically large reconstructed state cannot be sent back inline.
+5. Test with actual source-equivalent synthetic 35-field state and failures: stale revision, write conflict, offline upload, denied access, corrupt shard, ambiguous commit, mutation during upload, two concurrent sessions, restore after cache clearing, browser refresh, purchase edit, inventory edit, maintenance repeat removal, full cutting-job lifecycle, historical reports and totals.
+6. **Only after successful disposable tests**, capture a fresh production backup and independent second copy, verify main-state revision/counters and auxiliary Firestore metadata/Storage file references, get operator approval for rules deployment and cutover, and stage the original state without deleting it. Keep rollback until user independently verifies all features.
+
+### Operator console calls (ONLY after approved rules are deployed)
+
+On the exact PR preview, while signed in and with the staging module loaded:
+`await OMAXWorkingStorage.probe("STAGE OMAX COPY ONLY")`
+then, after the probe has verified and a fresh backup has been retained:
+`await OMAXWorkingStorage.snapshot("STAGE OMAX COPY ONLY")`
+
+Each produces a readback-verified, content-addressed Storage object **only**. No Firestore data is removed, no manifest is activated and the app continues using its original state. This is not permission to deploy untested rules or perform the full migration.
