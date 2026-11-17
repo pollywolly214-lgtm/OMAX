@@ -168,6 +168,42 @@ service firebase.storage {
         && validWorkingObject(workspaceId, phase, operationId, filename, resource);
       allow update, delete, list: if false;
     }
+    // MCAP staging shards: immutable field objects and a verified manifest.
+    // These are recoverable copies, not yet authoritative for the live app.
+    function validStateShard(workspaceId, field, operationId, fileName, item) {
+      return bucket == 'wj-tracker-v2.firebasestorage.app'
+        && workspaceId == 'github-prod'
+        && field.size() >= 1 && field.size() <= 128
+        && field.matches('[A-Za-z_$][A-Za-z0-9_$]*')
+        && operationId.size() >= 1 && operationId.size() <= 128
+        && operationId.matches('[A-Za-z0-9][A-Za-z0-9_-]*')
+        && fileName.matches('[a-f0-9]{64}\\.json')
+        && item.size > 0 && item.size <= 524288
+        && item.contentType == 'application/json'
+        && item.metadata.keys().hasOnly(['schemaVersion','workspaceId','field','operationId','sha256','sourceRevision','storagePath','createdBy','createdAtISO'])
+        && item.metadata.keys().hasAll(['schemaVersion','workspaceId','field','operationId','sha256','sourceRevision','storagePath','createdBy','createdAtISO'])
+        && item.metadata.schemaVersion == '1'
+        && item.metadata.workspaceId == workspaceId
+        && item.metadata.field == field
+        && item.metadata.operationId == operationId
+        && fileName == item.metadata.sha256 + '.json'
+        && item.metadata.sha256.matches('[a-f0-9]{64}')
+        && item.metadata.sourceRevision.matches('(0|[1-9][0-9]{0,15})')
+        && item.metadata.createdBy.size() >= 1 && item.metadata.createdBy.size() <= 128
+        && item.metadata.createdBy.matches('[A-Za-z0-9][A-Za-z0-9_-]*')
+        && item.metadata.createdAtISO.size() <= 30
+        && item.metadata.storagePath == 'workspaces/' + workspaceId + '/state-shards/v1/' + field + '/' + operationId + '/' + fileName;
+    }
+    match /workspaces/{workspaceId}/state-shards/v1/{field}/{operationId}/{fileName} {
+      allow create: if resource == null
+        && activeRole(workspaceId, ['owner','admin'])
+        && validStateShard(workspaceId, field, operationId, fileName, request.resource)
+        && request.resource.metadata.createdBy == request.auth.uid;
+      allow get: if resource != null
+        && activeRole(workspaceId, ['owner','admin'])
+        && validStateShard(workspaceId, field, operationId, fileName, resource);
+      allow update, delete, list: if false;
+    }
     match /{allPaths=**} { allow read, write: if false; }
   }
 }
