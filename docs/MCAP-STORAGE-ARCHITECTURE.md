@@ -113,3 +113,9 @@ Each produces a readback-verified, content-addressed Storage object **only**. No
 **This copy workflow is not enabled as the site's authoritative store.** The site still reads/writes the original Firestore document; therefore this PR does NOT yet prevent the original 975 KB error. Transitioning the site onto sharded state requires complete load/save/listener/readback/Recovery/rollback integration and disposable-backend acceptance tests. Do not replace or delete the live state on the strength of a staged copy alone.
 
 For later engineering, current 512 KiB per-field design must also support bounded splitting of individual collections as they grow; a single field must never become a new hard stop.
+
+### Actual Nov 17 backup: local-only lossless sharding validation
+
+The user-provided backup was analyzed **locally only** (not committed or uploaded to Firebase). Its exact input SHA-256 is `7798364efc0412f39696c3e8625fdc889ca03329dae062d333665ada7c7f7b38`, 1,349,307 source-file bytes, 35 top-level fields, source rev `1794576947956`. A separate Python offline-audit format split all 35 original top-level values into 35 immutable JSON shards, individually hashed them, checked all were smaller than 512 KiB, and rebuilt the complete parsed state. The rebuilt state exactly matched the original parsed backup, including unknown top-level fields. It produced a separate `OMAX_Offline_Sharded_Backup_Verified_2026-11-17.zip`, available as a user conversation attachment, **not** as a production-ready import or JS-format archive.
+
+This demonstrates current-data partition feasibility only. The Python audit shard serializer and current JavaScript shard serializer are separate formats; they have not been shown to be cross-compatible. It does not establish deployed Storage permission, authoritative Firestore cutover, lossless continued writes, multi-client behavior, or full UI functionality.
