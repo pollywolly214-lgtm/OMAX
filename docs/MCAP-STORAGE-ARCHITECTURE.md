@@ -102,3 +102,14 @@ then, after the probe has verified and a fresh backup has been retained:
 `await OMAXWorkingStorage.snapshot("STAGE OMAX COPY ONLY")`
 
 Each produces a readback-verified, content-addressed Storage object **only**. No Firestore data is removed, no manifest is activated and the app continues using its original state. This is not permission to deploy untested rules or perform the full migration.
+
+### Lossless per-collection sharded copy (development milestone)
+
+- `js/omaxShardedState.js` provides a **pure** field-level archive planner using versioned SHA-256 content-addressed JSON, metadata and strict byte limits. A missing, tampered, duplicate, or wrong-revision shard blocks reconstruction. It refuses to silently omit unknown top-level fields. The uploaded 2026-11-17 backup's largest top-level business field is `completedCuttingJobs` (~363 KB compact JSON); all 35 current fields fit under the provisional 512 KiB per-shard limit. This proves sizing feasibility **for that snapshot**, not for future growth.
+- `js/omaxWorkingShards.js` provides an explicit `stageFromBrowser("STAGE OMAX SHARDS ONLY")` operation: independently read current Firestore twice, upload one immutable object for every top-level field, independently verify each Storage object's metadata, size, SHA-256 and bytes, reconstruct the complete state, then upload and verify a manifest **last**. It reads current Firestore twice again to reject a changed source. Zero writes/deletes to Firestore. No automatic invocation.
+- `storage.rules` has an un-deployed create/get-only `workspaces/github-prod/state-shards/v1/{field}/{operationId}/{sha256}.json` path, including a `_manifest` shard. Production rule deployment **must not** proceed before explicit verification/approval.
+- `tests/omax-sharded-state.test.js` and `tests/omax-working-shards.test.js` are authored but not executed in Node. A synthetic in-memory smoke test executed the happy path with 16 fields/17 mock Storage objects and zero Firestore writes; it used a fake digest and is **not** a Firebase/SHA integration test.
+
+**This copy workflow is not enabled as the site's authoritative store.** The site still reads/writes the original Firestore document; therefore this PR does NOT yet prevent the original 975 KB error. Transitioning the site onto sharded state requires complete load/save/listener/readback/Recovery/rollback integration and disposable-backend acceptance tests. Do not replace or delete the live state on the strength of a staged copy alone.
+
+For later engineering, current 512 KiB per-field design must also support bounded splitting of individual collections as they grow; a single field must never become a new hard stop.
