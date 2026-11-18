@@ -99,6 +99,7 @@
       if(sharder.canonical(current)!==original)
         fail("source changed after staged upload; retain copies but do NOT perform cutover.");
       return Object.freeze({verified:true,projectId:PROJECT,bucket:BUCKET,revision,
+        operationId,actorUid:ctx.actor,createdAtISO,
         fieldCount:proposed.shards.length,archiveObjects:proposed.shards.length+1,
         manifestPath,manifestSha256:manifestHash,firestoreWrites:0,firestoreDeletes:0,
         status:"Verified immutable staged COPY ONLY. No live Firestore data was moved or removed."});
