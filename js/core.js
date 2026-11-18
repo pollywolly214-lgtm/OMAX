@@ -102,6 +102,10 @@ function blockCloudSave(reason, details = null){
 
 function canWriteCloud(reason = "cloud save"){
   if (typeof window === "undefined") return false;
+  // MCAP read-side integration is intentionally fail-closed. Do not let any
+  // legacy writer mutate app/state after a Storage index becomes authoritative.
+  if (authoritativeBackendMode === "sharded") return blockCloudSave(
+    `${reason}; Storage-backed authority is still read-only until full writer cutover tests pass.`);
   if (isRecoveryMode()) return blockCloudSave(`${reason}; Recovery Mode is read-only, cloud saves disabled.`);
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
   if (window.maintenanceCalendarCancellationApi?.isBusy() && reason !== "maintenance calendar cancellation") return blockCloudSave(`${reason}; a maintenance cancellation is being verified.`);
@@ -664,6 +668,11 @@ let firebaseInitStarted = false;
 let firebaseSettingsApplied = false;
 let workspaceMetadataWritesBlocked = false;
 let workspaceStateUnsubscribe = null;
+let authorityIndexUnsubscribe = null;
+let authoritativeBackendMode = "unknown";
+// Keep closed until Storage CAS, protected mutations and old-client lockout
+// have passed authoritative integration tests. Not a browser-configurable flag.
+const MCAP_SHARDED_WRITES_ACTIVE = false;
 let lastAppliedCloudRevision = 0;
 let hasPendingLocalChanges = false;
 let lastLocalMutationAt = 0;
@@ -2703,6 +2712,12 @@ async function initFirebase(){
       try { workspaceStateUnsubscribe(); } catch (err) { console.warn("Failed to stop workspace sync listener", err); }
       workspaceStateUnsubscribe = null;
     }
+    if (typeof authorityIndexUnsubscribe === "function"){
+      try { authorityIndexUnsubscribe(); } catch (err) { console.warn("Failed to stop authority index watcher", err); }
+      authorityIndexUnsubscribe = null;
+    }
+    authoritativeBackendMode = "unknown";
+    window.__omaxActiveStateBackend = null;
     lastAppliedCloudRevision = 0;
     if (user){
       if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
@@ -2789,7 +2804,33 @@ function startWorkspaceStateListener(){
       console.warn("Route refresh after workspace sync failed", err);
     }
   };
-  workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
+  const shardedListener = authoritativeBackendMode === "sharded";
+  const listenerRef = shardedListener
+    ? FB.db.doc("workspaces/github-prod/app/stateIndexV1") : FB.docRef;
+  workspaceStateUnsubscribe = listenerRef.onSnapshot((snap)=>{
+    if (shardedListener){
+      // The active index is authoritative; never read a legacy state echo.
+      if (!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites) return;
+      if (!snap.exists){
+        window.__autosaveDisabled = true;
+        window.__recoveryInspectMode = true;
+        window.__recoveryReason = "Active Storage index is missing. Writes remain disabled.";
+        renderRecoveryDiagnosticsPanel();
+        return;
+      }
+      try{
+        const index = window.OMAXShardedCommit.checkIndex(snap.data());
+        if (index.revision <= Number(window.__loadedCloudRevisionForSaveGuard || 0)) return;
+        window.__autosaveDisabled = true;
+        loadFromCloud().then(refreshRouteSafely);
+      }catch(error){
+        window.__autosaveDisabled = true;
+        window.__recoveryInspectMode = true;
+        window.__recoveryReason = "Invalid Storage index: " + String(error?.message || error);
+        renderRecoveryDiagnosticsPanel();
+      }
+      return;
+    }
     // Cache and pending local echoes cannot establish authoritative corruption
     // or absence. Keep the adopted baseline until a confirmed server event.
     if (!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites) return;
@@ -2822,7 +2863,44 @@ function startWorkspaceStateListener(){
     refreshRouteSafely();
   }, (err)=>{
     console.warn("Workspace realtime sync listener error", err);
+    if(shardedListener){
+      window.__autosaveDisabled=true;
+      window.__recoveryInspectMode=true;
+      window.__recoveryReason="Storage index listener failed: "+String(err?.message||err);
+      renderRecoveryDiagnosticsPanel();
+    }
   });
+
+  // A legacy session already open when migration occurs must notice the new
+  // authority index and stop all old-document writes before adopting anything.
+  if (!shardedListener && !window.OMAXDevSafe?.active
+      && window.OMAXAuthorityRouter && !authorityIndexUnsubscribe){
+    const indexRef=FB.db.doc("workspaces/github-prod/app/stateIndexV1");
+    authorityIndexUnsubscribe=indexRef.onSnapshot((snap)=>{
+      if(!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites || !snap.exists) return;
+      window.__autosaveDisabled=true;
+      window.__recoveryInspectMode=true;
+      if(typeof workspaceStateUnsubscribe==="function"){
+        try{workspaceStateUnsubscribe();}catch(_){}
+        workspaceStateUnsubscribe=null;
+      }
+      if(typeof authorityIndexUnsubscribe==="function"){
+        try{authorityIndexUnsubscribe();}catch(_){}
+        authorityIndexUnsubscribe=null;
+      }
+      loadFromCloud().then(()=>{
+        startWorkspaceStateListener();
+        refreshRouteSafely();
+      });
+    },error=>{
+      // An unreadable authority selector is never evidence that legacy state
+      // is writable. Stop saves rather than silently continuing.
+      window.__autosaveDisabled=true;
+      window.__recoveryInspectMode=true;
+      window.__recoveryReason="Authority index watcher failed: "+String(error?.message||error);
+      renderRecoveryDiagnosticsPanel();
+    });
+  }
 }
 
 
@@ -4567,6 +4645,12 @@ async function writeReviewedInventoryIdentityRepair(next,{source,expectedRevisio
 }
 
 async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true }, options = {}){
+  const shardedBackend=authoritativeBackendMode==="sharded";
+  if(shardedBackend && !MCAP_SHARDED_WRITES_ACTIVE)
+    return {saved:false,blocked:true,definiteFailure:true,indeterminate:false,
+      stateWriteAttempted:false,stateWriteCompleted:false,
+      errorCode:"storage_writes_not_activated",
+      error:"Storage authority is read-only while full migration integration is under review."};
   const target=options.authoritativeTarget;
   if(target&&!cuttingJobSaveTargetIsCurrent(target))return {saved:false,blocked:true,definiteFailure:true,stateWriteAttempted:false,stateWriteCompleted:false,error:"Cutting-job workspace/backend changed before the transaction."};
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
@@ -4583,7 +4667,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
     if (!cuttingJobHistoryRestoreProofs.has(historyRestoreProof) || cuttingJobHistoryRestoreTransactions.has(historyRestoreProof)) return cuttingJobDeletionFailure("History restoration transaction proof is invalid or already used.");
     cuttingJobHistoryRestoreTransactions.add(historyRestoreProof);
   }
-  const writer = window.OMAXAtomicPersistence?.save;
+  const writer = shardedBackend ? window.OMAXShardedCommit?.save : window.OMAXAtomicPersistence?.save;
   if (typeof writer !== "function" || !window.CuttingFileContentFirewall){
     return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
   }
@@ -4591,7 +4675,19 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const loadedState = window.__lastLoadedCloudState;
   const totalHistoryBaseline = loadedState?.syncMeta?.rev === expectedRevision && Array.isArray(loadedState.totalHistory)
     ? loadedState.totalHistory.map(entry => ({ ...entry })) : null;
-  const result = await writer({ db:target?.db||FB.db, docRef:target?.docRef||FB.docRef, state, setOptions,
+  // Same protected mutation prepare() / data-loss guards for both backends.
+  // Storage coordinator handles immutable upload + independent readback +
+  // atomic CAS of stateIndexV1; it never writes the old monolithic state.
+  const shardedArgs = shardedBackend ? {
+    app:FB.app,reader:window.OMAXShardedReadback,
+    stager:window.OMAXWorkingShards,sharder:window.OMAXShardedState,
+    working:window.OMAXWorkingStorage,cryptoApi:crypto,
+    fetchImpl:fetch.bind(window),
+    newId:()=>crypto.randomUUID().replace(/-/g,"_"),
+    now:()=>new Date().toISOString()
+  } : {};
+  const result = await writer({ ...shardedArgs,db:target?.db||FB.db,
+    docRef:target?.docRef||FB.docRef, state, setOptions,
     expectedRevision,
     clientId:getCloudSyncClientId(), scan:scanAuthoritativeCutFileContent,
     prepare:(pending, remote)=>{
@@ -4601,7 +4697,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       }
       if(identityAuthorized){
         if(stableStringify(remote)!==identityProof.sourceKey||stableStringify(pending)!==identityProof.pendingKey)throw Object.assign(new Error("Inventory repair source or exact authorized changes no longer match."),{definite:true,code:"inventory_repair_conflict"});
-        if(estimatePayloadBytes(pending)>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
+        if(!shardedBackend&&estimatePayloadBytes(pending)>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
         return pending;
       }
       const proof = options.repairProof;
@@ -4689,7 +4785,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
             throw Object.assign(Error("Pump log change differs from the selected record."), {definite:true,code:"pump_log_mutation_rejected"});
         } else pending.pumpEff = mergeUnlessIdentical("pumpEff",mergePumpEffForSave);
       }
-      if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
+      if (!shardedBackend && estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
       // Additional restriction after all existing protected merges. Validation
       // receives an isolated copy and cannot alter the guarded save or bypass
       // CAS, identity, content, size or protected-state gates.
@@ -4735,6 +4831,11 @@ function cuttingJobSaveTargetIsCurrent(target){
 }
 async function readCuttingJobAuthoritativeSnapshot(target){
   if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend changed before server verification.");
+  if(authoritativeBackendMode === "sharded"){
+    const data=await readShardedAuthoritativeState();
+    if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend changed during Storage verification.");
+    return {state:data,fromCache:false,hasPendingWrites:false,path:target.path,backendMatches:true};
+  }
   const snapshot=await target.docRef.get({source:"server"});
   return {state:snapshot?.exists?snapshot.data():null,fromCache:snapshot?.metadata?.fromCache,hasPendingWrites:snapshot?.metadata?.hasPendingWrites,path:snapshot?.ref?.path||target.path,backendMatches:!snapshot?.ref?.firestore||snapshot.ref.firestore===target.db};
 }
@@ -4822,6 +4923,19 @@ function getInventoryIdentityRepairLocalState(){
   return live;
 }
 
+// A single independent reader for current Storage-backed authority, shared by
+// all specialized transaction and verification paths. Missing/changed indices,
+// incomplete shards and missing permissions must block, never fall back.
+async function readShardedAuthoritativeState(){
+  if(!FB.ready||!FB.user||authoritativeBackendMode !== "sharded"
+    ||typeof window.OMAXAuthorityRouter?.fromBrowser!=="function")
+    throw Error("Storage authority cannot be independently verified.");
+  const routed=await window.OMAXAuthorityRouter.fromBrowser();
+  if(routed?.mode!=="sharded"||routed?.verified!==true)
+    throw Error("Storage authority changed or failed readback.");
+  return routed.state;
+}
+
 // Firebase v8 document.get({source:"server"}) uses a SnapshotListener and can
 // reuse an active view that has not observed a just-committed transaction yet.
 // Transaction.get performs a backend lookup independent of that view. This
@@ -4830,6 +4944,12 @@ async function readInventoryMaterialAuthoritativeState(){
   const db = FB.db, docRef = FB.docRef;
   if (!FB.ready || !docRef || typeof db?.runTransaction !== "function")
     throw Error("A backend transaction read is unavailable; material verification cannot use a cached view.");
+  if(authoritativeBackendMode === "sharded"){
+    const state=await readShardedAuthoritativeState();
+    if(!FB.ready || FB.db!==db || FB.docRef!==docRef)
+      throw Error("Material authority changed during Storage verification.");
+    return {revision:state.syncMeta.rev,state,path:docRef.path,readSource:"storage_manifest_verified"};
+  }
   return db.runTransaction(async transaction=>{
     const snapshot = await transaction.get(docRef);
     const state = snapshot?.exists ? (typeof snapshot.data === "function" ? snapshot.data() : snapshot.data) : null;
@@ -4841,6 +4961,12 @@ async function readInventoryMaterialAuthoritativeState(){
 async function readMaintenanceTaskAuthoritativeState(target){
   if(!cuttingJobSaveTargetIsCurrent(target)||typeof target.db?.runTransaction!=="function")
     throw Error("Task archive transfer requires an independent backend transaction read for the captured workspace.");
+  if(authoritativeBackendMode === "sharded"){
+    const state=await readShardedAuthoritativeState();
+    if(!cuttingJobSaveTargetIsCurrent(target))
+      throw Error("Task archive transfer workspace/backend changed during Storage verification.");
+    return state;
+  }
   // Firebase v8 server-get can still return a stale listener view after commit.
   // Read only through the captured backend; never fall back to document.get.
   const state=await target.db.runTransaction(async transaction=>{
@@ -8280,7 +8406,11 @@ function checkAuthoritativeIdentityIntegrity(data){
     if((entry.expectedShape==="array"&&!array)||(entry.expectedShape==="object"&&!object)||(entry.expectedShape==="arrayOrObject"&&!array&&!object))blockers.push(`Protected field ${entry.path} has invalid shape.`);
   }
   if(scanAuthoritativeCutFileContent(data).contaminated)blockers.push("Protected cutting-file content firewall rejected authoritative state.");
-  if(estimatePayloadBytes(data)>=FIRESTORE_BLOCK_BYTES)blockers.push("Protected authoritative payload exceeds the save limit.");
+  // Storage-backed data is still validated for schema, identities, retained
+  // records, and dangerous reductions. Its size is not a Firestore document
+  // size issue because this is a verified read-only Storage reconstruction.
+  if(authoritativeBackendMode !== "sharded" && estimatePayloadBytes(data)>=FIRESTORE_BLOCK_BYTES)
+    blockers.push("Protected authoritative payload exceeds the save limit.");
   if(check.valid&&!blockers.length){
     // Assess the authoritative document itself, without treating local caches
     // as restore sources. This runs the existing registry/coverage/compaction
@@ -8339,13 +8469,31 @@ async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   setCloudLoadGate({ loadComplete:false, adoptComplete:false });
   try {
-    const snap = await FB.docRef.get({ source:"server" });
-    const data = snap.exists ? snap.data() : null;
-    if (!snap.exists || !stateHasMeaningfulData(data)){
+    // Active authority index wins; a missing/unverifiable index read must
+    // never be treated as permission to use a stale legacy document.
+    const routed = !window.OMAXDevSafe?.active && window.OMAXAuthorityRouter
+      && FB.app?.options?.projectId === "wj-tracker-v2"
+      ? await window.OMAXAuthorityRouter.fromBrowser() : null;
+    const snap = routed ? null : await FB.docRef.get({ source:"server" });
+    const data = routed ? routed.state : (snap?.exists ? snap.data() : null);
+    authoritativeBackendMode = routed?.mode || "legacy";
+    window.__omaxActiveStateBackend = authoritativeBackendMode;
+    if (!data || !stateHasMeaningfulData(data)){
       enterMissingStateRecovery(data);
       return { loaded:false, recovery:true, reason:"authoritative_state_missing_or_empty" };
     }
-    return adoptIdentityCheckedAuthoritativeState(data);
+    const adopted = adoptIdentityCheckedAuthoritativeState(data);
+    if (routed?.mode === "sharded"){
+      // Storage reads work; writes, specialized mutation handlers and realtime
+      // adoption must stay read-only until all old client save paths are routed.
+      window.__autosaveDisabled = true;
+      window.__recoveryInspectMode = true;
+      window.__recoveryReason = "Storage-backed authority loaded read-only. Full save/cutover implementation is not active.";
+      renderRecoveryDiagnosticsPanel();
+      return {loaded:true,recovery:true,reason:"storage_authority_readonly",
+        revision:routed.revision,backend:"sharded"};
+    }
+    return adopted;
   } catch (error){
     console.error("Cloud load failed:", error);
     setCloudLoadGate({ loadComplete:true, adoptComplete:false });
