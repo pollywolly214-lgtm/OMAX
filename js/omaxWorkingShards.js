@@ -65,7 +65,7 @@
       {contentType:"application/json",customMetadata:metadata});
     return checkObject(ctx,{path,serialized,checksum,field,operationId,revision,createdAtISO,actor});
   }
-  async function stage({confirmation,app,sharder,working,cryptoApi,fetchImpl,newId,now}={}){
+  async function stage({confirmation,app,sharder,working,cryptoApi,fetchImpl,newId,now,providedSource}={}){
     if(confirmation!==PHRASE)fail("explicit opt-in phrase required.");
     if(busy)fail("a staging operation is already running.");
     busy=true;
@@ -75,7 +75,7 @@
       const operationId=newId(),createdAtISO=now();
       if(!id(operationId)||typeof createdAtISO!=="string"||!/^\d{4}-\d{2}-\d{2}T/.test(createdAtISO))
         fail("invalid operation ID or timestamp.");
-      const source=await working.readSourceTwice(ctx);
+      const source=providedSource===undefined ? await working.readSourceTwice(ctx) : working.validateSource(providedSource);
       const original=sharder.canonical(source),revision=source.syncMeta.rev;
       const proposed=await sharder.plan({state:source,workspaceId:WORKSPACE,operationId,cryptoApi});
       if(proposed.manifest.sourceRevision!==revision)fail("sharded source revision mismatch.");
@@ -95,11 +95,14 @@
       const manifestPath=pathFor("_manifest",operationId,manifestHash);
       await putChecked(ctx,{field:"_manifest",operationId,serialized:manifestBody,checksum:manifestHash,
         revision,createdAtISO});
-      const current=await working.readSourceTwice(ctx);
-      if(sharder.canonical(current)!==original)
-        fail("source changed after staged upload; retain copies but do NOT perform cutover.");
+      if(providedSource===undefined){
+        const current=await working.readSourceTwice(ctx);
+        if(sharder.canonical(current)!==original)
+          fail("source changed after staged upload; retain copies but do NOT perform cutover.");
+      }
       return Object.freeze({verified:true,projectId:PROJECT,bucket:BUCKET,revision,
         operationId,actorUid:ctx.actor,createdAtISO,
+        sourceEvidence:providedSource===undefined?"rechecked-server":"verified-caller-supplied",
         fieldCount:proposed.shards.length,archiveObjects:proposed.shards.length+1,
         manifestPath,manifestSha256:manifestHash,firestoreWrites:0,firestoreDeletes:0,
         status:"Verified immutable staged COPY ONLY. No live Firestore data was moved or removed."});
