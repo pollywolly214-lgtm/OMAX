@@ -127,5 +127,60 @@
     return Object.freeze({activated:true,indexPath:INDEX,sourceRevision:selected.sourceRevision,
       legacyStateDeleted:false,storageRewritten:false});
   }
-  return Object.freeze({PROJECT,BUCKET,WORKSPACE,LEGACY,INDEX,verify,activate});
+  // Only the zero-write activation window is reversible. Once a sharded
+  // update changes the index revision, restoring the old monolithic state
+  // would discard newer business history and is therefore forbidden.
+  async function rollbackBeforeFirstWrite({approval,rulesEnforced,...args}={}){
+    if(approval!=="ROLL BACK OMAX BEFORE FIRST SHARDED SAVE"||rulesEnforced!==true)
+      fail("approval_missing","Reviewed rollback rules and explicit approval required.");
+    const ctx=context(args);
+    const indexed=await serverSnapshot(ctx.indexRef);
+    if(!indexed.exists)fail("missing_index","Active index is absent.");
+    const baselineIndex=indexed.data();
+    if(baselineIndex.mode!=="active"||baselineIndex.schemaVersion!==1
+      ||baselineIndex.workspaceId!==WORKSPACE||baselineIndex.projectId!==PROJECT
+      ||baselineIndex.bucket!==BUCKET||baselineIndex.previousRevision!==0
+      ||!integer(baselineIndex.revision)
+      ||baselineIndex.actorUid!==ctx.app.auth().currentUser?.uid)
+      fail("rollback_unsafe","Storage authority has changed or post-activation saves may exist.");
+    const original=await serverSnapshot(ctx.legacyRef);
+    if(!original.exists)fail("missing_legacy","Original state no longer exists.");
+    const legacyState=ctx.working.validateSource(original.data());
+    if(legacyState.syncMeta.rev!==baselineIndex.revision)
+      fail("rollback_unsafe","Original and active index revisions differ.");
+    const copied=await ctx.reader.read({...baselineIndex,
+      sourceRevision:baselineIndex.revision,
+      app:ctx.app,sharder:ctx.sharder,cryptoApi:ctx.cryptoApi,fetchImpl:ctx.fetchImpl});
+    if(ctx.sharder.canonical(ctx.working.validateSource(copied.state))
+      !==ctx.sharder.canonical(legacyState))
+      fail("rollback_unsafe","Original state no longer matches active Storage authority.");
+    const originalKey=ctx.sharder.canonical(legacyState);
+    const indexKey=ctx.sharder.canonical(baselineIndex);
+    let writeQueued=false;
+    try{
+      await ctx.db.runTransaction(async tx=>{
+        const actualIndex=await tx.get(ctx.indexRef);
+        const actualLegacy=await tx.get(ctx.legacyRef);
+        if(!actualIndex.exists||!actualLegacy.exists
+          ||ctx.sharder.canonical(actualIndex.data())!==indexKey
+          ||ctx.sharder.canonical(actualLegacy.data())!==originalKey)
+          fail("rollback_conflict","Index or original data changed during rollback.");
+        tx.delete(ctx.indexRef);
+        writeQueued=true;
+      });
+    }catch(error){
+      if(writeQueued)fail("rollback_indeterminate",
+        "Rollback may have been committed. Inspect the index and original state before retrying.");
+      throw error;
+    }
+    const afterIndex=await serverSnapshot(ctx.indexRef);
+    const afterLegacy=await serverSnapshot(ctx.legacyRef);
+    if(afterIndex.exists||!afterLegacy.exists
+      ||ctx.sharder.canonical(afterLegacy.data())!==originalKey)
+      fail("rollback_indeterminate","Rollback readback does not match expected original state.");
+    return Object.freeze({rolledBack:true,legacyUnchanged:true,
+      shardedObjectsDeleted:0,legacyRevision:baselineIndex.revision,
+      note:"Only an activation with no subsequent sharded saves may be reversed."});
+  }
+  return Object.freeze({PROJECT,BUCKET,WORKSPACE,LEGACY,INDEX,verify,activate,rollbackBeforeFirstWrite});
 });
