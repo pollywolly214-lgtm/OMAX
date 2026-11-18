@@ -14,6 +14,7 @@
   const INDEX="workspaces/github-prod/app/stateIndexV1";
   const fail=(code,message)=>{throw Object.assign(Error("OMAX cutover: "+message),{code});};
   const integer=x=>Number.isSafeInteger(x)&&x>0;
+  const verifiedStates=new WeakMap();
   function context({app,reader,sharder,working,cryptoApi,fetchImpl}={}){
     if(!app||app.name!=="[DEFAULT]"||app.options?.projectId!==PROJECT
       ||app.options?.storageBucket!==BUCKET||typeof app.auth!=="function"
@@ -51,7 +52,11 @@
         +"/state-shards/v1/_manifest/"+candidate.operationId
         +"/"+candidate.manifestSha256+".json")
       fail("invalid_candidate","Complete immutable manifest identity is required.");
-    return Object.freeze({...candidate});
+    return Object.freeze({
+      sourceRevision:candidate.sourceRevision,operationId:candidate.operationId,
+      actorUid:candidate.actorUid,manifestSha256:candidate.manifestSha256,
+      createdAtISO:candidate.createdAtISO,manifestPath:candidate.manifestPath
+    });
   }
   async function verify({candidate,...args}={}){
     const ctx=context(args),selected=normalizedCandidate(candidate);
@@ -71,11 +76,12 @@
     const second=await serverSnapshot(ctx.legacyRef);
     if(!second.exists||ctx.sharder.canonical(second.data())!==ctx.sharder.canonical(original))
       fail("source_changed","Original state changed while verifying the copy.");
-    return Object.freeze({verified:true,candidate:selected,revision:original.syncMeta.rev,
-      sourceCanonical:ctx.sharder.canonical(original),
+    const proof=Object.freeze({verified:true,candidate:selected,revision:original.syncMeta.rev,
       fieldCount:Object.keys(original).length,
       firestoreWrites:0,firestoreDeletes:0,
       note:"Read-only preflight. The original Firestore document remains authoritative."});
+    verifiedStates.set(proof,ctx.sharder.canonical(original));
+    return proof;
   }
   // Never invoke until verified Firestore rules make OLD app/state writes
   // impossible after this index document is created. The old-client lockout
@@ -104,7 +110,7 @@
         // Preflight state can change without bumping revision in a rogue client:
         // compare it to independently reconstructed candidate inside the
         // transaction through precomputed immutable canonical content.
-        if(ctx.sharder.canonical(source)!==preflight.sourceCanonical)
+        if(ctx.sharder.canonical(source)!==verifiedStates.get(preflight))
           fail("concurrent_mutation","Original Firestore content changed since preflight.");
         tx.set(ctx.indexRef,index);
         writeQueued=true;
