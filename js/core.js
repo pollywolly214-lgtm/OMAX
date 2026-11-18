@@ -2799,7 +2799,33 @@ function startWorkspaceStateListener(){
       console.warn("Route refresh after workspace sync failed", err);
     }
   };
-  workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
+  const shardedListener = window.__omaxActiveStateBackend === "sharded";
+  const listenerRef = shardedListener
+    ? FB.db.doc("workspaces/github-prod/app/stateIndexV1") : FB.docRef;
+  workspaceStateUnsubscribe = listenerRef.onSnapshot((snap)=>{
+    if (shardedListener){
+      // The active index is authoritative; never read a legacy state echo.
+      if (!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites) return;
+      if (!snap.exists){
+        window.__autosaveDisabled = true;
+        window.__recoveryInspectMode = true;
+        window.__recoveryReason = "Active Storage index is missing. Writes remain disabled.";
+        renderRecoveryDiagnosticsPanel();
+        return;
+      }
+      try{
+        const index = window.OMAXShardedCommit.checkIndex(snap.data());
+        if (index.revision <= Number(window.__loadedCloudRevisionForSaveGuard || 0)) return;
+        window.__autosaveDisabled = true;
+        loadFromCloud().then(refreshRouteSafely);
+      }catch(error){
+        window.__autosaveDisabled = true;
+        window.__recoveryInspectMode = true;
+        window.__recoveryReason = "Invalid Storage index: " + String(error?.message || error);
+        renderRecoveryDiagnosticsPanel();
+      }
+      return;
+    }
     // Cache and pending local echoes cannot establish authoritative corruption
     // or absence. Keep the adopted baseline until a confirmed server event.
     if (!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites) return;
@@ -2832,7 +2858,44 @@ function startWorkspaceStateListener(){
     refreshRouteSafely();
   }, (err)=>{
     console.warn("Workspace realtime sync listener error", err);
+    if(shardedListener){
+      window.__autosaveDisabled=true;
+      window.__recoveryInspectMode=true;
+      window.__recoveryReason="Storage index listener failed: "+String(err?.message||err);
+      renderRecoveryDiagnosticsPanel();
+    }
   });
+
+  // A legacy session already open when migration occurs must notice the new
+  // authority index and stop all old-document writes before adopting anything.
+  if (!shardedListener && !window.OMAXDevSafe?.active
+      && window.OMAXAuthorityRouter && !authorityIndexUnsubscribe){
+    const indexRef=FB.db.doc("workspaces/github-prod/app/stateIndexV1");
+    authorityIndexUnsubscribe=indexRef.onSnapshot((snap)=>{
+      if(!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites || !snap.exists) return;
+      window.__autosaveDisabled=true;
+      window.__recoveryInspectMode=true;
+      if(typeof workspaceStateUnsubscribe==="function"){
+        try{workspaceStateUnsubscribe();}catch(_){}
+        workspaceStateUnsubscribe=null;
+      }
+      if(typeof authorityIndexUnsubscribe==="function"){
+        try{authorityIndexUnsubscribe();}catch(_){}
+        authorityIndexUnsubscribe=null;
+      }
+      loadFromCloud().then(()=>{
+        startWorkspaceStateListener();
+        refreshRouteSafely();
+      });
+    },error=>{
+      // An unreadable authority selector is never evidence that legacy state
+      // is writable. Stop saves rather than silently continuing.
+      window.__autosaveDisabled=true;
+      window.__recoveryInspectMode=true;
+      window.__recoveryReason="Authority index watcher failed: "+String(error?.message||error);
+      renderRecoveryDiagnosticsPanel();
+    });
+  }
 }
 
 
