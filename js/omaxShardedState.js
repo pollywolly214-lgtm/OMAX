@@ -165,7 +165,7 @@
       for(let i=0;i<group.count;i++){
         if(!group.parts.has(i))fail("missing segment "+field+" part "+i+".");
         const part=group.parts.get(i);
-        if(group.kind==="array")combined.push(...part);
+        if(group.kind==="array")for(const item of part)combined.push(item);
         else for(const [key,value] of Object.entries(part)){
           if(Object.prototype.hasOwnProperty.call(combined,key))
             fail("duplicate collection key across segments.");
