@@ -33,6 +33,10 @@ function setup(){
       set:(ref,data)=>{
         assert.equal(ref.path,Activation.INDEX);
         index=clone(data);committedWrites++;
+      },
+      delete:ref=>{
+        assert.equal(ref.path,Activation.INDEX);
+        index=null;committedWrites++;
       }
     })};
   const storage={ref:()=>({child:path=>({
@@ -110,4 +114,41 @@ test("existing index blocks any second migration activation",async()=>{
   e.setIndex({mode:"active",revision:11});
   await assert.rejects(Activation.verify({...e.args,candidate}),{code:"already_indexed"});
   assert.equal(e.writes(),0);
+});
+
+test("explicit pre-first-write rollback restores original authority without touching business records",async()=>{
+  const e=setup(),candidate=await e.stage(),before=e.legacy();
+  await Activation.activate({...e.args,candidate,
+    approval:"ACTIVATE OMAX SHARDED AUTHORITY",rulesEnforced:true});
+  await assert.rejects(Activation.rollbackBeforeFirstWrite({...e.args,
+    approval:"WRONG",rulesEnforced:true}),{code:"approval_missing"});
+  const result=await Activation.rollbackBeforeFirstWrite({...e.args,
+    approval:"ROLL BACK OMAX BEFORE FIRST SHARDED SAVE",rulesEnforced:true});
+  assert.equal(result.rolledBack,true);
+  assert.equal(e.index(),null);
+  assert.deepEqual(e.legacy(),before);
+  assert.equal(e.writes(),2);
+});
+test("rollback refuses if new history was saved after activation",async()=>{
+  const e=setup(),candidate=await e.stage();
+  await Activation.activate({...e.args,candidate,
+    approval:"ACTIVATE OMAX SHARDED AUTHORITY",rulesEnforced:true});
+  const i=e.index();
+  e.setIndex({...i,previousRevision:11,revision:12});
+  await assert.rejects(Activation.rollbackBeforeFirstWrite({...e.args,
+    approval:"ROLL BACK OMAX BEFORE FIRST SHARDED SAVE",rulesEnforced:true}),
+    {code:"rollback_unsafe"});
+  assert.equal(e.index().revision,12);
+  assert.equal(e.writes(),1);
+});
+test("transaction-time mutation refuses rollback without deleting active pointer",async()=>{
+  const e=setup(),candidate=await e.stage();
+  await Activation.activate({...e.args,candidate,
+    approval:"ACTIVATE OMAX SHARDED AUTHORITY",rulesEnforced:true});
+  e.race();
+  await assert.rejects(Activation.rollbackBeforeFirstWrite({...e.args,
+    approval:"ROLL BACK OMAX BEFORE FIRST SHARDED SAVE",rulesEnforced:true}),
+    {code:"rollback_conflict"});
+  assert.ok(e.index());
+  assert.equal(e.writes(),1);
 });
