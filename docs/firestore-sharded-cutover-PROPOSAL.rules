@@ -105,7 +105,14 @@ service cloud.firestore {
     }
     match /workspaces/github-prod/app/stateIndexV1 {
       allow get: if authorized();
-      allow list, delete: if false;
+      allow list: if false;
+      // Only index creation without any later sharded save can be reversed.
+      // The untouched original state must still have the exact same revision.
+      allow delete: if authorized()
+        && validStateIndex(resource.data)
+        && resource.data.previousRevision == 0
+        && exists(legacyStatePath())
+        && get(legacyStatePath()).data.syncMeta.rev == resource.data.revision;
       allow create: if authorized()
         && validStateIndex(request.resource.data)
         && request.resource.data.previousRevision == 0
