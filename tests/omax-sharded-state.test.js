@@ -36,11 +36,59 @@ test("missing shard, corrupted body, and missing manifest descriptor fail closed
 });
 test("oversized single collection blocks pending sharding instead of dropping records",async()=>{
   const big=state();big.completedCuttingJobs=[{id:"large",notes:"x".repeat(shards.LIMIT)}];
-  await assert.rejects(plan(big),/exceeds safe shard size/);
+  await assert.rejects(plan(big),/element exceeds maximum shard size/);
 });
 test("changing source revision after the plan cannot be mistaken for identical state",async()=>{
   const a=state(),built=await plan(a);
   a.syncMeta.rev++;
   const downloaded=new Map(built.shards.map(s=>[s.path,s.serialized]));
   await assert.rejects(shards.checkExact({source:a,manifest:built.manifest,serializedByPath:downloaded,cryptoApi:webcrypto}),/differs/);
+});
+
+test("large arrays split into immutable bounded parts and reconstruct without renumbering",async()=>{
+  const original=state(),count=850;
+  original.completedCuttingJobs=Array.from({length:count},(_,i)=>({
+    id:"cut_"+i,cutNumber:i+1,manualLogs:[{id:"entry_"+i,note:"x".repeat(1100)}]
+  }));
+  const built=await plan(original);
+  const chunks=built.manifest.shards.filter(x=>x.sourceField==="completedCuttingJobs");
+  assert.ok(chunks.length>=2,"Expected field-level splitting before Storage size limit.");
+  assert.ok(built.shards.every(x=>x.sizeBytes<=shards.LIMIT));
+  assert.ok(chunks.every((x,i)=>x.partIndex===i&&x.partCount===chunks.length&&x.partKind==="array"));
+  const verified=await shards.checkExact({source:original,manifest:built.manifest,
+    serializedByPath:new Map(built.shards.map(x=>[x.path,x.serialized])),cryptoApi:webcrypto});
+  assert.equal(verified.fieldCount,Object.keys(original).length);
+  assert.equal(original.completedCuttingJobs.length,count);
+});
+test("large arbitrary objects split without losing keys or nested data",async()=>{
+  const original=state();
+  original.customUnknown=Object.fromEntries(Array.from({length:800},(_,i)=>[
+    "opaque_"+i,{payload:"z".repeat(1100),child:{keep:i}}
+  ]));
+  const built=await plan(original);
+  const chunks=built.manifest.shards.filter(x=>x.sourceField==="customUnknown");
+  assert.ok(chunks.length>=2);
+  assert.ok(chunks.every(x=>x.partKind==="object"));
+  const verified=await shards.checkExact({source:original,manifest:built.manifest,
+    serializedByPath:new Map(built.shards.map(x=>[x.path,x.serialized])),cryptoApi:webcrypto});
+  assert.equal(verified.verified,true);
+});
+test("missing, repeated, or reclassified segments are rejected instead of partially loading",async()=>{
+  const original=state();
+  original.completedCuttingJobs=Array.from({length:850},(_,i)=>({id:"id_"+i,description:"m".repeat(1000)}));
+  const built=await plan(original),chunks=built.manifest.shards.filter(s=>s.sourceField==="completedCuttingJobs");
+  assert.ok(chunks.length>1);
+  const good=new Map(built.shards.map(x=>[x.path,x.serialized]));
+  const missing=new Map(good);missing.delete(chunks[1].path);
+  await assert.rejects(shards.reconstruct({manifest:built.manifest,serializedByPath:missing,cryptoApi:webcrypto}),/missing shard/);
+  const incomplete={...built.manifest,shards:built.manifest.shards.filter(x=>x.path!==chunks[1].path)};
+  await assert.rejects(shards.reconstruct({manifest:incomplete,serializedByPath:good,cryptoApi:webcrypto}),/incomplete or colliding/);
+  const changed={...built.manifest,shards:built.manifest.shards.map(x=>
+    x.path===chunks[1].path?{...x,partIndex:0}:x)};
+  await assert.rejects(shards.reconstruct({manifest:changed,serializedByPath:good,cryptoApi:webcrypto}),/invalid segmented/);
+});
+test("oversized noncollection payloads block rather than silently truncate",async()=>{
+  const original=state();
+  original.customUnknown="X".repeat(shards.LIMIT+100);
+  await assert.rejects(plan(original),/cannot be split without altering data/);
 });
