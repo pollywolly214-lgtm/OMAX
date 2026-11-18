@@ -1,0 +1,46 @@
+name: MCAP Storage migration safety
+
+on:
+  pull_request:
+    paths:
+      - "js/omax*.js"
+      - "js/core.js"
+      - "tests/omax-*.test.js"
+      - "tests/mcap-storage-*.test.js"
+      - ".github/workflows/mcap-storage-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: Validate isolated migration modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax validation
+        run: |
+          node --check js/core.js
+          node --check js/omaxAuthorityRouter.js
+          node --check js/omaxShardedActivation.js
+          node --check js/omaxShardedCommit.js
+          node --check js/omaxShardedState.js
+          node --check js/omaxWorkingShards.js
+          node --check js/omaxShardedReadback.js
+      - name: Migration regression suite
+        run: >
+          node --test
+          tests/mcap-storage-foundation.test.js
+          tests/mcap-storage-transport.test.js
+          tests/omax-sharded-state.test.js
+          tests/omax-working-storage.test.js
+          tests/omax-working-shards.test.js
+          tests/omax-sharded-commit.test.js
+          tests/omax-sharded-activation.test.js
+          tests/omax-authority-router.test.js
