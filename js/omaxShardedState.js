@@ -115,7 +115,7 @@
       ||!validID(manifest.operationId)||!Number.isSafeInteger(manifest.sourceRevision)||manifest.sourceRevision<0
       ||!Array.isArray(manifest.shards)||!manifest.shards.length||manifest.shards.length>MAX_SHARDS)
       fail("invalid manifest.");
-    const output=Object.create(null),seen=new Set(),split=new Map();
+    const output={},seen=new Set(),split=new Map();
     for(const entry of manifest.shards){
       if(!validField(entry?.field)||seen.has(entry.field)||!validSHA(entry.sha256)
         ||!Number.isSafeInteger(entry.sizeBytes)||entry.sizeBytes<1||entry.sizeBytes>LIMIT
@@ -161,7 +161,7 @@
     for(const [field,group] of split){
       if(group.parts.size!==group.count||Object.prototype.hasOwnProperty.call(output,field))
         fail("incomplete or colliding segmented source field.");
-      const combined=group.kind==="array"?[]:Object.create(null);
+      const combined=group.kind==="array"?[]:{};
       for(let i=0;i<group.count;i++){
         if(!group.parts.has(i))fail("missing segment "+field+" part "+i+".");
         const part=group.parts.get(i);
