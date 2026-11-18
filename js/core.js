@@ -102,6 +102,10 @@ function blockCloudSave(reason, details = null){
 
 function canWriteCloud(reason = "cloud save"){
   if (typeof window === "undefined") return false;
+  // MCAP read-side integration is intentionally fail-closed. Do not let any
+  // legacy writer mutate app/state after a Storage index becomes authoritative.
+  if (window.__omaxActiveStateBackend === "sharded") return blockCloudSave(
+    `${reason}; Storage-backed authority is still read-only until full writer cutover tests pass.`);
   if (isRecoveryMode()) return blockCloudSave(`${reason}; Recovery Mode is read-only, cloud saves disabled.`);
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
   if (window.maintenanceCalendarCancellationApi?.isBusy() && reason !== "maintenance calendar cancellation") return blockCloudSave(`${reason}; a maintenance cancellation is being verified.`);
@@ -664,6 +668,7 @@ let firebaseInitStarted = false;
 let firebaseSettingsApplied = false;
 let workspaceMetadataWritesBlocked = false;
 let workspaceStateUnsubscribe = null;
+let authorityIndexUnsubscribe = null;
 let lastAppliedCloudRevision = 0;
 let hasPendingLocalChanges = false;
 let lastLocalMutationAt = 0;
@@ -2703,6 +2708,11 @@ async function initFirebase(){
       try { workspaceStateUnsubscribe(); } catch (err) { console.warn("Failed to stop workspace sync listener", err); }
       workspaceStateUnsubscribe = null;
     }
+    if (typeof authorityIndexUnsubscribe === "function"){
+      try { authorityIndexUnsubscribe(); } catch (err) { console.warn("Failed to stop authority index watcher", err); }
+      authorityIndexUnsubscribe = null;
+    }
+    window.__omaxActiveStateBackend = null;
     lastAppliedCloudRevision = 0;
     if (user){
       if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
@@ -8339,13 +8349,30 @@ async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   setCloudLoadGate({ loadComplete:false, adoptComplete:false });
   try {
-    const snap = await FB.docRef.get({ source:"server" });
-    const data = snap.exists ? snap.data() : null;
-    if (!snap.exists || !stateHasMeaningfulData(data)){
+    // Active authority index wins; a missing/unverifiable index read must
+    // never be treated as permission to use a stale legacy document.
+    const routed = !window.OMAXDevSafe?.active && window.OMAXAuthorityRouter
+      && FB.app?.options?.projectId === "wj-tracker-v2"
+      ? await window.OMAXAuthorityRouter.fromBrowser() : null;
+    const snap = routed ? null : await FB.docRef.get({ source:"server" });
+    const data = routed ? routed.state : (snap?.exists ? snap.data() : null);
+    window.__omaxActiveStateBackend = routed?.mode || "legacy";
+    if (!data || !stateHasMeaningfulData(data)){
       enterMissingStateRecovery(data);
       return { loaded:false, recovery:true, reason:"authoritative_state_missing_or_empty" };
     }
-    return adoptIdentityCheckedAuthoritativeState(data);
+    const adopted = adoptIdentityCheckedAuthoritativeState(data);
+    if (routed?.mode === "sharded"){
+      // Storage reads work; writes, specialized mutation handlers and realtime
+      // adoption must stay read-only until all old client save paths are routed.
+      window.__autosaveDisabled = true;
+      window.__recoveryInspectMode = true;
+      window.__recoveryReason = "Storage-backed authority loaded read-only. Full save/cutover implementation is not active.";
+      renderRecoveryDiagnosticsPanel();
+      return {loaded:true,recovery:true,reason:"storage_authority_readonly",
+        revision:routed.revision,backend:"sharded"};
+    }
+    return adopted;
   } catch (error){
     console.error("Cloud load failed:", error);
     setCloudLoadGate({ loadComplete:true, adoptComplete:false });
