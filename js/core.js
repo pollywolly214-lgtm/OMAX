@@ -670,6 +670,9 @@ let workspaceMetadataWritesBlocked = false;
 let workspaceStateUnsubscribe = null;
 let authorityIndexUnsubscribe = null;
 let authoritativeBackendMode = "unknown";
+// Keep closed until Storage CAS, protected mutations and old-client lockout
+// have passed authoritative integration tests. Not a browser-configurable flag.
+const MCAP_SHARDED_WRITES_ACTIVE = false;
 let lastAppliedCloudRevision = 0;
 let hasPendingLocalChanges = false;
 let lastLocalMutationAt = 0;
@@ -4642,6 +4645,12 @@ async function writeReviewedInventoryIdentityRepair(next,{source,expectedRevisio
 }
 
 async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true }, options = {}){
+  const shardedBackend=authoritativeBackendMode==="sharded";
+  if(shardedBackend && !MCAP_SHARDED_WRITES_ACTIVE)
+    return {saved:false,blocked:true,definiteFailure:true,indeterminate:false,
+      stateWriteAttempted:false,stateWriteCompleted:false,
+      errorCode:"storage_writes_not_activated",
+      error:"Storage authority is read-only while full migration integration is under review."};
   const target=options.authoritativeTarget;
   if(target&&!cuttingJobSaveTargetIsCurrent(target))return {saved:false,blocked:true,definiteFailure:true,stateWriteAttempted:false,stateWriteCompleted:false,error:"Cutting-job workspace/backend changed before the transaction."};
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
@@ -4658,7 +4667,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
     if (!cuttingJobHistoryRestoreProofs.has(historyRestoreProof) || cuttingJobHistoryRestoreTransactions.has(historyRestoreProof)) return cuttingJobDeletionFailure("History restoration transaction proof is invalid or already used.");
     cuttingJobHistoryRestoreTransactions.add(historyRestoreProof);
   }
-  const writer = window.OMAXAtomicPersistence?.save;
+  const writer = shardedBackend ? window.OMAXShardedCommit?.save : window.OMAXAtomicPersistence?.save;
   if (typeof writer !== "function" || !window.CuttingFileContentFirewall){
     return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
   }
@@ -4666,7 +4675,19 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const loadedState = window.__lastLoadedCloudState;
   const totalHistoryBaseline = loadedState?.syncMeta?.rev === expectedRevision && Array.isArray(loadedState.totalHistory)
     ? loadedState.totalHistory.map(entry => ({ ...entry })) : null;
-  const result = await writer({ db:target?.db||FB.db, docRef:target?.docRef||FB.docRef, state, setOptions,
+  // Same protected mutation prepare() / data-loss guards for both backends.
+  // Storage coordinator handles immutable upload + independent readback +
+  // atomic CAS of stateIndexV1; it never writes the old monolithic state.
+  const shardedArgs = shardedBackend ? {
+    app:FB.app,reader:window.OMAXShardedReadback,
+    stager:window.OMAXWorkingShards,sharder:window.OMAXShardedState,
+    working:window.OMAXWorkingStorage,cryptoApi:crypto,
+    fetchImpl:fetch.bind(window),
+    newId:()=>crypto.randomUUID().replace(/-/g,"_"),
+    now:()=>new Date().toISOString()
+  } : {};
+  const result = await writer({ ...shardedArgs,db:target?.db||FB.db,
+    docRef:target?.docRef||FB.docRef, state, setOptions,
     expectedRevision,
     clientId:getCloudSyncClientId(), scan:scanAuthoritativeCutFileContent,
     prepare:(pending, remote)=>{
@@ -4676,7 +4697,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       }
       if(identityAuthorized){
         if(stableStringify(remote)!==identityProof.sourceKey||stableStringify(pending)!==identityProof.pendingKey)throw Object.assign(new Error("Inventory repair source or exact authorized changes no longer match."),{definite:true,code:"inventory_repair_conflict"});
-        if(estimatePayloadBytes(pending)>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
+        if(!shardedBackend&&estimatePayloadBytes(pending)>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
         return pending;
       }
       const proof = options.repairProof;
@@ -4764,7 +4785,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
             throw Object.assign(Error("Pump log change differs from the selected record."), {definite:true,code:"pump_log_mutation_rejected"});
         } else pending.pumpEff = mergeUnlessIdentical("pumpEff",mergePumpEffForSave);
       }
-      if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
+      if (!shardedBackend && estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
       // Additional restriction after all existing protected merges. Validation
       // receives an isolated copy and cannot alter the guarded save or bypass
       // CAS, identity, content, size or protected-state gates.
