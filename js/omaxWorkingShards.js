@@ -103,7 +103,7 @@
       return Object.freeze({verified:true,projectId:PROJECT,bucket:BUCKET,revision,
         operationId,actorUid:ctx.actor,createdAtISO,
         sourceEvidence:providedSource===undefined?"rechecked-server":"verified-caller-supplied",
-        fieldCount:proposed.shards.length,archiveObjects:proposed.shards.length+1,
+        fieldCount:Object.keys(source).length,archiveObjects:proposed.shards.length+1,
         manifestPath,manifestSha256:manifestHash,firestoreWrites:0,firestoreDeletes:0,
         status:"Verified immutable staged COPY ONLY. No live Firestore data was moved or removed."});
     }finally{busy=false;}
