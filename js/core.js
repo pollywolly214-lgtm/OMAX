@@ -4808,6 +4808,11 @@ function cuttingJobSaveTargetIsCurrent(target){
 }
 async function readCuttingJobAuthoritativeSnapshot(target){
   if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend changed before server verification.");
+  if(window.__omaxActiveStateBackend==="sharded"){
+    const data=await readShardedAuthoritativeState();
+    if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend changed during Storage verification.");
+    return {state:data,fromCache:false,hasPendingWrites:false,path:target.path,backendMatches:true};
+  }
   const snapshot=await target.docRef.get({source:"server"});
   return {state:snapshot?.exists?snapshot.data():null,fromCache:snapshot?.metadata?.fromCache,hasPendingWrites:snapshot?.metadata?.hasPendingWrites,path:snapshot?.ref?.path||target.path,backendMatches:!snapshot?.ref?.firestore||snapshot.ref.firestore===target.db};
 }
@@ -4895,6 +4900,19 @@ function getInventoryIdentityRepairLocalState(){
   return live;
 }
 
+// A single independent reader for current Storage-backed authority, shared by
+// all specialized transaction and verification paths. Missing/changed indices,
+// incomplete shards and missing permissions must block, never fall back.
+async function readShardedAuthoritativeState(){
+  if(!FB.ready||!FB.user||window.__omaxActiveStateBackend!=="sharded"
+    ||typeof window.OMAXAuthorityRouter?.fromBrowser!=="function")
+    throw Error("Storage authority cannot be independently verified.");
+  const routed=await window.OMAXAuthorityRouter.fromBrowser();
+  if(routed?.mode!=="sharded"||routed?.verified!==true)
+    throw Error("Storage authority changed or failed readback.");
+  return routed.state;
+}
+
 // Firebase v8 document.get({source:"server"}) uses a SnapshotListener and can
 // reuse an active view that has not observed a just-committed transaction yet.
 // Transaction.get performs a backend lookup independent of that view. This
@@ -4903,6 +4921,12 @@ async function readInventoryMaterialAuthoritativeState(){
   const db = FB.db, docRef = FB.docRef;
   if (!FB.ready || !docRef || typeof db?.runTransaction !== "function")
     throw Error("A backend transaction read is unavailable; material verification cannot use a cached view.");
+  if(window.__omaxActiveStateBackend==="sharded"){
+    const state=await readShardedAuthoritativeState();
+    if(!FB.ready || FB.db!==db || FB.docRef!==docRef)
+      throw Error("Material authority changed during Storage verification.");
+    return {revision:state.syncMeta.rev,state,path:docRef.path,readSource:"storage_manifest_verified"};
+  }
   return db.runTransaction(async transaction=>{
     const snapshot = await transaction.get(docRef);
     const state = snapshot?.exists ? (typeof snapshot.data === "function" ? snapshot.data() : snapshot.data) : null;
@@ -4914,6 +4938,12 @@ async function readInventoryMaterialAuthoritativeState(){
 async function readMaintenanceTaskAuthoritativeState(target){
   if(!cuttingJobSaveTargetIsCurrent(target)||typeof target.db?.runTransaction!=="function")
     throw Error("Task archive transfer requires an independent backend transaction read for the captured workspace.");
+  if(window.__omaxActiveStateBackend==="sharded"){
+    const state=await readShardedAuthoritativeState();
+    if(!cuttingJobSaveTargetIsCurrent(target))
+      throw Error("Task archive transfer workspace/backend changed during Storage verification.");
+    return state;
+  }
   // Firebase v8 server-get can still return a stale listener view after commit.
   // Read only through the captured backend; never fall back to document.get.
   const state=await target.db.runTransaction(async transaction=>{
