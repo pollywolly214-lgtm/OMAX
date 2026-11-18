@@ -8353,7 +8353,11 @@ function checkAuthoritativeIdentityIntegrity(data){
     if((entry.expectedShape==="array"&&!array)||(entry.expectedShape==="object"&&!object)||(entry.expectedShape==="arrayOrObject"&&!array&&!object))blockers.push(`Protected field ${entry.path} has invalid shape.`);
   }
   if(scanAuthoritativeCutFileContent(data).contaminated)blockers.push("Protected cutting-file content firewall rejected authoritative state.");
-  if(estimatePayloadBytes(data)>=FIRESTORE_BLOCK_BYTES)blockers.push("Protected authoritative payload exceeds the save limit.");
+  // Storage-backed data is still validated for schema, identities, retained
+  // records, and dangerous reductions. Its size is not a Firestore document
+  // size issue because this is a verified read-only Storage reconstruction.
+  if(window.__omaxActiveStateBackend!=="sharded" && estimatePayloadBytes(data)>=FIRESTORE_BLOCK_BYTES)
+    blockers.push("Protected authoritative payload exceeds the save limit.");
   if(check.valid&&!blockers.length){
     // Assess the authoritative document itself, without treating local caches
     // as restore sources. This runs the existing registry/coverage/compaction
