@@ -104,7 +104,7 @@ function canWriteCloud(reason = "cloud save"){
   if (typeof window === "undefined") return false;
   // MCAP read-side integration is intentionally fail-closed. Do not let any
   // legacy writer mutate app/state after a Storage index becomes authoritative.
-  if (window.__omaxActiveStateBackend === "sharded") return blockCloudSave(
+  if (authoritativeBackendMode === "sharded") return blockCloudSave(
     `${reason}; Storage-backed authority is still read-only until full writer cutover tests pass.`);
   if (isRecoveryMode()) return blockCloudSave(`${reason}; Recovery Mode is read-only, cloud saves disabled.`);
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
@@ -669,6 +669,7 @@ let firebaseSettingsApplied = false;
 let workspaceMetadataWritesBlocked = false;
 let workspaceStateUnsubscribe = null;
 let authorityIndexUnsubscribe = null;
+let authoritativeBackendMode = "unknown";
 let lastAppliedCloudRevision = 0;
 let hasPendingLocalChanges = false;
 let lastLocalMutationAt = 0;
@@ -2712,6 +2713,7 @@ async function initFirebase(){
       try { authorityIndexUnsubscribe(); } catch (err) { console.warn("Failed to stop authority index watcher", err); }
       authorityIndexUnsubscribe = null;
     }
+    authoritativeBackendMode = "unknown";
     window.__omaxActiveStateBackend = null;
     lastAppliedCloudRevision = 0;
     if (user){
@@ -2799,7 +2801,7 @@ function startWorkspaceStateListener(){
       console.warn("Route refresh after workspace sync failed", err);
     }
   };
-  const shardedListener = window.__omaxActiveStateBackend === "sharded";
+  const shardedListener = authoritativeBackendMode === "sharded";
   const listenerRef = shardedListener
     ? FB.db.doc("workspaces/github-prod/app/stateIndexV1") : FB.docRef;
   workspaceStateUnsubscribe = listenerRef.onSnapshot((snap)=>{
@@ -4808,7 +4810,7 @@ function cuttingJobSaveTargetIsCurrent(target){
 }
 async function readCuttingJobAuthoritativeSnapshot(target){
   if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend changed before server verification.");
-  if(window.__omaxActiveStateBackend==="sharded"){
+  if(authoritativeBackendMode === "sharded"){
     const data=await readShardedAuthoritativeState();
     if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend changed during Storage verification.");
     return {state:data,fromCache:false,hasPendingWrites:false,path:target.path,backendMatches:true};
@@ -4904,7 +4906,7 @@ function getInventoryIdentityRepairLocalState(){
 // all specialized transaction and verification paths. Missing/changed indices,
 // incomplete shards and missing permissions must block, never fall back.
 async function readShardedAuthoritativeState(){
-  if(!FB.ready||!FB.user||window.__omaxActiveStateBackend!=="sharded"
+  if(!FB.ready||!FB.user||authoritativeBackendMode !== "sharded"
     ||typeof window.OMAXAuthorityRouter?.fromBrowser!=="function")
     throw Error("Storage authority cannot be independently verified.");
   const routed=await window.OMAXAuthorityRouter.fromBrowser();
@@ -4921,7 +4923,7 @@ async function readInventoryMaterialAuthoritativeState(){
   const db = FB.db, docRef = FB.docRef;
   if (!FB.ready || !docRef || typeof db?.runTransaction !== "function")
     throw Error("A backend transaction read is unavailable; material verification cannot use a cached view.");
-  if(window.__omaxActiveStateBackend==="sharded"){
+  if(authoritativeBackendMode === "sharded"){
     const state=await readShardedAuthoritativeState();
     if(!FB.ready || FB.db!==db || FB.docRef!==docRef)
       throw Error("Material authority changed during Storage verification.");
@@ -4938,7 +4940,7 @@ async function readInventoryMaterialAuthoritativeState(){
 async function readMaintenanceTaskAuthoritativeState(target){
   if(!cuttingJobSaveTargetIsCurrent(target)||typeof target.db?.runTransaction!=="function")
     throw Error("Task archive transfer requires an independent backend transaction read for the captured workspace.");
-  if(window.__omaxActiveStateBackend==="sharded"){
+  if(authoritativeBackendMode === "sharded"){
     const state=await readShardedAuthoritativeState();
     if(!cuttingJobSaveTargetIsCurrent(target))
       throw Error("Task archive transfer workspace/backend changed during Storage verification.");
@@ -8386,7 +8388,7 @@ function checkAuthoritativeIdentityIntegrity(data){
   // Storage-backed data is still validated for schema, identities, retained
   // records, and dangerous reductions. Its size is not a Firestore document
   // size issue because this is a verified read-only Storage reconstruction.
-  if(window.__omaxActiveStateBackend!=="sharded" && estimatePayloadBytes(data)>=FIRESTORE_BLOCK_BYTES)
+  if(authoritativeBackendMode !== "sharded" && estimatePayloadBytes(data)>=FIRESTORE_BLOCK_BYTES)
     blockers.push("Protected authoritative payload exceeds the save limit.");
   if(check.valid&&!blockers.length){
     // Assess the authoritative document itself, without treating local caches
@@ -8453,7 +8455,8 @@ async function loadFromCloud(){
       ? await window.OMAXAuthorityRouter.fromBrowser() : null;
     const snap = routed ? null : await FB.docRef.get({ source:"server" });
     const data = routed ? routed.state : (snap?.exists ? snap.data() : null);
-    window.__omaxActiveStateBackend = routed?.mode || "legacy";
+    authoritativeBackendMode = routed?.mode || "legacy";
+    window.__omaxActiveStateBackend = authoritativeBackendMode;
     if (!data || !stateHasMeaningfulData(data)){
       enterMissingStateRecovery(data);
       return { loaded:false, recovery:true, reason:"authoritative_state_missing_or_empty" };
