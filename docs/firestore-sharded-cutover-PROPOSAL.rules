@@ -1,0 +1,160 @@
+rules_version = '2';
+
+// CFR-05B reviewed production rules mirrored from the manually deployed ruleset.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function authorized() {
+      return request.auth != null
+        && request.auth.uid == 'GntsaU7i2tXdDf05ds8cws5dfi63';
+    }
+    function validWorkspaceId(id) {
+      return id is string
+        && id.size() >= 1
+        && id.size() <= 64
+        && id.matches('[A-Za-z0-9][A-Za-z0-9_-]*');
+    }
+    function validId(id) {
+      return id is string
+        && id.size() >= 1
+        && id.size() <= 128
+        && id.matches('[A-Za-z0-9][A-Za-z0-9:_-]*');
+    }
+    function membershipPath(workspaceId) { return /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid); }
+    function validMemberData(data, workspaceId, uid) {
+      return data.keys().hasOnly(['schemaVersion','uid','workspaceId','role','active','createdAtISO','updatedAtISO','email'])
+        && data.keys().hasAll(['schemaVersion','uid','workspaceId','role','active','createdAtISO','updatedAtISO'])
+        && data.schemaVersion == 1 && data.uid == uid && data.workspaceId == workspaceId
+        && data.active == true && data.role in ['owner','admin','operator','viewer']
+        && data.createdAtISO is string && data.createdAtISO.size() <= 30
+        && data.updatedAtISO is string && data.updatedAtISO.size() <= 30
+        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 254));
+    }
+    function activeMember(workspaceId) {
+      return authorized() && workspaceId == 'github-prod' && exists(membershipPath(workspaceId))
+        && validMemberData(get(membershipPath(workspaceId)).data, workspaceId, request.auth.uid);
+    }
+    function writer(workspaceId) { return activeMember(workspaceId) && get(membershipPath(workspaceId)).data.role in ['owner','admin','operator']; }
+    function validJob(data, workspaceId, jobId) {
+      return data.keys().hasOnly(['schemaVersion','workspaceId','jobId','authoritativeStatePath','createdBy','createdAtISO'])
+        && data.keys().hasAll(['schemaVersion','workspaceId','jobId','authoritativeStatePath','createdBy','createdAtISO'])
+        && data.schemaVersion == 1 && data.workspaceId == workspaceId && data.jobId == jobId
+        && data.authoritativeStatePath == 'workspaces/' + workspaceId + '/app/state'
+        && validId(data.createdBy) && data.createdAtISO is string && data.createdAtISO.size() <= 30;
+    }
+    function validFile(data, workspaceId, jobId, fileId) {
+      return data.keys().hasOnly(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
+        && data.keys().hasAll(['schemaVersion','workspaceId','jobId','fileId','originalName','safeFileName','extension','contentType','sizeBytes','storagePath','sha256','status','createdBy','createdAtISO'])
+        && data.schemaVersion == 1 && data.workspaceId == workspaceId && data.jobId == jobId && data.fileId == fileId
+        && validId(jobId) && validId(fileId) && data.originalName is string && data.originalName.size() > 0 && data.originalName.size() <= 255
+        && data.safeFileName is string && data.safeFileName.size() > 0 && data.safeFileName.size() <= 120
+        && data.extension in ['dxf','ord','omx']
+        && ((data.extension == 'dxf' && data.contentType == 'application/dxf') || (data.extension in ['ord','omx'] && data.contentType == 'application/octet-stream'))
+        && data.sizeBytes is int && data.sizeBytes > 0 && data.sizeBytes <= 52428800
+        && data.storagePath == 'workspaces/' + workspaceId + '/cutting-jobs/' + jobId + '/files/' + fileId + '/' + data.safeFileName
+        && data.sha256 is string && data.sha256.size() == 64 && data.sha256.matches('[a-f0-9]*') && data.status == 'ready'
+        && validId(data.createdBy) && data.createdAtISO is string && data.createdAtISO.size() <= 30;
+    }
+
+    // MCAP cutover proposal ONLY — NOT deployed.
+    // Freeze all legacy full-document writers when the authoritative index
+    // is created. The index creation and old state revision read MUST be in
+    // the same Firestore client transaction.
+    function stateIndexPath() {
+      return /databases/$(database)/documents/workspaces/github-prod/app/stateIndexV1;
+    }
+    function legacyStatePath() {
+      return /databases/$(database)/documents/workspaces/github-prod/app/state;
+    }
+    function validStateIndex(data) {
+      return data.keys().hasOnly([
+          'schemaVersion','mode','workspaceId','projectId','bucket','revision',
+          'previousRevision','manifestPath','manifestSha256',
+          'operationId','actorUid','createdAtISO'
+        ])
+        && data.keys().hasAll([
+          'schemaVersion','mode','workspaceId','projectId','bucket','revision',
+          'previousRevision','manifestPath','manifestSha256',
+          'operationId','actorUid','createdAtISO'
+        ])
+        && data.schemaVersion == 1
+        && data.mode == 'active'
+        && data.workspaceId == 'github-prod'
+        && data.projectId == 'wj-tracker-v2'
+        && data.bucket == 'wj-tracker-v2.firebasestorage.app'
+        && data.revision is int && data.revision > 0
+        && data.previousRevision is int && data.previousRevision >= 0
+        && data.operationId is string && data.operationId.size() > 0
+        && data.operationId.size() <= 128
+        && data.operationId.matches('[A-Za-z0-9][A-Za-z0-9_-]*')
+        && data.manifestSha256 is string
+        && data.manifestSha256.matches('[a-f0-9]{64}')
+        && data.manifestPath is string
+        && data.manifestPath ==
+          'workspaces/github-prod/state-shards/v1/_manifest/'
+          + data.operationId + '/' + data.manifestSha256 + '.json'
+        && data.actorUid == request.auth.uid
+        && data.createdAtISO is string
+        && data.createdAtISO.size() <= 30;
+    }
+    match /workspaces/github-prod/app/state {
+      allow read: if authorized();
+      // Once the index exists, even a previously loaded/old browser can
+      // no longer save a competing whole-state document.
+      allow create, update: if authorized() && !exists(stateIndexPath());
+      allow delete: if false;
+    }
+    match /workspaces/github-prod/app/stateIndexV1 {
+      allow get: if authorized();
+      allow list, delete: if false;
+      allow create: if authorized()
+        && validStateIndex(request.resource.data)
+        && request.resource.data.previousRevision == 0
+        && exists(legacyStatePath())
+        && get(legacyStatePath()).data.syncMeta.rev == request.resource.data.revision;
+      allow update: if authorized()
+        && validStateIndex(request.resource.data)
+        && validStateIndex(resource.data)
+        && request.resource.data.revision > resource.data.revision
+        && request.resource.data.previousRevision == resource.data.revision;
+    }
+    // Preserve read/write access to existing unrelated app metadata and
+    // nested saveLogs. Single-segment docName excludes state and index.
+    match /workspaces/github-prod/app/{docName} {
+      allow read: if authorized();
+      allow write: if authorized()
+        && docName != 'state' && docName != 'stateIndexV1';
+      match /{nested=**} {
+        allow read: if authorized();
+        allow write: if authorized()
+          && docName != 'state' && docName != 'stateIndexV1';
+      }
+    }
+    // The application writes bounded workspace-root metadata such as lastTouchedAt.
+    match /workspaces/github-prod {
+      allow get, create, update: if authorized();
+      allow delete: if false;
+    }
+    match /workspaces/{workspaceId}/members/{uid} {
+      allow get: if authorized() && workspaceId == 'github-prod' && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+    match /workspaces/{workspaceId}/cuttingJobs/{jobId} {
+      allow get: if activeMember(workspaceId) && (resource == null || validJob(resource.data, workspaceId, jobId));
+      allow list: if false;
+      allow create: if writer(workspaceId) && validJob(request.resource.data, workspaceId, jobId)
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if false;
+      match /files/{fileId} {
+        allow get: if activeMember(workspaceId) && validFile(resource.data, workspaceId, jobId, fileId);
+        allow list: if activeMember(workspaceId);
+        allow create: if writer(workspaceId) && validFile(request.resource.data, workspaceId, jobId, fileId)
+          && request.resource.data.createdBy == request.auth.uid
+          && existsAfter(/databases/$(database)/documents/workspaces/$(workspaceId)/cuttingJobs/$(jobId))
+          && validJob(getAfter(/databases/$(database)/documents/workspaces/$(workspaceId)/cuttingJobs/$(jobId)).data, workspaceId, jobId);
+        allow update, delete: if false;
+      }
+      match /logs/{logId} { allow read, write: if false; }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
