@@ -27,7 +27,10 @@
       ||typeof working?.validateSource!=="function"
       ||!cryptoApi?.subtle?.digest||typeof fetchImpl!=="function")
       fail("environment_mismatch","Verification dependencies unavailable.");
-    return {app,db,commit,readback,sharder,working,cryptoApi,fetchImpl};
+    const actorUid=app.auth().currentUser.uid;
+    const authorized=()=>app.auth().currentUser?.uid===actorUid;
+    return {app,db,commit,readback,sharder,working,cryptoApi,fetchImpl,
+      actorUid,authorized};
   }
   async function serverRead(ref){
     const snap=await ref.get({source:"server"});
@@ -43,6 +46,7 @@
     // Index is the authority selector. Never interpret an inaccessible
     // index as missing; failing closed prevents silently reading old state.
     const indexSnapshot=await serverRead(indexRef);
+    if(!ctx.authorized())fail("actor_changed","Authenticated user changed while resolving authority.");
     if(indexSnapshot.exists){
       const index=ctx.commit.checkIndex(indexSnapshot.data());
       const copy=await ctx.readback.read({...index,sourceRevision:index.revision,
@@ -55,6 +59,7 @@
       // A second independent index read protects against a pointer change
       // during this relatively long multi-object Storage reconstruction.
       const second=await serverRead(indexRef);
+      if(!ctx.authorized())fail("actor_changed","Authenticated user changed during Storage readback.");
       if(!second.exists)fail("index_changed","Authoritative index disappeared.");
       const latest=ctx.commit.checkIndex(second.data());
       if(ctx.sharder.canonical(latest)!==ctx.sharder.canonical(index))
@@ -69,6 +74,7 @@
     // The index can appear after the first read but before this state is
     // consumed; refuse to adopt legacy evidence if activation has occurred.
     const second=await serverRead(indexRef);
+    if(!ctx.authorized())fail("actor_changed","Authenticated user changed during legacy state read.");
     if(second.exists)fail("authority_changed","Sharded index appeared during legacy state read.");
     return {mode:"legacy",revision:state.syncMeta.rev,state,
       indexPath:INDEX_PATH,legacyPath:STATE_PATH,verified:true};
