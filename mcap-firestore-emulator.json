@@ -1,0 +1,14 @@
+{
+  "firestore": {
+    "rules": "docs/firestore-sharded-cutover-PROPOSAL.rules"
+  },
+  "emulators": {
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8187
+    },
+    "ui": {
+      "enabled": false
+    }
+  }
+}
