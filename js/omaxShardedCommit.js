@@ -61,8 +61,12 @@
     return {db,indexRef,app,reader,stager,sharder,working,cryptoApi,fetchImpl,newId,now};
   }
   async function readIndex(ctx){
-    const snap=await ctx.indexRef.get({source:"server"});
-    if(!snap?.exists||snap.metadata?.fromCache||snap.metadata?.hasPendingWrites||snap.ref?.path!==INDEX_PATH)
+    // Firebase v8 server-get can reuse a stale listener snapshot. A read-only
+    // transaction independently fetches the current backend pointer, which
+    // matters especially for post-commit acknowledgement and CAS conflicts.
+    const snap=await ctx.db.runTransaction(async tx=>tx.get(ctx.indexRef));
+    if(!snap?.exists||snap.metadata?.fromCache===true
+      ||snap.metadata?.hasPendingWrites===true||snap.ref?.path!==INDEX_PATH)
       throw fail("index_unavailable","Active index is not independently verified.");
     return checkIndex(snap.data());
   }
