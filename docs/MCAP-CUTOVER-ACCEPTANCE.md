@@ -38,3 +38,12 @@ Our early tests validated the *components* before they validated the actual OMAX
 4. Only after passing these, prepare a separate, explicit operator runbook and fresh snapshot check for gate J. Preserve this checklist as durable repo handoff context across Codex agents.
 
 **Verification rules:** report every actual command/test and pass/fail; never describe synthetic in-memory Storage as production Storage; never claim the live backend migrated from a historical copy. The user should not be asked for F12 until isolated tests are complete and a single focused production read-only verification is genuinely necessary.
+
+
+## 2026-11-23 process reassessment and next acceptance test
+
+The decisive acceptance gap is the **real OMAX active-sharded browser save**, not the number of unit tests. The completed verified snapshot and component tests are useful, but no live cutover can be approved on that basis. Avoid spending more iterations on isolated test counts unless they directly close a release gate.
+
+**Active-browser save exercise added (not yet claimed as passed):** `tests/mcap-active-browser-save.browser.cjs` uses the real OMAX HTML, real sharding/readback/coordinator, and a strictly-local Firebase/Storage mock. Playwright blocks all external network requests. Only the served localhost copy of `js/core.js` has its source gate substituted for this test; the checked-in production `const MCAP_SHARDED_WRITES_ACTIVE = false;` remains unchanged. The harness tests the real `saveCloudNow()` path, exact index and revision adoption, and forbids any legacy state write. CI status must be checked before considering gate E even partially verified.
+
+**Acceptance discipline:** A successful harness test is narrower than real Firebase multi-device browser acceptance. Any failed assertion must be classified as app logic, fixture normalizing behavior, or test harness fault using actual logs, without weakening protected-state comparisons. Keep PR #532 Draft, published Firestore rules unchanged and the source write gate closed. Next prioritize active-browser ordinary save and refresh with a >975 KB assembled source, then specialized business changes and failure/recovery.
