@@ -17,11 +17,10 @@ function setup(){
     metadata:{fromCache:false,hasPendingWrites:false},data:()=>structuredClone(index)})};
   const db={doc:path=>path===Commit.INDEX_PATH?indexRef:null,
     runTransaction:async callback=>{
-      transactions++;
-      const tx={get:async()=>({exists:!!index,data:()=>structuredClone(index)}),
+      const tx={get:async()=>indexRef.get(),
         set:(_ref,value)=>{
           if(forceConflict)throw Object.assign(Error("Conflict"),{code:"aborted",definite:true});
-          index=structuredClone(value);
+          transactions++;index=structuredClone(value);
         }};
       return callback(tx);
     }};
@@ -113,7 +112,8 @@ test("post-CAS permission denial stays indeterminate; never tells user to retry"
   let reads=0;
   indexRef.get=async options=>{
     reads++;
-    if(reads>=2)throw Object.assign(new Error("permission denied after CAS"),{code:"permission-denied"});
+    // Baseline, CAS transaction, then post-commit independent read.
+    if(reads>=3)throw Object.assign(new Error("permission denied after CAS"),{code:"permission-denied"});
     return originalGet(options);
   };
   const next={...source,inventory:[{id:"one-verified-record"}]};
