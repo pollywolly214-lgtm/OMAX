@@ -2570,7 +2570,10 @@ function applyFirestoreSettings(db){
       return;
     }
     try {
-      db.settings({ ...currentSettings, ignoreUndefinedProperties: true });
+      // Firebase v8's public wrapper does not expose the private settings
+      // getters above. Use its supported merge option so adding this flag
+      // cannot reset a previously configured host/SSL or other transport.
+      db.settings({ ...currentSettings, ignoreUndefinedProperties: true, merge:true });
       firebaseSettingsApplied = true;
     } catch (err) {
       console.warn("Failed to enable ignoreUndefinedProperties", err);
@@ -2590,7 +2593,7 @@ function applyFirestoreSettings(db){
     }
 
     try {
-      db.settings(mergedSettings);
+      db.settings({ ...mergedSettings, merge:true });
       firebaseSettingsApplied = true;
     } catch (err) {
       console.warn("Failed to enable ignoreUndefinedProperties", err);

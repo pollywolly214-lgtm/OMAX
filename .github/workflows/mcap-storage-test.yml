@@ -18,6 +18,10 @@ on:
       - "tests/mcap-specialized-browser.browser.cjs"
       - "tests/mcap-recovery-browser.browser.cjs"
       - "tests/fixtures/mcap-active-browser.cjs"
+      - "scripts/mcap-emulator-browser.cjs"
+      - "tests/mcap-real-firebase.browser.cjs"
+      - "tests/fixtures/mcap-emulator-identity.cjs"
+      - "storage.rules"
       - "tests/water-quality-persistence.test.js"
       - "tests/pump-baseline.test.js"
       - "tests/polishv2-pump-log.test.js"
@@ -128,3 +132,43 @@ jobs:
           node --check tests/fixtures/mcap-firebase-browser-write-mock.js
           node --check tests/fixtures/mcap-firebase-browser-mock.js
           node --test --test-concurrency=1 tests/mcap-browser-smoke.browser.cjs tests/mcap-active-browser-readonly.browser.cjs tests/mcap-active-browser-save.browser.cjs tests/mcap-specialized-browser.browser.cjs tests/mcap-recovery-browser.browser.cjs
+
+  real-firebase-browser:
+    name: Actual Firebase SDK browser with Auth, Firestore and Storage emulators
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install isolated emulator and exact application SDK dependencies
+        run: |
+          mkdir -p "$RUNNER_TEMP/mcap-real-browser"
+          npm install --prefix "$RUNNER_TEMP/mcap-real-browser" --no-save --no-audit --no-fund \
+            firebase-tools@15.32.1 firebase@8.10.1 playwright@1.56.1
+          echo "NODE_PATH=$RUNNER_TEMP/mcap-real-browser/node_modules" >> "$GITHUB_ENV"
+      - name: Provision disposable headless Chromium
+        run: "$RUNNER_TEMP/mcap-real-browser/node_modules/.bin/playwright install chromium"
+      - name: Real browser and all three local Firebase services (demo project ONLY)
+        run: |
+          node --check scripts/mcap-emulator-browser.cjs
+          node --check tests/mcap-real-firebase.browser.cjs
+          node --check tests/fixtures/mcap-emulator-identity.cjs
+          node scripts/mcap-emulator-browser.cjs
+      - name: Retain synthetic emulator diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcap-demo-browser-emulator-logs
+          path: |
+            firebase-debug.log
+            firestore-debug.log
+            storage-debug.log
+          if-no-files-found: ignore
