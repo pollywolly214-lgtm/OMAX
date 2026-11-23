@@ -143,5 +143,45 @@ test("actual OMAX browser performs verified Storage-backed save and reload in is
   assert.equal(inspection.originalLegacyUnchanged,true,proof);
   assert.equal(inspection.recovery,false,proof);
   assert.equal(inspection.autosaveDisabled,false,proof);
+  const persisted=await page.evaluate(()=>
+    window.__mcapPersistSnapshot(window.__lastLoadedCloudState));
+  assert.equal(persisted.stateRevision,inspection.currentRevision);
+  assert.equal(persisted.objectCount,inspection.after.storedObjects);
+  await page.reload({waitUntil:"load"});
+  await page.waitForFunction(()=>!!window.__mcapMockError||
+    window.__mcapCallbackFinished===true,null,{timeout:25000});
+  const restored=await page.evaluate(async()=>{
+    const expected=window.__mcapExpectedState;
+    const actual=window.__lastLoadedCloudState;
+    const authority=await window.OMAXAuthorityRouter.fromBrowser();
+    return {
+      error:window.__mcapMockError||null,
+      backend:window.__omaxActiveStateBackend,
+      adopted:window.__initialAdoptComplete,
+      savedRevision:actual?.syncMeta?.rev,
+      expectedRevision:expected?.syncMeta?.rev,
+      sameState:window.OMAXShardedState.canonical(actual)===
+        window.OMAXShardedState.canonical(expected),
+      independentlyVerified:window.OMAXShardedState.canonical(authority.state)===
+        window.OMAXShardedState.canonical(expected),
+      unchangedLegacy:window.__mcapMockLegacy()?.syncMeta?.rev===1,
+      counters:window.__mcapMockCounters(),
+      readOnly:window.__recoveryInspectMode,
+      autosaveDisabled:window.__autosaveDisabled
+    };
+  });
+  const refreshProof=JSON.stringify(restored);
+  assert.equal(restored.error,null,refreshProof);
+  assert.equal(restored.backend,"sharded",refreshProof);
+  assert.equal(restored.adopted,true,refreshProof);
+  assert.equal(restored.savedRevision,inspection.currentRevision,refreshProof);
+  assert.equal(restored.expectedRevision,inspection.currentRevision,refreshProof);
+  assert.equal(restored.sameState,true,refreshProof);
+  assert.equal(restored.independentlyVerified,true,refreshProof);
+  assert.equal(restored.unchangedLegacy,true,refreshProof);
+  assert.equal(restored.readOnly,false,refreshProof);
+  assert.equal(restored.autosaveDisabled,false,refreshProof);
+  assert.equal(restored.counters.databaseWrites,0,
+    "Reload must not write or reseed any data: "+refreshProof);
   assert.deepEqual(errors,[],"Uncaught browser errors");
 });
