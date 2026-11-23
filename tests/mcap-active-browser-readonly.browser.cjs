@@ -42,8 +42,11 @@ test("actual OMAX browser reads verified active Storage authority, keeps Recover
     return route.fulfill({status:200,contentType:"application/javascript",
       body:target.endsWith("/firebase-app.js")?mockScript:""});
   });
-  const page=await context.newPage(),errors=[];
+  const page=await context.newPage(),errors=[],consoleErrors=[];
   page.on("pageerror",err=>errors.push(err.message));
+  page.on("console",message=>{
+    if(message.type()==="error")consoleErrors.push(message.text());
+  });
   page.on("dialog",dialog=>dialog.dismiss());
   page.setDefaultTimeout(15000);
   await page.goto(origin+"/");
@@ -59,9 +62,10 @@ test("actual OMAX browser reads verified active Storage authority, keeps Recover
     backend:window.__omaxActiveStateBackend||null,
     recoveryReason:window.__recoveryReason||null
   }));
-  assert.equal(initial.mockError,null,JSON.stringify(initial));
-  assert.equal(initial.cloudLoadAttemptComplete,true,JSON.stringify(initial));
-  assert.equal(initial.initialAdoptComplete,true,JSON.stringify(initial));
+  const details=JSON.stringify({...initial,consoleErrors,uncaughtErrors:errors});
+  assert.equal(initial.mockError,null,details);
+  assert.equal(initial.cloudLoadAttemptComplete,true,details);
+  assert.equal(initial.initialAdoptComplete,true,details);
   const inspection=await page.evaluate(async()=>{
     if(window.__mcapMockError)throw Error(window.__mcapMockError);
     const expected=window.__mcapExpectedState;
