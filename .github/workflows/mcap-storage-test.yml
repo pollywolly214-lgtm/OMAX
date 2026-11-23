@@ -7,6 +7,7 @@ on:
       - "js/core.js"
       - "tests/omax-*.test.js"
       - "tests/mcap-storage-*.test.js"
+      - "tests/mcap-core-write-gate.test.js"
       - ".github/workflows/mcap-storage-test.yml"
       - "docs/firestore-sharded-cutover-PROPOSAL.rules"
       - "tests/mcap-firestore-cutover.emulator.cjs"
@@ -43,6 +44,7 @@ jobs:
           node --test
           tests/mcap-storage-foundation.test.js
           tests/mcap-storage-transport.test.js
+          tests/mcap-core-write-gate.test.js
           tests/omax-sharded-state.test.js
           tests/omax-working-storage.test.js
           tests/omax-working-shards.test.js
