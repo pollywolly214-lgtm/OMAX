@@ -10,6 +10,7 @@ on:
       - ".github/workflows/mcap-storage-test.yml"
       - "docs/firestore-sharded-cutover-PROPOSAL.rules"
       - "tests/mcap-firestore-cutover.emulator.cjs"
+      - "tests/mcap-browser-smoke.browser.cjs"
       - "mcap-firestore-emulator.json"
   workflow_dispatch:
 
@@ -77,3 +78,24 @@ jobs:
             --only firestore --project demo-mcap-security \
             --config mcap-firestore-emulator.json \
             'node --test --test-concurrency=1 tests/mcap-firestore-cutover.emulator.cjs'
+
+  browser-smoke:
+    name: Disposable website startup and save/reload smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install isolated Playwright (no repo package.json)
+        run: |
+          mkdir -p "$RUNNER_TEMP/mcap-browser"
+          npm install --prefix "$RUNNER_TEMP/mcap-browser" --no-save --no-audit --no-fund playwright@1.56.1
+          echo "NODE_PATH=$RUNNER_TEMP/mcap-browser/node_modules" >> "$GITHUB_ENV"
+      - name: Provision disposable headless Chromium
+        run: "$RUNNER_TEMP/mcap-browser/node_modules/.bin/playwright install --with-deps chromium"
+      - name: Run isolated OMAXDevSafe browser smoke (no Firebase traffic)
+        run: |
+          node --check tests/mcap-browser-smoke.browser.cjs
+          node --test tests/mcap-browser-smoke.browser.cjs
