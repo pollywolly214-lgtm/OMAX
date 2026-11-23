@@ -51,7 +51,7 @@
     });
     return true;
   };
-  let databaseWrites=0,storageUploads=0,authReady=false;
+  let databaseWrites=0,storageUploads=0,authReady=false,nextFault=null;
   function snapshot(ref){
     const body=documents.get(ref.path);
     return {exists:body!==undefined,ref,metadata:{fromCache:false,hasPendingWrites:false},
@@ -104,11 +104,19 @@
           throw Object.assign(Error("MCAP simulated revision conflict"),{code:"aborted"});
         databaseWrites++;documents.set(INDEX_PATH,op.body);notify(INDEX_PATH);
       }
+      if(queued.length&&nextFault==="lost_ack"){
+        nextFault=null;
+        throw Object.assign(Error("MCAP fixture lost acknowledgement after index commit"),{code:"unavailable"});
+      }
       return out;
     }
   };
   const storage={ref:()=>({child:path=>({
     put:async(blob,options)=>{
+      if(nextFault==="upload_denied"){
+        nextFault=null;
+        throw Object.assign(Error("MCAP fixture upload denied before index commit"),{code:"permission-denied"});
+      }
       if(files.has(path))throw Error("Immutable MCAP shard overwritten");
       files.set(path,{body:new Uint8Array(await blob.arrayBuffer()),options});
       storageUploads++;
@@ -167,6 +175,9 @@
           state.mcapSyntheticLargeExtension=Array.from({length:1100},(_,i)=>({
             id:"mcap-synthetic-"+i,fixtureOnly:true,payload:"X".repeat(1000)
           }));
+          // Optional synthetic business fixtures are supplied before bootstrap,
+          // never by altering a loaded/guarded authoritative baseline.
+          window.__mcapFixtureSeed?.(state);
           const staged=await window.OMAXWorkingShards.stage({
             confirmation:window.OMAXWorkingShards.PHRASE,
             app,sharder:window.OMAXShardedState,
@@ -217,6 +228,11 @@
     indexPresent:documents.has(INDEX_PATH),storedObjects:files.size});
   window.__mcapMockReadState=()=>clone(documents.get(INDEX_PATH));
   window.__mcapMockLegacy=()=>clone(documents.get("workspaces/github-prod/app/state"));
+  window.__mcapFailNext=phase=>{
+    if(!["lost_ack","upload_denied"].includes(phase))throw Error("Unknown fixture fault");
+    nextFault=phase;
+  };
+  window.__mcapRemoveActiveManifest=()=>files.delete(documents.get(INDEX_PATH).manifestPath);
   window.__mcapPersistSnapshot=async expectedState=>{
     if(!expectedState||!documents.has(INDEX_PATH))
       throw Error("No verified active state to persist for localhost reload.");

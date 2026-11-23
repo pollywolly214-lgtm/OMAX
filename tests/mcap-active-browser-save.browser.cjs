@@ -1,7 +1,7 @@
 "use strict";
 // MCAP: actual OMAX page + synthetic active stateIndexV1 + real sharder,
 // all against a localhost-only Firebase stand-in. NO live credentials/network.
-// Intentionally READ-ONLY: never bypass the source-controlled write gate.
+// Enables writes only in the served localhost copy; production gate stays closed.
 const test=require("node:test"),assert=require("node:assert/strict");
 const fs=require("node:fs/promises"),path=require("node:path"),http=require("node:http");
 const {chromium}=require(process.env.OMAX_PLAYWRIGHT_PATH||"playwright");
@@ -28,7 +28,7 @@ test("actual OMAX browser performs verified Storage-backed save and reload in is
   await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
   t.after(()=>new Promise(resolve=>server.close(resolve)));
   const origin="http://127.0.0.1:"+server.address().port;
-  const browser=await chromium.launch({headless:true});
+  const browser=await chromium.launch({headless:true,...(process.platform==="win32"?{channel:"msedge"}:{})});
   t.after(()=>browser.close());
   const context=await browser.newContext({serviceWorkers:"block"});
   await context.route("**/*",route=>{

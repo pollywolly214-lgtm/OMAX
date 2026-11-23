@@ -15,6 +15,14 @@ on:
       - "tests/mcap-browser-smoke.browser.cjs"
       - "tests/mcap-active-browser-readonly.browser.cjs"
       - "tests/mcap-active-browser-save.browser.cjs"
+      - "tests/mcap-specialized-browser.browser.cjs"
+      - "tests/mcap-recovery-browser.browser.cjs"
+      - "tests/fixtures/mcap-active-browser.cjs"
+      - "tests/water-quality-persistence.test.js"
+      - "tests/pump-baseline.test.js"
+      - "tests/polishv2-pump-log.test.js"
+      - "tests/inventory-material-persistence.test.js"
+      - "tests/cjo04-review.test.js"
       - "tests/fixtures/mcap-firebase-browser-write-mock.js"
       - "tests/fixtures/mcap-firebase-browser-mock.js"
       - "mcap-firestore-emulator.json"
@@ -57,6 +65,11 @@ jobs:
           tests/omax-sharded-acknowledgement.test.js
           tests/omax-sharded-activation.test.js
           tests/omax-authority-router.test.js
+          tests/water-quality-persistence.test.js
+          tests/pump-baseline.test.js
+          tests/polishv2-pump-log.test.js
+          tests/inventory-material-persistence.test.js
+          tests/cjo04-review.test.js
 
   cutover-rules:
     name: Test proposed cutover rules in disposable Firestore emulator
@@ -109,5 +122,9 @@ jobs:
           node --check tests/mcap-browser-smoke.browser.cjs
           node --check tests/mcap-active-browser-readonly.browser.cjs
           node --check tests/mcap-active-browser-save.browser.cjs
+          node --check tests/mcap-specialized-browser.browser.cjs
+          node --check tests/mcap-recovery-browser.browser.cjs
+          node --check tests/fixtures/mcap-active-browser.cjs
+          node --check tests/fixtures/mcap-firebase-browser-write-mock.js
           node --check tests/fixtures/mcap-firebase-browser-mock.js
-          node --test --test-concurrency=1 tests/mcap-browser-smoke.browser.cjs tests/mcap-active-browser-readonly.browser.cjs tests/mcap-active-browser-save.browser.cjs
+          node --test --test-concurrency=1 tests/mcap-browser-smoke.browser.cjs tests/mcap-active-browser-readonly.browser.cjs tests/mcap-active-browser-save.browser.cjs tests/mcap-specialized-browser.browser.cjs tests/mcap-recovery-browser.browser.cjs

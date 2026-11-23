@@ -15,7 +15,7 @@ const initial=()=>({schema:72,syncMeta:{rev:7,retained:"keep"},saveMeta:{keep:"e
 const create=(date="2026-09-20",rpm=3515)=>({kind:"create",rpm,effectiveDateISO:date});
 const edit=(id,rpm,date)=>({kind:"edit",id,rpm,effectiveDateISO:date,reason:"Correct transcription"});
 function pure(value=initial().pumpEff){
-  const window={pumpEff:clone(value)},c=vm.createContext({window,Date,console,stableStringifyForIntegrity:identity.key,normalizeDateISO:value=>value||null});
+  const window={pumpEff:clone(value)},c=vm.createContext({authoritativeBackendMode:"legacy",MCAP_SHARDED_WRITES_ACTIVE:false,window,Date,console,stableStringifyForIntegrity:identity.key,normalizeDateISO:value=>value||null});
   vm.runInContext(model+section(pump,"function pumpPercentChange","const PUMP_DELTA_CLASS_COLORS")+retention+merging,c);
   return c;
 }
@@ -42,7 +42,7 @@ function harness(options={}){
     }
     return result;
   }};
-  const c=vm.createContext({window,Date,console,Map,Set,FB:{ready:true,user:{uid:"actor-fixture"},db,docRef},
+  const c=vm.createContext({authoritativeBackendMode:"legacy",MCAP_SHARDED_WRITES_ACTIVE:false,window,Date,console,Map,Set,FB:{ready:true,user:{uid:"actor-fixture"},db,docRef},
     cloneStructured:clone,stableStringifyForIntegrity:identity.key,stableStringify:identity.key,normalizeDateISO:value=>value||null,
     getCloudSyncClientId:()=>"client-fixture",genId:prefix=>prefix+"_"+(++ids),blockCloudSave:()=>false,
     isRecoveryMode:()=>!!window.__recoveryInspectMode,isVercelPreviewRuntime:()=>!!options.preview,

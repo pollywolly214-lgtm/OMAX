@@ -37,7 +37,7 @@ function harness(options={}){
     }
     return result;
   }};
-  const c=vm.createContext({window,Date,console,Map,Set,FB:{ready:true,user:{uid:"actor-fixture"},db,docRef},
+  const c=vm.createContext({authoritativeBackendMode:"legacy",MCAP_SHARDED_WRITES_ACTIVE:false,window,Date,console,Map,Set,FB:{ready:true,user:{uid:"actor-fixture"},db,docRef},
     cloneStructured:clone,stableStringifyForIntegrity:identity.key,stableStringify:identity.key,normalizeDateISO:value=>value||null,
     getCloudSyncClientId:()=>"client-fixture",genId:prefix=>prefix+"_"+(++ids),blockCloudSave:()=>false,
     isRecoveryMode:()=>!!window.__recoveryInspectMode,isVercelPreviewRuntime:()=>!!options.preview,
@@ -115,7 +115,7 @@ test("prepared pump tampering is rejected by the scoped writer before commit",as
  assert.equal((await h.save(logEdit(h.local))).saved,false);assert.equal(h.commits,0);
 });
 test("render-time time fallback does not mutate legacy or unrelated measurement evidence",()=>{
- const entries=[{dateISO:"2026-01-01",rpm:3600},{dateISO:"2026-01-02",rpm:3700,time:"09:23",unknown:true}],before=clone(entries),c=vm.createContext({window:{pumpEff:{entries}},Date});
+ const entries=[{dateISO:"2026-01-01",rpm:3600},{dateISO:"2026-01-02",rpm:3700,time:"09:23",unknown:true}],before=clone(entries),c=vm.createContext({authoritativeBackendMode:"legacy",MCAP_SHARDED_WRITES_ACTIVE:false,window:{pumpEff:{entries}},Date});
  vm.runInContext('const PUMP_DEFAULT_MEASUREMENT_TIME="12:00";'+section(pump,"function pumpNormalizeTimeValue","function pumpCompareEntriesDesc"),c);
  assert.equal(c.pumpGetEntryTimeISO(entries[0]),"12:00");assert.equal(c.pumpGetEntryTimeISO(entries[1]),"09:23");assert.deepEqual(entries,before);
 });
