@@ -7536,17 +7536,36 @@ async function performCloudSave(saveOptions = {}){
     // advancing the loaded revision or reporting success. Retained server log
     // evidence is the sole top-level omission made by ordinary compaction.
     const verified = await readMaintenanceTaskAuthoritativeState(saveTarget);
-    const expectedState = {...snap};
-    if (!Object.prototype.hasOwnProperty.call(expectedState,"syncProcessLog") && Object.prototype.hasOwnProperty.call(remoteData||{},"syncProcessLog")) expectedState.syncProcessLog = remoteData.syncProcessLog;
-    if (!writeResult.committedState || !Number.isSafeInteger(verified?.syncMeta?.rev) || verified.syncMeta.rev <= expectedRevision
-      || stableStringifyForIntegrity(verified) !== stableStringifyForIntegrity(expectedState)
-      || stableStringifyForIntegrity(snap) !== stableStringifyForIntegrity(writeResult.committedState)) throw Error("Acknowledged save did not match independent backend readback. Preserve local evidence and verify before retrying.");
+    if (authoritativeBackendMode === "sharded"){
+      // The immutable coordinator advances syncMeta.rev after preparing the
+      // transaction. Comparing verified data to the OLD local snap would
+      // falsely reject a successful CAS and suspend every Storage-backed save.
+      // Compare instead to the exact committed state, with independent
+      // Storage reconstruction and active-index revision proof.
+      const confirm = window.OMAXShardedAcknowledgement?.confirm;
+      if (typeof confirm !== "function") throw Error("Storage acknowledgement verifier unavailable; preserve commit evidence.");
+      confirm({
+        committedState:writeResult.committedState,
+        verifiedState:verified,
+        expectedRevision,
+        canonical:window.OMAXShardedState?.canonical
+      });
+      writeRev = verified.syncMeta.rev;
+    }else{
+      // Legacy Firestore verification must remain unchanged.
+      const expectedState = {...snap};
+      if (!Object.prototype.hasOwnProperty.call(expectedState,"syncProcessLog") && Object.prototype.hasOwnProperty.call(remoteData||{},"syncProcessLog")) expectedState.syncProcessLog = remoteData.syncProcessLog;
+      if (!writeResult.committedState || !Number.isSafeInteger(verified?.syncMeta?.rev) || verified.syncMeta.rev <= expectedRevision
+        || stableStringifyForIntegrity(verified) !== stableStringifyForIntegrity(expectedState)
+        || stableStringifyForIntegrity(snap) !== stableStringifyForIntegrity(writeResult.committedState)) throw Error("Acknowledged save did not match independent backend readback. Preserve local evidence and verify before retrying.");
+    }
     if (!canWriteCloud("saveCloudInternal")) throw Error("Save committed, but a separate write blocker prevents verified acknowledgement.");
     authoritativeStateVerified = true;
     // An independent read proves this commit, but a listener may already have
     // adopted a newer authoritative revision while the read was in flight.
     if (typeof window !== "undefined" && Math.max(Number(window.__loadedCloudRevisionForSaveGuard||0),Number(window.__lastLoadedCloudState?.syncMeta?.rev||0)) <= verified.syncMeta.rev){
-      window.__loadedCloudRevisionForSaveGuard = Number(snap?.syncMeta?.rev || 0);
+      window.__loadedCloudRevisionForSaveGuard = authoritativeBackendMode === "sharded"
+        ? verified.syncMeta.rev : Number(snap?.syncMeta?.rev || 0);
       if (explicitTrace){
         explicitTrace.loadedRevUpdatedAfterSuccessfulSave = true;
         explicitTrace.loadedRevAfterSave = Number(window.__loadedCloudRevisionForSaveGuard || 0);
@@ -7598,7 +7617,9 @@ async function performCloudSave(saveOptions = {}){
       stateWriteAttempted:true,
       stateWriteCompleted:true,
       verified:true,
-      path:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
+      path:authoritativeBackendMode === "sharded"
+        ? (writeResult.path || "workspaces/github-prod/app/stateIndexV1")
+        : (FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`),
       warnings
     };
   }catch(e){
