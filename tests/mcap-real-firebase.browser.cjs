@@ -27,7 +27,7 @@ function token(uid){
 test("real Firebase browser: active Storage saves, rules, multi-client convergence and recovery",{timeout:600000},async t=>{
   assertEmulators();
   if(process.env.MCAP_EMULATOR_ONLY){
-    assert.ok(["native calendar","lost real commit","history import","archive","corrupt field","actor change"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
+    assert.ok(["native calendar","lost real commit","history import","archive","corrupt field","actor change","in-flight"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
     assert.ok(!process.env.CI,"CI must run every real Firebase browser acceptance case");
     t.diagnostic("Development-only selection: "+process.env.MCAP_EMULATOR_ONLY);
   }
@@ -171,6 +171,87 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     const rejected=await b.evaluate(()=>inventoryMaterialMutationApi.run({kind:"cell",typeId:window.__lastLoadedCloudState.inventoryMaterials.types[0].id,rowIndex:0,colIndex:0,value:"STALE"}));
     assert.equal(rejected.saved,false);assert.equal(rejected.stateWriteAttempted,false);await exact(a,saved);
     await b.reload();await ready(b);await exact(b,saved);
+  });
+  await step("in-flight two-browser native pump race retains the winner and the rejected draft",async()=>{
+    const before=await read(a);await exact(a,before);await exact(b,before);
+    const watch=page=>page.evaluate(()=>{
+      window.__mcapRaceOutcome=null;window.__mcapRaceAction=null;
+      const save=window.savePumpLogChange;
+      window.savePumpLogChange=async action=>{
+        window.__mcapRaceAction=JSON.parse(JSON.stringify(action));
+        const result=await save(action);window.__mcapRaceOutcome=result;return result;
+      };
+    });
+    const fill=async(page,date,rpm)=>{
+      await page.locator("#pumpLogDate").fill(date);await page.locator("#pumpLogTime").fill("14:15");
+      await page.locator("#pumpLogRPM").fill(String(rpm));
+    };
+    await watch(a);await watch(b);
+    await fill(a,"2026-10-24",540);await fill(b,"2026-10-25",541);
+    let release,signal,timer,held=false;const statuses=[];
+    const gate=new Promise(resolve=>{release=resolve;});
+    const reached=new Promise((resolve,reject)=>{signal=resolve;timer=setTimeout(()=>reject(Error("Native contender never reached the index-commit barrier")),60000);});
+    const intercept=async route=>{
+      const request=route.request(),url=new URL(request.url());
+      const indexCommit=url.origin==="http://"+FIRESTORE&&url.pathname.endsWith("/documents:commit")
+        &&(request.postDataJSON()?.writes||[]).some(write=>write.update?.name?.endsWith("/"+INDEX));
+      if(!indexCommit)return route.fallback();
+      if(!held){held=true;signal();await gate;}
+      const response=await route.fetch();statuses.push(response.status());return route.fulfill({response});
+    };
+    await b.route("**/*",intercept);
+    let winner,index,winnerAction,loserAction,loser;
+    try{
+      await b.locator('#pumpLogForm button[type="submit"]').click();await reached;clearTimeout(timer);
+      assert.equal(await b.evaluate(()=>window.__pumpLogMutationPending),true);
+      assert.equal(await b.evaluate(()=>typeof workspaceStateUnsubscribe==="function"),true,"Contender keeps its real listener");
+      await a.locator('#pumpLogForm button[type="submit"]').click();
+      await a.waitForFunction(()=>window.__mcapRaceOutcome!==null,null,{timeout:90000});
+      const outcome=await a.evaluate(()=>window.__mcapRaceOutcome);assert.equal(outcome.saved,true,JSON.stringify(outcome));
+      winnerAction=await a.evaluate(()=>window.__mcapRaceAction);loserAction=await b.evaluate(()=>window.__mcapRaceAction);
+      winner=await read(a);await exact(a,winner);assert.equal(winner.syncMeta.rev,outcome.revision);
+      assert.deepEqual(await b.evaluate(()=>window.__lastLoadedCloudState),before,"In-flight contender must retain its verified baseline despite the winner's live echo");
+      index=await a.evaluate(async()=>(await FB.db.doc("workspaces/github-prod/app/stateIndexV1").get({source:"server"})).data());
+      assert.equal(index.previousRevision,before.syncMeta.rev);
+      release();await b.waitForFunction(()=>window.__mcapRaceOutcome!==null,null,{timeout:90000});
+      loser=await b.evaluate(()=>window.__mcapRaceOutcome);assert.equal(loser.saved,false,JSON.stringify(loser));
+      assert.ok(statuses.length>0&&statuses.every(status=>status>=400),"Native stale commit was rejected: "+JSON.stringify(statuses));
+      await b.locator('#pumpLogForm [data-pump-log-status][role="alert"]').waitFor();
+      assert.equal(await b.locator("#pumpLogDate").inputValue(),"2026-10-25");
+      assert.equal(await b.locator("#pumpLogTime").inputValue(),"14:15");
+      assert.equal(await b.locator("#pumpLogRPM").inputValue(),"541");
+      if(loser.indeterminate){
+        assert.equal(await b.evaluate(()=>isRecoveryMode()&&window.__autosaveDisabled),true);
+        assert.equal(await b.locator('#pumpLogForm button[type="submit"]').isDisabled(),true);
+        assert.deepEqual(await b.evaluate(()=>window.__lastLoadedCloudState),before);
+      }
+    }finally{clearTimeout(timer);release();await b.unroute("**/*",intercept);}
+    assert.equal(winner.pumpEff.entries.filter(row=>row.id===winnerAction.id).length,1);
+    assert.deepEqual(winner.pumpEff.entries.find(row=>row.id===winnerAction.id),{id:winnerAction.id,dateISO:"2026-10-24",rpm:540,timeISO:"14:15"});
+    assert.equal(winner.pumpEff.entries.some(row=>row.id===loserAction.id),false);
+    assert.deepEqual(winner.pumpEff.entries.filter(row=>row.id!==winnerAction.id),before.pumpEff.entries);
+    assert.deepEqual({...winner.pumpEff,entries:before.pumpEff.entries},before.pumpEff);
+    for(const key of Object.keys(before))if(!["pumpEff","syncMeta"].includes(key))assert.deepEqual(winner[key],before[key],key);
+    assert.deepEqual(await read(b),winner);await exact(a,winner);
+    assert.deepEqual(await b.evaluate(async()=>(await FB.db.doc("workspaces/github-prod/app/stateIndexV1").get({source:"server"})).data()),index);
+    assert.deepEqual(await b.evaluate(async()=>(await FB.docRef.get({source:"server"})).data()),legacy);
+    await a.reload();await ready(a);await exact(a,winner);await b.reload();await ready(b);await exact(b,winner);
+    // After reviewing the new authority, the user can resubmit the retained
+    // values through the same native form without replaying the stale request.
+    await watch(b);await fill(b,"2026-10-25",541);await b.locator('#pumpLogForm button[type="submit"]').click();
+    await b.waitForFunction(()=>window.__mcapRaceOutcome!==null,null,{timeout:90000});
+    const retried=await b.evaluate(()=>window.__mcapRaceOutcome);assert.equal(retried.saved,true,JSON.stringify(retried));
+    const retryAction=await b.evaluate(()=>window.__mcapRaceAction),after=await read(b);
+    assert.notEqual(retryAction.id,loserAction.id,"Freshly reviewed submission does not replay the old request identity");
+    assert.equal(after.pumpEff.entries.filter(row=>row.id===retryAction.id).length,1);
+    assert.deepEqual(after.pumpEff.entries.find(row=>row.id===retryAction.id),{id:retryAction.id,dateISO:"2026-10-25",rpm:541,timeISO:"14:15"});
+    assert.equal(after.pumpEff.entries.some(row=>row.id===loserAction.id),false);
+    assert.deepEqual(after.pumpEff.entries.filter(row=>row.id!==retryAction.id),winner.pumpEff.entries);
+    assert.deepEqual({...after.pumpEff,entries:winner.pumpEff.entries},winner.pumpEff);
+    for(const key of Object.keys(winner))if(!["pumpEff","syncMeta"].includes(key))assert.deepEqual(after[key],winner[key],key);
+    await exact(b,after);await a.waitForFunction(rev=>window.__loadedCloudRevisionForSaveGuard===rev,after.syncMeta.rev);await exact(a,after);
+    await b.reload();await ready(b);await exact(b,after);await a.reload();await ready(a);await exact(a,after);
+    t.diagnostic("Native contender commit statuses: "+JSON.stringify(statuses)+"; indeterminate="+String(loser.indeterminate===true));
   });
   await step("native calendar scheduling and completion persist through real Firebase",async()=>{
     const before=await read(a);
