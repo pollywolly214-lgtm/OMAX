@@ -18,7 +18,7 @@ On Linux, use the same packages and expose the dependency directory through `NOD
 
 The runner starts only `demo-mcap-browser` on loopback: Auth `9097`, Firestore `8188`, Storage `9197`, hub `4447`, logging `4597`. Firebase also opens its Firestore UI websocket port `9150`. The suite refuses to run directly unless the runner supplied the exact emulator environment. The Firebase CLI shuts the services down after the test exits. Logs are `firebase-debug.log`, `firestore-debug.log` and, when provided by the CLI, `storage-debug.log`; CI retains them on failure.
 
-For a focused local diagnosis, set `MCAP_EMULATOR_ONLY` to `native calendar` or `lost real commit`. This still creates a fresh full authority and runs ordinary-save acceptance before the selected case. Clear the variable for full acceptance. The filter is rejected in CI, and a filtered run is never evidence that the whole suite passed.
+For a focused local diagnosis, set `MCAP_EMULATOR_ONLY` to `native calendar`, `lost real commit`, `history import`, or `archive`. This still creates a fresh full authority and runs ordinary-save acceptance before the selected cases. Clear the variable for full acceptance. The filter is rejected in CI, and a filtered run is never evidence that the whole suite passed.
 
 ## Test-only configuration boundaries
 
@@ -33,6 +33,10 @@ The active test authority includes an opaque segmented extension that makes the 
 ## Acceptance scope
 
 The suite checks ordinary saves, exact full-state refresh, two-session realtime convergence, specialized water/pump/material/cutting-job operations, native calendar scheduling/completion, stale-client rejection, Storage-rule denials, membership denial, a dropped response after a real committed index write, and missing-manifest recovery. Exact business preservation and revision/readback checks remain required even when the UI has already displayed an optimistic result.
+
+Historical import cases feed reviewed rows to the production purchase, pump-hours, RPM and maintenance import API. They capture the mandatory native download and parse it independently to verify exact pre-import state, including the oversized opaque field. They check source provenance, purchase allocations without inventory replay, idempotent reruns and changed-preview denial. Workbook parsing/file-selection UI is not claimed by these API tests.
+
+The initial synthetic authority includes a linked maintenance task and inventory item with retained completion/note evidence. Task and stock archive/restore cases verify exact payload transfers, unchanged unrelated fields, history and financial-report stability before and after full reload, confirmation binding and peer-browser convergence. These are record restoration tests, not a whole-database backup restore. During actual committed-response-loss Recovery Mode, the native cloud-export button must download the independently verified current Storage authority rather than the retained older local baseline or legacy Firestore document.
 
 Passing emulator acceptance does not establish production IAM, deployed-rule identity, current source/candidate equality, production CORS, independent latest backups or operator approval. Those remaining release gates are tracked in `MCAP-CUTOVER-ACCEPTANCE.md`.
 

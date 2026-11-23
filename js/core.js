@@ -7887,6 +7887,24 @@ function mergePumpEffForSave(localPump, remotePump){
     && !Array.isArray(localPump) && !Array.isArray(remotePump)
     && stableStringifyForIntegrity(local) === stableStringifyForIntegrity(remote))
     return JSON.parse(JSON.stringify(remote));
+  // A reviewed history append must also keep every existing measurement and
+  // all non-measurement evidence exact. Recognize only a valid, unique-date
+  // superset retaining the complete remote sequence; missing or changed remote
+  // evidence still goes through the existing guarded merge below.
+  const localEntries=Array.isArray(local.entries)?local.entries:null;
+  const remoteEntries=Array.isArray(remote.entries)?remote.entries:null;
+  const withoutEntries=pump=>Object.fromEntries(Object.entries(pump).filter(([field])=>field!=="entries"));
+  const validEntries=entries=>new Set(entries.map(entry=>entry?.dateISO)).size===entries.length
+    &&entries.every(entry=>entry&&typeof entry==="object"&&!Array.isArray(entry)
+      &&typeof entry.dateISO==="string"&&normalizeDateISO(entry.dateISO)===entry.dateISO
+      &&Number.isFinite(Number(entry.rpm))&&Number(entry.rpm)>0);
+  if(localEntries&&remoteEntries&&localEntries.length>remoteEntries.length
+    &&validEntries(localEntries)&&validEntries(remoteEntries)
+    &&stableStringifyForIntegrity(withoutEntries(local))===stableStringifyForIntegrity(withoutEntries(remote))){
+    const remoteDates=new Set(remoteEntries.map(entry=>entry.dateISO));
+    if(stableStringifyForIntegrity(localEntries.filter(entry=>remoteDates.has(entry.dateISO)))===stableStringifyForIntegrity(remoteEntries))
+      return JSON.parse(JSON.stringify(local));
+  }
   const evidence = pump=>Object.fromEntries(Object.entries(pump).filter(([field])=>field !== "baselineHistory"));
   // Baseline-only changes must not round, re-date, reorder or trim measurements
   // and notes. Preserve the complete unchanged evidence verbatim.

@@ -29,6 +29,22 @@ for(const withBaselineHistory of [false,true])test("unchanged pump history survi
   actual.entries[0].rpm=1;
   assert.deepEqual(local,pump);assert.deepEqual(remote,pump);
 });
+test("reviewed measurement append preserves pre-existing precision, order and note evidence",()=>{
+  const remote=initial().pumpEff;
+  remote.entries.push({id:"older",dateISO:"2026-06-02",rpm:3495.75,timeISO:"08:17",opaque:{retain:"exact"}});
+  const local=clone(remote);
+  local.entries.unshift({dateISO:"2025-01-03",rpm:3400,timeISO:"12:00",import_event_id:"reviewed_append",importProvenance:{sourceRecord:{date:"2025-01-03",rpm:3400}}});
+  const actual=pure(remote).mergePumpEffForSave(local,remote);
+  assert.deepEqual(clone(actual),local,"Adding a reviewed row must not normalize retained history");
+});
+test("measurement append cannot discard a remote-only record",()=>{
+  const remote=initial().pumpEff,local=clone(remote);
+  remote.entries.push({id:"remote-only",dateISO:"2026-06-02",rpm:3495,timeISO:"08:17"});
+  local.entries.unshift({dateISO:"2025-01-03",rpm:3400,timeISO:"12:00"},{dateISO:"2025-01-04",rpm:3401,timeISO:"12:00"});
+  const actual=pure(remote).mergePumpEffForSave(local,remote);
+  assert.ok(actual.entries.some(row=>row.id==="remote-only"));
+  assert.equal(actual.entries.length,4);
+});
 function harness(options={}){
   let cloud=clone(options.initial||initial()),local=clone(cloud),commits=0,reads=0,preflights=0,ids=0,adoptions=0,diagnostics=0;
   const window={pumpEff:local.pumpEff,OMAXAtomicPersistence:atomic,CuttingFileContentFirewall:firewall,__cloudLoadAttemptComplete:true,__initialAdoptComplete:true,

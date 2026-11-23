@@ -27,7 +27,7 @@ function token(uid){
 test("real Firebase browser: active Storage saves, rules, multi-client convergence and recovery",{timeout:600000},async t=>{
   assertEmulators();
   if(process.env.MCAP_EMULATOR_ONLY){
-    assert.ok(["native calendar","lost real commit"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
+    assert.ok(["native calendar","lost real commit","history import","archive"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
     assert.ok(!process.env.CI,"CI must run every real Firebase browser acceptance case");
     t.diagnostic("Development-only selection: "+process.env.MCAP_EMULATOR_ONLY);
   }
@@ -74,7 +74,7 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
   t.after(async()=>{await browser.close();await new Promise(resolve=>server.close(resolve));});
   const deniedExternal=[],errors=[],consoleErrors=[];
   async function client(){
-    const context=await browser.newContext({timezoneId:"America/Chicago",serviceWorkers:"block",viewport:{width:1440,height:1100}});
+    const context=await browser.newContext({timezoneId:"America/Chicago",serviceWorkers:"block",acceptDownloads:true,viewport:{width:1440,height:1100}});
     await context.route("**/*",route=>{
       const uri=new URL(route.request().url());
       if(allowed.has(uri.origin))return route.continue();
@@ -113,6 +113,8 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     const source=JSON.parse(JSON.stringify(snapshotState({skipLocalFileCacheSync:true})));
     source.syncMeta.rev=rev;source.totalHistory=[{dateISO:"2026-11-23",hours:1,fixtureOnly:true}];
     source.jobFolders.push({id:"mcap-project",name:"1241 Synthetic MCAP",projectNumber:"1241",parent:"jobs_root",order:2});
+    source.tasksAsReq.push({id:"emulator_archive_task",name:"Synthetic retained service task",mode:"asreq",variant:"template",templateId:"emulator_archive_task",cat:"root",parentTask:null,order:100,inventoryId:"emulator_archive_inventory",pn:"TEST-001",price:5,downtimeHours:0.25,manualLink:"",storeLink:"",note:"Retain definition and history",completedDates:["2026-11-01"],manualHistory:[{dateISO:"2026-11-01",status:"completed",hours:0.25,calendarPrice:5,note:"Retain original completion"}],occurrenceHours:{"2026-11-01":0.25},occurrenceNotes:{"2026-11-01":"Retain historical note"},removedOccurrences:[]});
+    source.inventory.push({id:"emulator_archive_inventory",linkedTaskId:"emulator_archive_task",name:"Synthetic retained service stock",qtyNew:3,qtyOld:1,unit:"pcs",price:5,folderId:null,pn:"TEST-001",note:"Retain stock identity"});
     return source;
   },REV);
   await seedDoc("workspaces/github-prod/members/"+OWNER,member("owner"));
@@ -211,6 +213,103 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     await a.reload();await ready(a);await exact(a,completed);
     await b.waitForFunction(rev=>window.__loadedCloudRevisionForSaveGuard===rev,completed.syncMeta.rev);await exact(b,completed);
   });
+  const importHistory=async(kind,rows,fields)=>{
+    const before=await read(a),downloads=[],onDownload=download=>downloads.push(download);
+    const preview=await a.evaluate(({kind,rows})=>historicalImport.preview(kind,rows),{kind,rows});
+    assert.ok(preview.every(row=>row.status==="Missing — Import"),JSON.stringify(preview));
+    a.on("download",onDownload);
+    let result;
+    try{result=await a.evaluate(({kind,rows,preview})=>historicalImport.submit(kind,rows,{confirmed:true,reviewedPreview:preview}),{kind,rows,preview});}
+    finally{a.off("download",onDownload);}
+    assert.equal(result.saved,true,JSON.stringify(result));
+    assert.equal(result.backupCreated,true);assert.equal(result.verificationCompleted,true);
+    assert.equal(downloads.length,1,"Exactly one native mandatory backup download");
+    assert.match(downloads[0].suggestedFilename(),/^omax-pre-import-.*\.json$/);
+    const backup=JSON.parse(await fs.readFile(await downloads[0].path(),"utf8"));
+    assert.deepEqual(backup.state,before,"Download contains the complete exact active Storage authority");
+    assert.deepEqual(backup.syncMeta,before.syncMeta);
+    const after=await read(a),allowed=new Set(["syncMeta","saveMeta",...fields]);
+    for(const key of Object.keys(before))if(!allowed.has(key))assert.deepEqual(after[key],before[key],key);
+    assert.ok(after.syncMeta.rev>before.syncMeta.rev);await exact(a,after);
+    await a.reload();await ready(a);await exact(a,after);
+    const duplicate=await a.evaluate(async({kind,rows})=>{
+      const reviewedPreview=historicalImport.preview(kind,rows);
+      return {statuses:reviewedPreview.map(row=>row.status),result:await historicalImport.submit(kind,rows,{confirmed:true,reviewedPreview})};
+    },{kind,rows});
+    assert.ok(duplicate.statuses.every(status=>status==="Already Present"));
+    assert.equal(duplicate.result.saveAttempted,false);assert.equal(duplicate.result.backupCreated,false);
+    await exact(a,after);
+    await b.waitForFunction(rev=>window.__loadedCloudRevisionForSaveGuard===rev,after.syncMeta.rev);await exact(b,after);
+    return {before,after};
+  };
+  await step("history import purchase retains exact backup, allocations and provenance without stock replay",async()=>{
+    const row={import_event_id:"emulator_purchase_import",source_id:"mcap_fixture",source_record_id:"purchase_1",date:"2026-10-28",purchased:"Synthetic service filter",qty:2,cost:12.5,shipping:2.31,tax:0.17,partNumber:"0007",review_status:"reviewed",source_text:"Synthetic purchase evidence"};
+    const {before,after}=await importHistory("purchase",[row],["receiptTrackerWeeks"]);
+    const saved=after.receiptTrackerWeeks.flatMap(week=>week.rows).find(item=>item.import_event_id===row.import_event_id);
+    assert.equal(saved.qty,2);assert.equal(saved.cost,12.5);assert.equal(saved.shipping,2.31);assert.equal(saved.tax,0.17);assert.equal(saved.partNumber,"0007");
+    assert.deepEqual(saved.importProvenance.sourceRecord,row);assert.deepEqual(after.inventory,before.inventory);
+    const changed={...row,cost:99};
+    const conflict=await a.evaluate(async({row,changed})=>({preview:historicalImport.preview("purchase",[changed]),submit:await historicalImport.submit("purchase",[changed],{confirmed:true,reviewedPreview:historicalImport.preview("purchase",[row])})}),{row,changed});
+    assert.equal(conflict.preview[0].status,"Possible Match — Review");assert.equal(conflict.submit.saved,false);
+    assert.equal(conflict.submit.saveAttempted,false);assert.equal(conflict.submit.backupCreated,false);await exact(a,after);
+  });
+  await step("history import pump hours and measurements preserve IDs, exact source and unrelated history",async()=>{
+    const hours={import_event_id:"emulator_hours_import",source_id:"mcap_fixture",source_record_id:"hours_1",date:"2026-10-29",hours:0.5,review_status:"reviewed",source_text:"Synthetic cumulative hours"};
+    const totals=await importHistory("pump_hours",[hours],["totalHistory"]);
+    assert.deepEqual(totals.after.totalHistory.find(row=>row.import_event_id===hours.import_event_id).importProvenance.sourceRecord,hours);
+    for(const row of totals.before.totalHistory)assert.deepEqual(totals.after.totalHistory.find(saved=>saved.dateISO===row.dateISO),row);
+    const rpm={import_event_id:"emulator_rpm_import",source_id:"mcap_fixture",source_record_id:"rpm_1",date:"2026-10-28",rpm:3495,timeISO:"12:00",time_source:"unknown_source_time_placeholder_noon",review_status:"reviewed",source_text:"Synthetic measurement; exact time unknown"};
+    const measurements=await importHistory("pump",[rpm],["pumpEff"]);
+    const saved=measurements.after.pumpEff.entries.find(row=>row.import_event_id===rpm.import_event_id);
+    assert.equal(saved.rpm,3495);assert.equal(saved.timeISO,"12:00");assert.equal(saved.importProvenance.sourceTimeKnown,false);
+    assert.deepEqual(saved.importProvenance.sourceRecord,rpm);
+    for(const row of measurements.before.pumpEff.entries)assert.deepEqual(measurements.after.pumpEff.entries.find(saved=>saved.dateISO===row.dateISO),row);
+  });
+  await step("history import maintenance appends audited one-time completion without rewriting tasks",async()=>{
+    const row={import_event_id:"emulator_maintenance_import",event_date:"2026-10-30",route:"existing_task",event_name:"Synthetic retained service task",exact_existing_task:"Synthetic retained service task",calendar_mode:"one_time",mark_completed:true,labor_minutes:5,parts_cost_snapshot:5,part_number_snapshot:"TEST-001",source_kind:"shop_log",source_page:"1",source_line:"1",source_text:"Synthetic completed service",review_status:"reviewed",review_notes:"Keep exact provenance"};
+    const {before,after}=await importHistory("maintenance",[row],["maintenanceTasksV2","maintenanceCalendarInstancesV2","maintenanceOccurrencesV2"]);
+    assert.deepEqual(after.tasksAsReq,before.tasksAsReq);assert.deepEqual(after.tasksInterval,before.tasksInterval);
+    const completed=after.maintenanceOccurrencesV2.find(event=>event.import_event_id===row.import_event_id);
+    assert.equal(completed.eventType,"completed");assert.equal(completed.loggedHours*60,5);assert.equal(completed.partsCostSnapshot,5);
+    assert.deepEqual(completed.importProvenance.sourceRecord,row);
+    const instance=after.maintenanceCalendarInstancesV2.find(item=>item.id===completed.instanceId);
+    assert.equal(instance.instanceMode,"one_time");assert.equal(instance.repeatRule,null);
+    for(const original of before.maintenanceOccurrencesV2)assert.deepEqual(after.maintenanceOccurrencesV2.find(item=>item.id===original.id),original);
+  });
+  await step("archive task and stock transfers restore exact identities, history and financial evidence",async()=>{
+    const before=await read(a);
+    const financial=page=>page.evaluate(()=>computeCostModel().maintenanceCostRows.map(row=>({taskId:row.taskId,dateISO:row.dateISO,root:row.rootOccurrenceId||"",totalCost:row.totalCost,costIncomplete:row.costIncomplete})).sort((one,two)=>JSON.stringify(one).localeCompare(JSON.stringify(two))));
+    const costs=await financial(a);
+    const transfer=async(api,method,id,fields)=>{
+      const source=await read(a);
+      const result=await a.evaluate(({api,method,id})=>{
+        if(api==="maintenanceTaskDeletionApi"&&method==="restore"){
+          const entry=window.__lastLoadedCloudState.deletedItems.find(row=>row.id===id);
+          return window[api].restore(id,OMAXMaintenanceTaskArchive.key(entry));
+        }
+        return window[api][method](id);
+      },{api,method,id});
+      assert.equal(result.saved,true,JSON.stringify(result));assert.equal(result.verified,true);
+      const actual=await read(a),allowed=new Set(["syncMeta",...fields]);
+      for(const key of Object.keys(source))if(!allowed.has(key))assert.deepEqual(actual[key],source[key],key);
+      assert.deepEqual(await financial(a),costs,"Archive transfer retains historical cost evidence");
+      await a.reload();await ready(a);await exact(a,actual);
+      assert.deepEqual(await financial(a),costs,"A fresh report model retains the same archived/restored costs");
+      await b.waitForFunction(rev=>window.__loadedCloudRevisionForSaveGuard===rev,actual.syncMeta.rev);await exact(b,actual);
+      return actual;
+    };
+    const archivedTask=await transfer("maintenanceTaskDeletionApi","remove","emulator_archive_task",["tasksAsReq","deletedItems"]);
+    const taskEntry=archivedTask.deletedItems.find(row=>row.type==="task"&&row.payload.id==="emulator_archive_task");
+    assert.deepEqual(taskEntry.payload,before.tasksAsReq.find(row=>row.id==="emulator_archive_task"));
+    const unconfirmed=await a.evaluate(id=>maintenanceTaskDeletionApi.restore(id,"unreviewed archive"),taskEntry.id);
+    assert.equal(unconfirmed.saved,false);assert.equal(unconfirmed.stateWriteAttempted,false);
+    await exact(a,archivedTask);
+    await transfer("maintenanceTaskDeletionApi","restore",taskEntry.id,["tasksAsReq","deletedItems"]);
+    const archivedStock=await transfer("inventoryDeletionApi","remove","emulator_archive_inventory",["inventory","deletedItems"]);
+    assert.deepEqual(archivedStock.deletedItems.find(row=>row.type==="inventory").payload,before.inventory.find(row=>row.id==="emulator_archive_inventory"));
+    const restored=await transfer("inventoryDeletionApi","restore","emulator_archive_inventory",["inventory","deletedItems"]);
+    for(const key of Object.keys(before))if(key!=="syncMeta")assert.deepEqual(restored[key],before[key],key);
+  });
   await step("real Storage rules deny overwrite, delete, list, malformed metadata and unauthorized reads",async()=>{
     const proof=await a.evaluate(async()=>{
       const index=(await FB.db.doc("workspaces/github-prod/app/stateIndexV1").get({source:"server"})).data();
@@ -253,6 +352,11 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     assert.deepEqual(await a.evaluate(()=>window.__lastLoadedCloudState),before,"Uncertain save must not adopt its realtime echo");
     const committed=await read(a);assert.ok(committed.syncMeta.rev>before.syncMeta.rev);
     assert.equal(committed.pumpEff.entries.filter(row=>row.id==="emulator_lost_ack").length,1);
+    const download= a.waitForEvent("download");
+    await a.locator('[data-recovery-export="cloud"]').click();
+    const exported=await download;
+    assert.match(exported.suggestedFilename(),/^omax-cloud-state-.*\.json$/);
+    assert.deepEqual(JSON.parse(await fs.readFile(await exported.path(),"utf8")),committed,"Recovery export reads current active authority, not old baseline or legacy document");
     assert.equal((await a.evaluate(()=>saveCloudNow())).saved,false);
     assert.deepEqual(await read(a),committed);
     await a.reload();await ready(a);await exact(a,committed);
