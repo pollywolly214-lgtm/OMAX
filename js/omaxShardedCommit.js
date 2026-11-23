@@ -140,10 +140,16 @@
       return {saved:true,stateWriteAttempted:true,stateWriteCompleted:true,
         indeterminate:false,committedState,path:INDEX_PATH};
     }catch(error){
-      const definite=error?.definite===true||(error?.code==="permission-denied");
+      // Once the index write has been queued in any transaction attempt, even
+      // a later PERMISSION_DENIED cannot prove that the CAS did not commit.
+      // This is crucial for the app's Recovery Mode: never classify a
+      // possibly committed state as a definite no-write failure.
+      const indeterminate=indexWriteQueued;
+      const definite=!indeterminate
+        &&(error?.definite===true||error?.code==="permission-denied");
       return {saved:false,blocked:definite,definiteFailure:definite,
         stateWriteAttempted:indexWriteQueued,stateWriteCompleted:false,
-        indeterminate:indexWriteQueued&&!definite,
+        indeterminate,
         errorCode:String(error?.code||"sharded_commit_failed"),
         error:String(error?.message||error),
         stagedManifestPath:staged?.manifestPath||null,
