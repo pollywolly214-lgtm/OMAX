@@ -22,6 +22,7 @@ const index=()=>({
 });
 function fixture(){
   let selection=null,legacy=state(),error=null,swap=false,corrupt=false,readCount=0;
+  let actor="GntsaU7i2tXdDf05ds8cws5dfi63",changeActorOnReadback=false;
   const snap=(ref,contents)=>({
     ref:{path:ref.path},exists:contents!==null,
     metadata:{fromCache:false,hasPendingWrites:false},
@@ -42,12 +43,13 @@ function fixture(){
     }})};
   const app={name:"[DEFAULT]",
     options:{projectId:Router.PROJECT,storageBucket:Router.BUCKET},
-    auth:()=>({currentUser:{uid:"GntsaU7i2tXdDf05ds8cws5dfi63"}}),
+    auth:()=>({currentUser:actor?{uid:actor}:null}),
     firestore:()=>db};
   let reads=0;
   const args={app,commit:Commit,
     readback:{read:async()=>{
       reads++;
+      if(changeActorOnReadback)actor=null;
       if(corrupt)throw Error("Shard checksum mismatch");
       return {state:clone(legacy),summary:{verified:true,revision:11}};
     }},
@@ -64,6 +66,8 @@ function fixture(){
     setError:e=>error=e,
     changeIndex:()=>swap=true,
     corruptShard:()=>corrupt=true,
+    signOut:()=>actor=null,
+    signOutDuringReadback:()=>changeActorOnReadback=true,
     reads:()=>reads,
     indexReads:()=>readCount};
 }
@@ -109,4 +113,26 @@ test("rejects index CAS pointer changes during multi-shard download",async()=>{
 test("rejects a Storage copy with wrong revision",async()=>{
   const f=fixture();f.setIndex({...index(),revision:12});
   await assert.rejects(Router.resolve(f.args),{code:"incomplete_sharded_read"});
+});
+
+test("rejects sharded state if actor signs out during independent download",async()=>{
+  const f=fixture();f.setIndex(index());f.signOutDuringReadback();
+  await assert.rejects(Router.resolve(f.args),{code:"actor_changed"});
+  assert.equal(f.reads(),1);
+});
+test("rejects legacy state if actor signs out before last authority verification",async()=>{
+  const f=fixture();
+  const original=f.args.app.firestore().doc;
+  f.args.app.firestore().doc=path=>{
+    const ref=original(path);
+    if(path!==Router.STATE_PATH)return ref;
+    const read=ref.get;
+    return {...ref,get:async opts=>{
+      const result=await read(opts);
+      f.signOut();
+      return result;
+    }};
+  };
+  await assert.rejects(Router.resolve(f.args),{code:"actor_changed"});
+  assert.equal(f.reads(),0);
 });
