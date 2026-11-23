@@ -104,7 +104,7 @@ function canWriteCloud(reason = "cloud save"){
   if (typeof window === "undefined") return false;
   // MCAP read-side integration is intentionally fail-closed. Do not let any
   // legacy writer mutate app/state after a Storage index becomes authoritative.
-  if (authoritativeBackendMode === "sharded") return blockCloudSave(
+  if (authoritativeBackendMode === "sharded" && !MCAP_SHARDED_WRITES_ACTIVE) return blockCloudSave(
     `${reason}; Storage-backed authority is still read-only until full writer cutover tests pass.`);
   if (isRecoveryMode()) return blockCloudSave(`${reason}; Recovery Mode is read-only, cloud saves disabled.`);
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
@@ -7385,12 +7385,12 @@ async function performCloudSave(saveOptions = {}){
       return cloudSaveNoWriteFailure("core_business_reduction_blocked", "Core business data reduction was blocked.");
     }
     const sizeBytes = estimatePayloadBytes(snap);
-    if (sizeBytes >= FIRESTORE_WARN_BYTES){
+    if (authoritativeBackendMode !== "sharded" && sizeBytes >= FIRESTORE_WARN_BYTES){
       console.warn("Cloud state size warning", { sizeBytes, warnAt: FIRESTORE_WARN_BYTES, strongWarnAt: FIRESTORE_STRONG_WARN_BYTES, blockAt: FIRESTORE_BLOCK_BYTES });
       logStateSizeDiagnostics(snap, "before-save");
       if (sizeBytes >= FIRESTORE_STRONG_WARN_BYTES) console.error("Cloud state size strong warning", { sizeBytes, strongWarnAt: FIRESTORE_STRONG_WARN_BYTES });
     }
-    if (sizeBytes >= FIRESTORE_BLOCK_BYTES){
+    if (authoritativeBackendMode !== "sharded" && sizeBytes >= FIRESTORE_BLOCK_BYTES){
       if (explicitTrace){
         explicitTrace.payloadSizeBlocked = true;
         explicitTrace.saveCloudInternalReturnValue = "payload_size_blocked";
@@ -8483,7 +8483,7 @@ async function loadFromCloud(){
       return { loaded:false, recovery:true, reason:"authoritative_state_missing_or_empty" };
     }
     const adopted = adoptIdentityCheckedAuthoritativeState(data);
-    if (routed?.mode === "sharded"){
+    if (routed?.mode === "sharded" && !MCAP_SHARDED_WRITES_ACTIVE){
       // Storage reads work; writes, specialized mutation handlers and realtime
       // adoption must stay read-only until all old client save paths are routed.
       window.__autosaveDisabled = true;
