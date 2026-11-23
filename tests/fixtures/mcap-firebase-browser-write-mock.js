@@ -9,29 +9,48 @@
   const user=Object.freeze({uid:"GntsaU7i2tXdDf05ds8cws5dfi63",email:"mcap-test@example.invalid"});
   const clone=x=>x==null?x:JSON.parse(JSON.stringify(x));
   const documents=new Map(),files=new Map(),listeners=new Map();
-  const SNAPSHOT_KEY="__mcapDisposableStorageSnapshotV1";
-  const persisted=(()=>{
-    try{return JSON.parse(sessionStorage.getItem(SNAPSHOT_KEY)||"null")}
-    catch(_){return null}
-  })();
-  const fromBase64=text=>{
-    const binary=atob(text),bytes=new Uint8Array(binary.length);
-    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
-    return bytes;
+  // IndexedDB holds only fake test snapshots on localhost. The previous
+  // sessionStorage representation exceeded the browser's small 5 MB quota
+  // once more than one immutable Storage revision existed.
+  const openFixtureDb=()=>new Promise((resolve,reject)=>{
+    const req=indexedDB.open("mcap-disposable-storage-test",1);
+    req.onupgradeneeded=()=>req.result.createObjectStore("snapshots");
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error||Error("Fixture IndexedDB open failed"));
+  });
+  const readPersisted=async()=>{
+    const db=await openFixtureDb();
+    try{
+      return await new Promise((resolve,reject)=>{
+        const tx=db.transaction("snapshots","readonly");
+        const req=tx.objectStore("snapshots").get("latest");
+        req.onsuccess=()=>resolve(req.result||null);
+        req.onerror=()=>reject(req.error);
+      });
+    }finally{db.close();}
   };
-  const toBase64=bytes=>{
-    let body="";
-    for(let i=0;i<bytes.length;i+=8192)
-      body+=String.fromCharCode(...bytes.subarray(i,i+8192));
-    return btoa(body);
+  const writePersisted=async archive=>{
+    const db=await openFixtureDb();
+    try{
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction("snapshots","readwrite");
+        tx.objectStore("snapshots").put(archive,"latest");
+        tx.oncomplete=()=>resolve();
+        tx.onabort=()=>reject(tx.error||Error("Fixture snapshot write aborted"));
+        tx.onerror=()=>reject(tx.error||Error("Fixture snapshot write failed"));
+      });
+    }finally{db.close();}
   };
-  if(persisted?.version===1 && Array.isArray(persisted.documents)
-      && Array.isArray(persisted.files)){
-    for(const [key,value]of persisted.documents)documents.set(key,value);
-    for(const [key,value]of persisted.files)files.set(key,{
-      body:fromBase64(value.body),options:value.options
+  let persisted=null;
+  const restorePersisted=archive=>{
+    if(archive?.version!==1||!Array.isArray(archive.documents)
+      ||!Array.isArray(archive.files))return false;
+    for(const [key,value]of archive.documents)documents.set(key,clone(value));
+    for(const [key,value]of archive.files)files.set(key,{
+      body:new Uint8Array(value.body),options:clone(value.options)
     });
-  }
+    return true;
+  };
   let databaseWrites=0,storageUploads=0,authReady=false;
   function snapshot(ref){
     const body=documents.get(ref.path);
@@ -120,7 +139,8 @@
     onAuthStateChanged:callback=>{
       queueMicrotask(async()=>{
         try{
-          if(persisted?.version===1 && documents.has(INDEX_PATH)){
+          persisted=await readPersisted();
+          if(restorePersisted(persisted) && documents.has(INDEX_PATH)){
             window.__mcapExpectedState=clone(persisted.expectedState);
             window.__mcapStageEvidence=clone(persisted.stageEvidence);
             authReady=true;
@@ -197,23 +217,19 @@
     indexPresent:documents.has(INDEX_PATH),storedObjects:files.size});
   window.__mcapMockReadState=()=>clone(documents.get(INDEX_PATH));
   window.__mcapMockLegacy=()=>clone(documents.get("workspaces/github-prod/app/state"));
-  window.__mcapPersistSnapshot=expectedState=>{
+  window.__mcapPersistSnapshot=async expectedState=>{
     if(!expectedState||!documents.has(INDEX_PATH))
       throw Error("No verified active state to persist for localhost reload.");
     const archive={
       version:1,
       documents:[...documents.entries()].map(([k,v])=>[k,clone(v)]),
       files:[...files.entries()].map(([k,v])=>[k,{
-        body:toBase64(v.body),options:clone(v.options)
+        body:Uint8Array.from(v.body),options:clone(v.options)
       }]),
       expectedState:clone(expectedState),
       stageEvidence:clone(window.__mcapStageEvidence)
     };
-    // This is only a disposable browser fixture. The previously serialized
-    // ~2MB snapshot must be cleared before storing the new one, otherwise
-    // simultaneous old+new copies can exceed Chromium's sessionStorage quota.
-    sessionStorage.removeItem(SNAPSHOT_KEY);
-    sessionStorage.setItem(SNAPSHOT_KEY,JSON.stringify(archive));
+    await writePersisted(archive);
     return {objectCount:archive.files.length,
       stateRevision:archive.expectedState.syncMeta?.rev};
   };
