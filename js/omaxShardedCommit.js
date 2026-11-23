@@ -12,10 +12,22 @@
   const fail=(code,message)=>Object.assign(Error("OMAX sharded commit: "+message),{code,definite:true});
   const validID=x=>typeof x==="string"&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(x);
   const validSHA=x=>typeof x==="string"&&/^[a-f0-9]{64}$/.test(x);
+  const INDEX_FIELDS=Object.freeze([
+    "schemaVersion","mode","workspaceId","projectId","bucket",
+    "revision","previousRevision","manifestPath","manifestSha256",
+    "operationId","actorUid","createdAtISO"
+  ]);
   function checkIndex(index){
-    if(index?.schemaVersion!==1||index.mode!=="active"||index.workspaceId!==WORKSPACE
+    // Match the exact Firestore index schema. An unexpected/partial pointer
+    // is not safe evidence of a valid authority switch or successful save.
+    if(!index||typeof index!=="object"||Array.isArray(index)
+      ||Object.keys(index).length!==INDEX_FIELDS.length
+      ||INDEX_FIELDS.some(key=>!Object.prototype.hasOwnProperty.call(index,key))
+      ||index.schemaVersion!==1||index.mode!=="active"||index.workspaceId!==WORKSPACE
       ||index.projectId!==PROJECT||index.bucket!==BUCKET
       ||!Number.isSafeInteger(index.revision)||index.revision<1
+      ||!Number.isSafeInteger(index.previousRevision)||index.previousRevision<0
+      ||index.previousRevision>=index.revision
       ||!validSHA(index.manifestSha256)||typeof index.manifestPath!=="string"
       ||!validID(index.operationId)||!validID(index.actorUid)
       ||typeof index.createdAtISO!=="string"||index.createdAtISO.length>30
