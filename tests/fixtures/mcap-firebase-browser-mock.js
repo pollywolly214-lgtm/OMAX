@@ -76,7 +76,12 @@
         try{
           // Main app's buildCleanState is now defined. Stage using the real
           // production sharding and independent readback libraries.
-          const state=buildCleanState();
+          // buildCleanState intentionally omits syncMeta and several
+          // protected collections. Use the complete app snapshot for the
+          // disposable full-authority fixture; JSON canonicalizes it first.
+          const state=JSON.parse(JSON.stringify(
+            snapshotState({skipLocalFileCacheSync:true})
+          ));
           state.syncMeta.rev=1794576947956;
           const staged=await window.OMAXWorkingShards.stage({
             confirmation:window.OMAXWorkingShards.PHRASE,
