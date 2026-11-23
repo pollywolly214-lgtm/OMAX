@@ -105,3 +105,40 @@ test("no active index means no write or automatic activation",async()=>{
   assert.equal(result.saved,false);
   assert.equal(e.transactions(),0);
 });
+
+test("post-CAS permission denial stays indeterminate; never tells user to retry",async()=>{
+  const e=setup(),source=await initialize(e);
+  const indexRef=e.args.app.firestore().doc(Commit.INDEX_PATH);
+  const originalGet=indexRef.get;
+  let reads=0;
+  indexRef.get=async options=>{
+    reads++;
+    if(reads>=2)throw Object.assign(new Error("permission denied after CAS"),{code:"permission-denied"});
+    return originalGet(options);
+  };
+  const next={...source,inventory:[{id:"one-verified-record"}]};
+  const result=await Commit.save({...e.args,state:next,expectedRevision:11,
+    prepare:pending=>pending,scan:()=>({contaminated:false}),
+    clientId:"unit_test_client",timeNow:()=>12});
+  assert.equal(result.saved,false);
+  assert.equal(result.stateWriteAttempted,true);
+  assert.equal(result.indeterminate,true);
+  assert.equal(result.definiteFailure,false);
+  assert.equal(result.blocked,false);
+  assert.equal(e.index().revision,12);
+  assert.equal(e.transactions(),1);
+});
+test("permission denial before CAS is a definite no-index-write failure",async()=>{
+  const e=setup(),source=await initialize(e);
+  const indexRef=e.args.app.firestore().doc(Commit.INDEX_PATH);
+  indexRef.get=async()=>{throw Object.assign(new Error("permission denied"),{code:"permission-denied"})};
+  const result=await Commit.save({...e.args,state:source,expectedRevision:11,
+    prepare:pending=>pending,scan:()=>({contaminated:false}),
+    clientId:"unit_test_client",timeNow:()=>12});
+  assert.equal(result.saved,false);
+  assert.equal(result.indeterminate,false);
+  assert.equal(result.definiteFailure,true);
+  assert.equal(result.stateWriteAttempted,false);
+  assert.equal(e.index().revision,11);
+  assert.equal(e.transactions(),0);
+});
