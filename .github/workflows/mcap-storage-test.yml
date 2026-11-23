@@ -8,6 +8,9 @@ on:
       - "tests/omax-*.test.js"
       - "tests/mcap-storage-*.test.js"
       - ".github/workflows/mcap-storage-test.yml"
+      - "docs/firestore-sharded-cutover-PROPOSAL.rules"
+      - "tests/mcap-firestore-cutover.emulator.cjs"
+      - "mcap-firestore-emulator.json"
   workflow_dispatch:
 
 permissions:
@@ -44,3 +47,33 @@ jobs:
           tests/omax-sharded-commit.test.js
           tests/omax-sharded-activation.test.js
           tests/omax-authority-router.test.js
+
+  cutover-rules:
+    name: Test proposed cutover rules in disposable Firestore emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GCLOUD_PROJECT: demo-mcap-security
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install isolated emulator-only test dependencies
+        run: |
+          mkdir -p "$RUNNER_TEMP/mcap-firebase"
+          npm install --prefix "$RUNNER_TEMP/mcap-firebase" --no-save --no-audit --no-fund \
+            firebase-tools@15.32.1 firebase@12.16.0 @firebase/rules-unit-testing@5.0.0
+          echo "NODE_PATH=$RUNNER_TEMP/mcap-firebase/node_modules" >> "$GITHUB_ENV"
+      - name: Real Firestore rules emulator tests (demo project ONLY)
+        run: |
+          test "$GCLOUD_PROJECT" = "demo-mcap-security"
+          "$RUNNER_TEMP/mcap-firebase/node_modules/.bin/firebase" emulators:exec \
+            --only firestore --project demo-mcap-security \
+            --config mcap-firestore-emulator.json \
+            'node --test --test-concurrency=1 tests/mcap-firestore-cutover.emulator.cjs'
