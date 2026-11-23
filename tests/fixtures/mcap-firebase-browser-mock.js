@@ -83,6 +83,10 @@
             snapshotState({skipLocalFileCacheSync:true})
           ));
           state.syncMeta.rev=1794576947956;
+          // An empty initial snapshot is correctly rejected by OMAX's
+          // stateHasMeaningfulData guard. Use one explicitly synthetic,
+          // non-financial machine-hour record to test normal adoption.
+          state.totalHistory=[{dateISO:"2026-11-23",hours:1,fixtureOnly:true}];
           const staged=await window.OMAXWorkingShards.stage({
             confirmation:window.OMAXWorkingShards.PHRASE,
             app,sharder:window.OMAXShardedState,
