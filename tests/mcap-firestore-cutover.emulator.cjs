@@ -134,3 +134,27 @@ test("non-state workspace metadata and nested save logs retain their previous ru
   await assertFails(setDoc(doc(otherDb,META),{workspaceId:"github-prod"}));
   await assertFails(setDoc(doc(otherDb,LOG),{status:"saved"}));
 });
+
+test("legacy transaction started before cutover cannot commit AFTER index activation",async()=>{
+  const legacyRef=doc(ownerDb,STATE),indexRef=doc(ownerDb,INDEX);
+  const before=(await getDoc(legacyRef)).data();
+  let notifyRead,releaseWrite;
+  const readReady=new Promise(resolve=>{notifyRead=resolve;});
+  const continueTransaction=new Promise(resolve=>{releaseWrite=resolve;});
+  const staleClient=runTransaction(ownerDb,async tx=>{
+    const observed=await tx.get(legacyRef);
+    assert.equal(observed.data().syncMeta.rev,REV);
+    notifyRead();
+    await continueTransaction;
+    tx.update(legacyRef,{"syncMeta.rev":REV+1});
+  });
+  try{
+    await readReady;
+    await assertSucceeds(setDoc(indexRef,pointer()));
+  }finally{
+    releaseWrite();
+  }
+  await assertFails(staleClient);
+  assert.deepEqual((await getDoc(legacyRef)).data(),before);
+  assert.equal((await getDoc(indexRef)).data().revision,REV);
+});
