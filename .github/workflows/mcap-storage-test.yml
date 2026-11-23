@@ -103,7 +103,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/mcap-browser" --no-save --no-audit --no-fund playwright@1.56.1
           echo "NODE_PATH=$RUNNER_TEMP/mcap-browser/node_modules" >> "$GITHUB_ENV"
       - name: Provision disposable headless Chromium
-        run: "$RUNNER_TEMP/mcap-browser/node_modules/.bin/playwright install --with-deps chromium"
+        run: "$RUNNER_TEMP/mcap-browser/node_modules/.bin/playwright install chromium"
       - name: Run isolated OMAXDevSafe browser smoke (no Firebase traffic)
         run: |
           node --check tests/mcap-browser-smoke.browser.cjs
