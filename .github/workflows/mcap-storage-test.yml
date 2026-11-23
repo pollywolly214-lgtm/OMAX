@@ -14,6 +14,8 @@ on:
       - "tests/mcap-sharded-backend.emulator.cjs"
       - "tests/mcap-browser-smoke.browser.cjs"
       - "tests/mcap-active-browser-readonly.browser.cjs"
+      - "tests/mcap-active-browser-save.browser.cjs"
+      - "tests/fixtures/mcap-firebase-browser-write-mock.js"
       - "tests/fixtures/mcap-firebase-browser-mock.js"
       - "mcap-firestore-emulator.json"
   workflow_dispatch:
@@ -106,5 +108,6 @@ jobs:
         run: |
           node --check tests/mcap-browser-smoke.browser.cjs
           node --check tests/mcap-active-browser-readonly.browser.cjs
+          node --check tests/mcap-active-browser-save.browser.cjs
           node --check tests/fixtures/mcap-firebase-browser-mock.js
-          node --test --test-concurrency=1 tests/mcap-browser-smoke.browser.cjs tests/mcap-active-browser-readonly.browser.cjs
+          node --test --test-concurrency=1 tests/mcap-browser-smoke.browser.cjs tests/mcap-active-browser-readonly.browser.cjs tests/mcap-active-browser-save.browser.cjs
