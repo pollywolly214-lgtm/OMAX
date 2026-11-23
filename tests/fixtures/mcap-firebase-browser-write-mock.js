@@ -209,6 +209,10 @@
       expectedState:clone(expectedState),
       stageEvidence:clone(window.__mcapStageEvidence)
     };
+    // This is only a disposable browser fixture. The previously serialized
+    // ~2MB snapshot must be cleared before storing the new one, otherwise
+    // simultaneous old+new copies can exceed Chromium's sessionStorage quota.
+    sessionStorage.removeItem(SNAPSHOT_KEY);
     sessionStorage.setItem(SNAPSHOT_KEY,JSON.stringify(archive));
     return {objectCount:archive.files.length,
       stateRevision:archive.expectedState.syncMeta?.rev};
