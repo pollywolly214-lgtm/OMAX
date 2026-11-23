@@ -17,16 +17,19 @@ function state(){
     orderRequests:[],totalHistory:[],dailyCutHours:[],deletedItems:[],unknown:"retain"};
 }
 function setup(){
-  let legacy=state(),index=null,committedWrites=0,simulateRace=false;
+  let legacy=state(),index=null,committedWrites=0;
+  let transactionCount=0,injectRaceAt=Infinity;
   const stored=new Map();
   const read=(path)=>({exists:path===Activation.LEGACY?legacy!==null:index!==null,
     ref:{path},metadata:{fromCache:false,hasPendingWrites:false},
     data:()=>clone(path===Activation.LEGACY?legacy:index)});
   const db={doc:path=>({path,get:async()=>read(path)}),
-    runTransaction:async fn=>fn({
+    runTransaction:async fn=>{
+      const ordinal=++transactionCount;
+      return fn({
       get:async ref=>{
         const snapshot=read(ref.path);
-        if(simulateRace&&ref.path===Activation.LEGACY)
+        if(ordinal===injectRaceAt&&ref.path===Activation.LEGACY)
           return {...snapshot,data:()=>({...snapshot.data(),syncMeta:{rev:12}})};
         return snapshot;
       },
@@ -38,7 +41,8 @@ function setup(){
         assert.equal(ref.path,Activation.INDEX);
         index=null;committedWrites++;
       }
-    })};
+    });
+    }};
   const storage={ref:()=>({child:path=>({
     put:async(blob,metadata)=>{
       if(stored.has(path))throw Error("Immutable Storage object exists.");
@@ -65,7 +69,11 @@ function setup(){
     cryptoApi:webcrypto,fetchImpl};
   return {args,index:()=>clone(index),legacy:()=>clone(legacy),
     writes:()=>committedWrites,setLegacy:s=>legacy=clone(s),
-    setIndex:s=>index=clone(s),race:()=>simulateRace=true,
+    setIndex:s=>index=clone(s),race:(phase="activate")=>{
+      // Activation makes three transaction reads before its index commit;
+      // rollback makes two. Inject the change within its write transaction.
+      injectRaceAt=transactionCount+(phase==="rollback"?3:4);
+    },
     stage:async()=>{
       const result=await Stager.stage({...args,confirmation:Stager.PHRASE,
         providedSource:legacy,
@@ -145,7 +153,7 @@ test("transaction-time mutation refuses rollback without deleting active pointer
   const e=setup(),candidate=await e.stage();
   await Activation.activate({...e.args,candidate,
     approval:"ACTIVATE OMAX SHARDED AUTHORITY",rulesEnforced:true});
-  e.race();
+  e.race("rollback");
   await assert.rejects(Activation.rollbackBeforeFirstWrite({...e.args,
     approval:"ROLL BACK OMAX BEFORE FIRST SHARDED SAVE",rulesEnforced:true}),
     {code:"rollback_conflict"});
