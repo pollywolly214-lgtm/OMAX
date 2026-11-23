@@ -53,7 +53,7 @@ function setup(){
 async function initialize(e,source=fixture()){
   const staged=await Stager.stage({...e.args,providedSource:source,confirmation:Stager.PHRASE});
   e.setIndex({schemaVersion:1,mode:"active",workspaceId:"github-prod",projectId:Commit.PROJECT,
-    bucket:Commit.BUCKET,revision:source.syncMeta.rev,manifestPath:staged.manifestPath,
+    bucket:Commit.BUCKET,revision:source.syncMeta.rev,previousRevision:0,manifestPath:staged.manifestPath,
     manifestSha256:staged.manifestSha256,operationId:staged.operationId,
     actorUid:staged.actorUid,createdAtISO:staged.createdAtISO});
   return source;
@@ -141,4 +141,20 @@ test("permission denial before CAS is a definite no-index-write failure",async()
   assert.equal(result.stateWriteAttempted,false);
   assert.equal(e.index().revision,11);
   assert.equal(e.transactions(),0);
+});
+
+test("authority index decoder rejects fields the backend rules would reject",async()=>{
+  const e=setup();await initialize(e);
+  const good=e.index();
+  assert.equal(Commit.checkIndex(good).revision,11);
+  for(const mutation of [
+    {...good,previousRevision:undefined},
+    {...good,previousRevision:-1},
+    {...good,previousRevision:11},
+    {...good,revision:12,previousRevision:13},
+    {...good,arbitraryField:"should-fail"},
+    {...good,manifestSha256:"not-sha"}
+  ]){
+    assert.throws(()=>Commit.checkIndex(mutation),{code:"invalid_index"});
+  }
 });
