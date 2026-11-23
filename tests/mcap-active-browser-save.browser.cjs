@@ -212,7 +212,7 @@ test("actual OMAX browser performs verified Storage-backed save and reload in is
       matchingLoaded:window.OMAXShardedState.canonical(verified.state)===
         window.OMAXShardedState.canonical(window.__lastLoadedCloudState)
     };
-    window.__mcapPersistSnapshot(window.__lastLoadedCloudState);
+    await window.__mcapPersistSnapshot(window.__lastLoadedCloudState);
     return result;
   });
   const historyProof=JSON.stringify(historyChange);
