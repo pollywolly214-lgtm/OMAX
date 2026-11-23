@@ -28,3 +28,27 @@ test("size ceiling remains mandatory for legacy and never rejects a Storage shar
   assert.doesNotMatch(ordinary,/(?<!sharded" && )if \(sizeBytes >= FIRESTORE_BLOCK_BYTES\)/);
   assert.match(core,/routed\?\.mode === "sharded" && !MCAP_SHARDED_WRITES_ACTIVE/);
 });
+
+test("repair and recovery tools must never read historical legacy state after activation",()=>{
+  const authoritativeRead=functionSection("async function readCurrentCloudStateReadOnly(","async function buildDiagnosticSummary");
+  assert.match(authoritativeRead,/OMAXAuthorityRouter\?\.fromBrowser/);
+  assert.match(authoritativeRead,/const routed = await window\.OMAXAuthorityRouter\.fromBrowser\(\)/);
+  assert.match(authoritativeRead,/throw Error\("Verified OMAX authority reader unavailable/);
+  assert.match(authoritativeRead,/window\.OMAXDevSafe\?\.active/);
+  const inspect=functionSection("async function runRecoveryInspect(","if (typeof window !== \"undefined\") window.recoveryInspect");
+  assert.match(inspect,/cloudState = await readCurrentCloudStateReadOnly\(\)/);
+  assert.doesNotMatch(inspect,/FB\.docRef\.get\(/);
+  const repair=functionSection("const cuttingJobRepairEnv=","const runReadOnlyCuttingJobRepairAudit=");
+  assert.match(repair,/const state=await readCurrentCloudStateReadOnly\(\)/);
+  assert.doesNotMatch(repair,/FB\.docRef\.get\(/);
+});
+
+test("startup refuses silent legacy fallback when production router is absent",()=>{
+  const load=functionSection("async function loadFromCloud()","async function migrateLegacyWorkspaceDoc()");
+  assert.match(load,/if \(!window\.OMAXDevSafe\?\.active\)/);
+  assert.match(load,/typeof window\.OMAXAuthorityRouter\?\.fromBrowser !== "function"/);
+  assert.match(load,/throw Error\("OMAX authoritative source router unavailable/);
+  assert.match(load,/await window\.OMAXAuthorityRouter\.fromBrowser\(\)/);
+  assert.match(load,/!\["legacy","sharded"\]\.includes\(routed\.mode\)/);
+  assert.match(load,/window\.__autosaveDisabled = true;/);
+});
