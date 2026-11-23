@@ -13,6 +13,8 @@ on:
       - "tests/mcap-firestore-cutover.emulator.cjs"
       - "tests/mcap-sharded-backend.emulator.cjs"
       - "tests/mcap-browser-smoke.browser.cjs"
+      - "tests/mcap-active-browser-readonly.browser.cjs"
+      - "tests/fixtures/mcap-firebase-browser-mock.js"
       - "mcap-firestore-emulator.json"
   workflow_dispatch:
 
@@ -103,4 +105,6 @@ jobs:
       - name: Run isolated OMAXDevSafe browser smoke (no Firebase traffic)
         run: |
           node --check tests/mcap-browser-smoke.browser.cjs
-          node --test tests/mcap-browser-smoke.browser.cjs
+          node --check tests/mcap-active-browser-readonly.browser.cjs
+          node --check tests/fixtures/mcap-firebase-browser-mock.js
+          node --test --test-concurrency=1 tests/mcap-browser-smoke.browser.cjs tests/mcap-active-browser-readonly.browser.cjs
