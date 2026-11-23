@@ -52,3 +52,17 @@ test("startup refuses silent legacy fallback when production router is absent",(
   assert.match(load,/!\["legacy","sharded"\]\.includes\(routed\.mode\)/);
   assert.match(load,/window\.__autosaveDisabled = true;/);
 });
+
+test("ordinary Storage save acknowledges the exact committed state and revision",()=>{
+  const ordinary=functionSection("async function performCloudSave(","function recordDataFlowEvent(");
+  assert.match(ordinary,/const confirm = window\.OMAXShardedAcknowledgement\?\.confirm/);
+  assert.match(ordinary,/committedState:writeResult\.committedState/);
+  assert.match(ordinary,/verifiedState:verified/);
+  assert.match(ordinary,/canonical:window\.OMAXShardedState\?\.canonical/);
+  assert.match(ordinary,/writeRev = verified\.syncMeta\.rev/);
+  assert.match(ordinary,/window\.__loadedCloudRevisionForSaveGuard = authoritativeBackendMode === "sharded"/);
+  assert.match(ordinary,/\? verified\.syncMeta\.rev : Number\(snap\?\.syncMeta\?\.rev \|\| 0\)/);
+  assert.match(ordinary,/Legacy Firestore verification must remain unchanged/);
+  assert.match(ordinary,/stableStringifyForIntegrity\(verified\) !== stableStringifyForIntegrity\(expectedState\)/);
+  assert.match(ordinary,/path:authoritativeBackendMode === "sharded"/);
+});
