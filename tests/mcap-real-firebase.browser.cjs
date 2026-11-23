@@ -191,15 +191,18 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     let release,signal,timer,held=false;const statuses=[];
     const gate=new Promise(resolve=>{release=resolve;});
     const reached=new Promise((resolve,reject)=>{signal=resolve;timer=setTimeout(()=>reject(Error("Native contender never reached the index-commit barrier")),60000);});
+    // Match only an already-allowlisted emulator endpoint. Avoid installing
+    // and removing a catch-all fallback while native listener traffic is live.
+    const commitUrls=new RegExp(`^http://${FIRESTORE.replaceAll(".","\\.")}/v1/projects/${PROJECT}/databases/\\(default\\)/documents:commit(?:\\?.*)?$`);
     const intercept=async route=>{
       const request=route.request(),url=new URL(request.url());
       const indexCommit=url.origin==="http://"+FIRESTORE&&url.pathname.endsWith("/documents:commit")
         &&(request.postDataJSON()?.writes||[]).some(write=>write.update?.name?.endsWith("/"+INDEX));
-      if(!indexCommit)return route.fallback();
+      if(!indexCommit)return route.continue();
       if(!held){held=true;signal();await gate;}
       const response=await route.fetch();statuses.push(response.status());return route.fulfill({response});
     };
-    await b.route("**/*",intercept);
+    await b.route(commitUrls,intercept);
     let winner,index,winnerAction,loserAction,loser;
     try{
       await b.locator('#pumpLogForm button[type="submit"]').click();await reached;clearTimeout(timer);
@@ -225,7 +228,7 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
         assert.equal(await b.locator('#pumpLogForm button[type="submit"]').isDisabled(),true);
         assert.deepEqual(await b.evaluate(()=>window.__lastLoadedCloudState),before);
       }
-    }finally{clearTimeout(timer);release();await b.unroute("**/*",intercept);}
+    }finally{clearTimeout(timer);release();await b.unroute(commitUrls,intercept);}
     assert.equal(winner.pumpEff.entries.filter(row=>row.id===winnerAction.id).length,1);
     assert.deepEqual(winner.pumpEff.entries.find(row=>row.id===winnerAction.id),{id:winnerAction.id,dateISO:"2026-10-24",rpm:540,timeISO:"14:15"});
     assert.equal(winner.pumpEff.entries.some(row=>row.id===loserAction.id),false);
