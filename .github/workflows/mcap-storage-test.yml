@@ -27,6 +27,14 @@ on:
       - "tests/polishv2-pump-log.test.js"
       - "tests/inventory-material-persistence.test.js"
       - "tests/cjo04-review.test.js"
+      - "js/cfr05CloudCuttingFiles.js"
+      - "js/cfr04WorkspaceMetadata.js"
+      - "js/cuttingJobChronology.js"
+      - "tests/cjo04b-verification.test.js"
+      - "tests/cjo04c-readback.test.js"
+      - "tests/cfr05-cloud-cutting-files.test.js"
+      - "tests/cfr05-storage-cleanup-rules.test.js"
+      - "tests/fixtures/mcap-cutting-files.cjs"
       - "tests/fixtures/mcap-firebase-browser-write-mock.js"
       - "tests/fixtures/mcap-firebase-browser-mock.js"
       - "mcap-firestore-emulator.json"
@@ -49,6 +57,7 @@ jobs:
       - name: Syntax validation
         run: |
           node --check js/core.js
+          node --check js/cuttingJobChronology.js
           node --check js/omaxAuthorityRouter.js
           node --check js/omaxShardedActivation.js
           node --check js/omaxShardedCommit.js
@@ -74,6 +83,11 @@ jobs:
           tests/polishv2-pump-log.test.js
           tests/inventory-material-persistence.test.js
           tests/cjo04-review.test.js
+          tests/cfr05-cloud-cutting-files.test.js
+          tests/cfr05-storage-cleanup-rules.test.js
+          tests/omax-sharded-chronology-deadline.test.js
+          tests/cjo04b-verification.test.js
+          tests/cjo04c-readback.test.js
 
   cutover-rules:
     name: Test proposed cutover rules in disposable Firestore emulator
@@ -161,6 +175,7 @@ jobs:
           node --check scripts/mcap-emulator-browser.cjs
           node --check tests/mcap-real-firebase.browser.cjs
           node --check tests/fixtures/mcap-emulator-identity.cjs
+          node --check tests/fixtures/mcap-cutting-files.cjs
           node scripts/mcap-emulator-browser.cjs
       - name: Retain synthetic emulator diagnostics on failure
         if: failure()

@@ -27,7 +27,7 @@ function token(uid){
 test("real Firebase browser: active Storage saves, rules, multi-client convergence and recovery",{timeout:600000},async t=>{
   assertEmulators();
   if(process.env.MCAP_EMULATOR_ONLY){
-    assert.ok(["native calendar","lost real commit","history import","archive","corrupt field","actor change","in-flight"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
+    assert.ok(["native calendar","lost real commit","history import","archive","corrupt field","actor change","in-flight","cutting file","specialized"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
     assert.ok(!process.env.CI,"CI must run every real Firebase browser acceptance case");
     t.diagnostic("Development-only selection: "+process.env.MCAP_EMULATOR_ONLY);
   }
@@ -109,14 +109,16 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     assert.deepEqual(await page.evaluate(()=>window.__lastLoadedCloudState),expected);
   };
   const a=await client();
-  const legacy=await a.evaluate(rev=>{
+  const legacy=await a.evaluate(({rev,owner})=>{
     const source=JSON.parse(JSON.stringify(snapshotState({skipLocalFileCacheSync:true})));
     source.syncMeta.rev=rev;source.totalHistory=[{dateISO:"2026-11-23",hours:1,fixtureOnly:true}];
     source.jobFolders.push({id:"mcap-project",name:"1241 Synthetic MCAP",projectNumber:"1241",parent:"jobs_root",order:2});
     source.tasksAsReq.push({id:"emulator_archive_task",name:"Synthetic retained service task",mode:"asreq",variant:"template",templateId:"emulator_archive_task",cat:"root",parentTask:null,order:100,inventoryId:"emulator_archive_inventory",pn:"TEST-001",price:5,downtimeHours:0.25,manualLink:"",storeLink:"",note:"Retain definition and history",completedDates:["2026-11-01"],manualHistory:[{dateISO:"2026-11-01",status:"completed",hours:0.25,calendarPrice:5,note:"Retain original completion"}],occurrenceHours:{"2026-11-01":0.25},occurrenceNotes:{"2026-11-01":"Retain historical note"},removedOccurrences:[]});
     source.inventory.push({id:"emulator_archive_inventory",linkedTaskId:"emulator_archive_task",name:"Synthetic retained service stock",qtyNew:3,qtyOld:1,unit:"pcs",price:5,folderId:null,pn:"TEST-001",note:"Retain stock identity"});
-    return source;
-  },REV);
+    const planned=CuttingJobDateEditing.prepareMutation(source,{type:"create",job:{id:"mcap_attachment_job",name:"Synthetic attachment acceptance",cat:"mcap-project",projectNumber:"1241",startISO:"2026-11-21",dueISO:"2026-11-22",estimateHours:1,chargeRate:100,costRate:30,material:"Steel",materialCost:5,materialQty:1,priority:1,manualLogs:[],files:[],notes:"Keep attachments outside business state"}},{audit:{operationId:"mcap_attachment_seed",actorUid:owner,atISO:"2026-11-23T12:00:00.000Z"},validateCategory:(job,state)=>CuttingJobHistory.validateManualProjectCategory(job.cat,job.projectNumber,state.jobFolders,[...state.cuttingJobs,...state.completedCuttingJobs],null).ok});
+    if(!planned.ok)throw Error("Synthetic attachment job fixture is invalid: "+JSON.stringify(planned));
+    return planned.nextState;
+  },{rev:REV,owner:OWNER});
   await seedDoc("workspaces/github-prod/members/"+OWNER,member("owner"));
   await seedDoc(STATE,legacy);
   await signIn(a);
@@ -153,7 +155,27 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     assert.equal(water.saved,true,JSON.stringify(water));
     const pump=await a.evaluate(()=>savePumpLogChange({kind:"create",id:"emulator_pump",dateISO:"2026-11-22",rpm:500,timeISO:"10:30"}));assert.equal(pump.saved,true,JSON.stringify(pump));
     const material=await a.evaluate(()=>inventoryMaterialMutationApi.run({kind:"cell",typeId:window.__lastLoadedCloudState.inventoryMaterials.types[0].id,rowIndex:0,colIndex:0,value:"19"}));assert.equal(material.saved,true,JSON.stringify(material));
-    const job=await a.evaluate(()=>createCuttingJob({id:"emulator_job",name:"Synthetic emulator cut",cat:"mcap-project",projectNumber:"1241",startISO:"2026-11-21",dueISO:"2026-11-22",estimateHours:2,chargeRate:200,costRate:45,material:"Steel",materialCost:10,materialQty:1,priority:1,manualLogs:[],files:[],notes:"Retain exact note"}));assert.equal(job.saved,true,JSON.stringify(job));
+    // After the real CAS, the engine reconstructs once and the chronology
+    // coordinator independently reconstructs again. Delay that final proof
+    // beyond the old single-document deadline without altering any bytes.
+    let committed=false,manifestDownloads=0,delayed=false,job;
+    const commitUrls=new RegExp(`^http://${FIRESTORE.replaceAll(".","\\.")}/v1/projects/${PROJECT}/databases/\\(default\\)/documents:commit(?:\\?.*)?$`);
+    const objectUrls=new RegExp(`^http://${STORAGE.replaceAll(".","\\.")}/v0/b/${BUCKET.replaceAll(".","\\.")}/o/`);
+    const latency=async route=>{
+      const request=route.request(),url=new URL(request.url());
+      if(url.pathname.endsWith("/documents:commit")&&(request.postDataJSON()?.writes||[]).some(write=>write.update?.name?.endsWith("/"+INDEX))){
+        const response=await route.fetch();assert.equal(response.status(),200);committed=true;return route.fulfill({response});
+      }
+      if(committed&&decodeURIComponent(url.pathname.split("/o/")[1]||"").includes("/state-shards/v1/_manifest/")&&url.searchParams.get("alt")==="media"&&++manifestDownloads===2){
+        const response=await route.fetch();assert.equal(response.status(),200);
+        await new Promise(resolve=>setTimeout(resolve,4000));delayed=true;return route.fulfill({response});
+      }
+      return route.continue();
+    };
+    await a.route(commitUrls,latency);await a.route(objectUrls,latency);
+    try{job=await a.evaluate(()=>createCuttingJob({id:"emulator_job",name:"Synthetic emulator cut",cat:"mcap-project",projectNumber:"1241",startISO:"2026-11-21",dueISO:"2026-11-22",estimateHours:2,chargeRate:200,costRate:45,material:"Steel",materialCost:10,materialQty:1,priority:1,manualLogs:[],files:[],notes:"Retain exact note"}));}
+    finally{await a.unroute(commitUrls,latency);await a.unroute(objectUrls,latency);}
+    assert.equal(delayed,true,"Real final chronology proof exceeded the legacy deadline");assert.equal(job.saved,true,JSON.stringify(job));
     const complete=await a.evaluate(()=>completeCuttingJob("emulator_job",{completedAtISO:"2026-11-22"}));assert.equal(complete.saved,true,JSON.stringify(complete));
     const saved=await read(a),changed=new Set(["waterQualityChecks","pumpEff","inventoryMaterials","cuttingJobs","completedCuttingJobs","syncMeta"]);
     for(const key of Object.keys(before))if(!changed.has(key))assert.deepEqual(saved[key],before[key],key);
@@ -490,6 +512,7 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     await a.reload();await ready(a);await exact(a,actual);
     await b.waitForFunction(rev=>window.__loadedCloudRevisionForSaveGuard===rev,actual.syncMeta.rev);await exact(b,actual);
   });
+  await require("./fixtures/mcap-cutting-files.cjs")({step,a,b,read,exact,ready,client,signIn,seedDoc,member,localRequest,legacy});
   await step("real Storage rules deny overwrite, delete, list, malformed metadata and unauthorized reads",async()=>{
     const proof=await a.evaluate(async()=>{
       const index=(await FB.db.doc("workspaces/github-prod/app/stateIndexV1").get({source:"server"})).data();
