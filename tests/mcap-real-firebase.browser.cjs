@@ -27,7 +27,7 @@ function token(uid){
 test("real Firebase browser: active Storage saves, rules, multi-client convergence and recovery",{timeout:600000},async t=>{
   assertEmulators();
   if(process.env.MCAP_EMULATOR_ONLY){
-    assert.ok(["native calendar","lost real commit","history import","archive"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
+    assert.ok(["native calendar","lost real commit","history import","archive","corrupt field","actor change"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
     assert.ok(!process.env.CI,"CI must run every real Firebase browser acceptance case");
     t.diagnostic("Development-only selection: "+process.env.MCAP_EMULATOR_ONLY);
   }
@@ -309,6 +309,102 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     assert.deepEqual(archivedStock.deletedItems.find(row=>row.type==="inventory").payload,before.inventory.find(row=>row.id==="emulator_archive_inventory"));
     const restored=await transfer("inventoryDeletionApi","restore","emulator_archive_inventory",["inventory","deletedItems"]);
     for(const key of Object.keys(before))if(key!=="syncMeta")assert.deepEqual(restored[key],before[key],key);
+  });
+  await step("actor change during staged save cannot commit or adopt the pending record",async()=>{
+    const before=await read(a);
+    const index=await b.evaluate(async()=>(await FB.db.doc("workspaces/github-prod/app/stateIndexV1").get({source:"server"})).data());
+    let release,signal,held=false,indexWrites=0;
+    const gate=new Promise(resolve=>{release=resolve;}),reached=new Promise(resolve=>{signal=resolve;});
+    const intercept=async route=>{
+      const request=route.request(),url=new URL(request.url());
+      if(url.pathname.endsWith("/documents:commit")&&(request.postDataJSON()?.writes||[]).some(write=>write.update?.name?.endsWith("/"+INDEX)))indexWrites++;
+      const objectPath=decodeURIComponent(url.pathname.split("/o/")[1]||"");
+      if(!held&&url.origin==="http://"+STORAGE&&url.searchParams.get("alt")==="media"
+        &&objectPath.includes("/state-shards/v1/_manifest/")&&objectPath!==index.manifestPath){
+        const response=await route.fetch();assert.equal(response.status(),200);
+        held=true;signal();await gate;return route.fulfill({response});
+      }
+      return route.fallback();
+    };
+    await a.route("**/*",intercept);
+    const saving=a.evaluate(()=>savePumpLogChange({kind:"create",id:"emulator_actor_change",dateISO:"2026-10-27",rpm:525,timeISO:"13:00"}));
+    let result;
+    try{
+      await Promise.race([reached,saving.then(value=>{throw Error("Save settled before staged response barrier: "+JSON.stringify(value));})]);
+      await a.evaluate(()=>firebase.auth().signOut());
+      await a.waitForFunction(()=>!FB.user&&!FB.ready&&!firebase.auth().currentUser);
+      release();result=await saving;
+    }finally{release();await a.unroute("**/*",intercept);}
+    assert.equal(held,true);assert.equal(result.saved,false);assert.equal(result.stateWriteAttempted===true,false,JSON.stringify(result));
+    assert.equal(result.indeterminate===true,false);assert.equal(indexWrites,0,"No index write sent after account change");
+    assert.deepEqual(await a.evaluate(()=>window.__lastLoadedCloudState),before,"Account change must not adopt pending data");
+    await exact(b,before);
+    await a.reload();await signIn(a);await ready(a);await exact(a,before);
+    assert.equal((await read(a)).pumpEff.entries.some(row=>row.id==="emulator_actor_change"),false);
+  });
+  await step("corrupt field download fails startup closed and recovers only after verified reload",async()=>{
+    const before=await read(a),consoleStart=consoleErrors.length;
+    const pointer=await a.evaluate(async()=>{
+      const index=(await FB.db.doc("workspaces/github-prod/app/stateIndexV1").get({source:"server"})).data();
+      const url=await firebase.app().storage().ref(index.manifestPath).getDownloadURL();
+      const manifest=await (await fetch(url)).json();
+      return {index,path:manifest.shards.find(part=>part.sourceField==="mcapEmulatorOpaque").path};
+    });
+    let corrupted=0,indexWrites=0;
+    const intercept=async route=>{
+      const request=route.request(),url=new URL(request.url());
+      if(url.pathname.endsWith("/documents:commit")&&(request.postDataJSON()?.writes||[]).some(write=>write.update?.name?.endsWith("/"+INDEX)))indexWrites++;
+      if(url.origin==="http://"+STORAGE&&decodeURIComponent(url.pathname.split("/o/")[1]||"")===pointer.path&&url.searchParams.get("alt")==="media"){
+        const response=await route.fetch(),body=await response.body();assert.equal(response.status(),200);
+        const offset=body.indexOf(Buffer.from("XXXX"));assert.ok(offset>=0,"Synthetic payload must be present");
+        body[offset]=89;corrupted++;return route.fulfill({response,body});
+      }
+      return route.fallback();
+    };
+    await a.route("**/*",intercept);
+    try{
+      await a.reload();await a.waitForFunction(()=>window.__cloudLoadAttemptComplete&&window.__recoveryInspectMode);
+      assert.ok(corrupted>0,"Tampered an actual field-shard download with unchanged byte count");
+      assert.ok(consoleErrors.slice(consoleStart).some(message=>message.includes("downloaded object SHA-256 mismatch")),"Startup rejected the field checksum");
+      assert.equal(await a.evaluate(()=>window.__initialAdoptComplete),false);
+      assert.equal((await a.evaluate(()=>saveCloudNow())).saved,false);
+      assert.equal(await a.evaluate(()=>typeof workspaceStateUnsubscribe==="function"),false,"Failed startup must not start a reload listener");
+      assert.equal(indexWrites,0);await exact(b,before);
+      assert.deepEqual(await b.evaluate(async()=>(await FB.db.doc("workspaces/github-prod/app/stateIndexV1").get({source:"server"})).data()),pointer.index);
+      assert.deepEqual(await a.evaluate(async()=>(await FB.docRef.get({source:"server"})).data()),legacy);
+    }finally{await a.unroute("**/*",intercept);}
+    await a.reload();await ready(a);await exact(a,before);
+  });
+  await step("corrupt field after committed index suspends retry and retains the previous baseline",async()=>{
+    const before=await read(a);let committed=false,corrupted=0;
+    const intercept=async route=>{
+      const request=route.request(),url=new URL(request.url());
+      if(url.pathname.endsWith("/documents:commit")&&(request.postDataJSON()?.writes||[]).some(write=>write.update?.name?.endsWith("/"+INDEX))){
+        const response=await route.fetch();assert.equal(response.status(),200,"Index committed before corrupt readback");
+        committed=true;return route.fulfill({response});
+      }
+      const objectPath=decodeURIComponent(url.pathname.split("/o/")[1]||"");
+      if(committed&&url.origin==="http://"+STORAGE&&objectPath.includes("/state-shards/v1/mcapEmulatorOpaque$p")&&url.searchParams.get("alt")==="media"){
+        const response=await route.fetch(),body=await response.body();assert.equal(response.status(),200);
+        const offset=body.indexOf(Buffer.from("XXXX"));assert.ok(offset>=0);
+        body[offset]=89;corrupted++;return route.fulfill({response,body});
+      }
+      return route.fallback();
+    };
+    await a.route("**/*",intercept);
+    let result;
+    try{result=await a.evaluate(()=>savePumpLogChange({kind:"create",id:"emulator_corrupt_ack",dateISO:"2026-10-26",rpm:530,timeISO:"13:15"}));}
+    finally{await a.unroute("**/*",intercept);}
+    assert.equal(committed,true);assert.ok(corrupted>0,"Tampered post-commit field download");
+    assert.equal(result.saved,false);assert.equal(result.indeterminate,true,JSON.stringify(result));
+    assert.match(result.error,/downloaded object SHA-256 mismatch/);
+    assert.equal(await a.evaluate(()=>isRecoveryMode()&&window.__autosaveDisabled),true);
+    assert.deepEqual(await a.evaluate(()=>window.__lastLoadedCloudState),before,"Corrupt readback cannot advance the loaded baseline");
+    const actual=await read(a);assert.ok(actual.syncMeta.rev>before.syncMeta.rev);
+    assert.equal(actual.pumpEff.entries.filter(row=>row.id==="emulator_corrupt_ack").length,1);
+    assert.equal((await a.evaluate(()=>saveCloudNow())).saved,false);assert.deepEqual(await read(a),actual);
+    await a.reload();await ready(a);await exact(a,actual);
+    await b.waitForFunction(rev=>window.__loadedCloudRevisionForSaveGuard===rev,actual.syncMeta.rev);await exact(b,actual);
   });
   await step("real Storage rules deny overwrite, delete, list, malformed metadata and unauthorized reads",async()=>{
     const proof=await a.evaluate(async()=>{
