@@ -110,6 +110,12 @@
           // stateHasMeaningfulData guard. Use one explicitly synthetic,
           // non-financial machine-hour record to test normal adoption.
           state.totalHistory=[{dateISO:"2026-11-23",hours:1,fixtureOnly:true}];
+          // The reconstructed authoritative JSON is intentionally larger
+          // than the old 975 KB Firestore document gate. Only the localhost
+          // fixture contains these synthetic opaque items.
+          state.mcapSyntheticLargeExtension=Array.from({length:1100},(_,i)=>({
+            id:"mcap-synthetic-"+i,fixtureOnly:true,payload:"X".repeat(1000)
+          }));
           const staged=await window.OMAXWorkingShards.stage({
             confirmation:window.OMAXWorkingShards.PHRASE,
             app,sharder:window.OMAXShardedState,
