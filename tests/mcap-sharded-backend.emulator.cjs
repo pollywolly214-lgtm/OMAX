@@ -14,6 +14,7 @@ const Working=require("../js/omaxWorkingStorage");
 const Staging=require("../js/omaxWorkingShards");
 const Readback=require("../js/omaxShardedReadback");
 const Commit=require("../js/omaxShardedCommit");
+const Ack=require("../js/omaxShardedAcknowledgement");
 const Router=require("../js/omaxAuthorityRouter");
 
 const PROJECT="demo-mcap-security";
@@ -164,6 +165,12 @@ test("active Storage read, protected save, reload, stale second client, and old-
       assert.equal(after.revision,REV+1);
       assert.equal(after.state.inventory.length,2);
       assert.equal(after.state.maintenanceOccurrencesV2.length,2);
+      // Test the SAME strict acknowledgement contract used by core's
+      // sharded ordinary save path against genuine emulator index evidence.
+      const proof=Ack.confirm({committedState:saved.committedState,
+        verifiedState:after.state,expectedRevision:REV,canonical:State.canonical});
+      assert.equal(proof.verified,true);
+      assert.equal(proof.revision,REV+1);
       assert.deepEqual(after.state.unknownAppFields,baseline.unknownAppFields);
       assert.deepEqual(after.state.completedCuttingJobs,baseline.completedCuttingJobs);
       const stale=await Commit.save({...b.context,state:baseline,
