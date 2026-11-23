@@ -186,3 +186,76 @@ test("active Storage read, protected save, reload, stale second client, and old-
       assert.ok(storage.objects.size>=staged.archiveObjects);
     }finally{await env.cleanup();}
   });
+
+test("two active Storage clients race after staging; only the winning CAS becomes authoritative",
+  {timeout:90000},async()=>{
+    assert.equal(process.env.GCLOUD_PROJECT,PROJECT);
+    assert.ok(process.env.FIRESTORE_EMULATOR_HOST);
+    const [host,port]=process.env.FIRESTORE_EMULATOR_HOST.split(":");
+    const rules=fs.readFileSync(path.join(__dirname,"../docs/firestore-sharded-cutover-PROPOSAL.rules"),"utf8");
+    const env=await initializeTestEnvironment({
+      projectId:PROJECT,firestore:{host,port:Number(port),rules}
+    });
+    try{
+      await env.clearFirestore();
+      const baseline=fixture();
+      await env.withSecurityRulesDisabled(async context=>{
+        await setDoc(doc(context.firestore(),STATE_PATH),baseline);
+      });
+      const storage=mockStorage(),a=client(env,storage),b=client(env,storage);
+      const staged=await Staging.stage({
+        ...a.context,confirmation:Staging.PHRASE,providedSource:baseline
+      });
+      await setDoc(doc(a.db,INDEX_PATH),{
+        schemaVersion:1,mode:"active",workspaceId:"github-prod",
+        projectId:Commit.PROJECT,bucket:Commit.BUCKET,
+        revision:REV,previousRevision:0,
+        manifestPath:staged.manifestPath,manifestSha256:staged.manifestSha256,
+        operationId:staged.operationId,actorUid:staged.actorUid,
+        createdAtISO:staged.createdAtISO
+      });
+      let notifyStaging,releaseStage;
+      const stagedA=new Promise(resolve=>notifyStaging=resolve);
+      const allowA=new Promise(resolve=>releaseStage=resolve);
+      const pendingA=clone(baseline);
+      pendingA.inventory.push({id:"losing-inventory",qty:10});
+      const pendingB=clone(baseline);
+      pendingB.orderRequests.push({id:"winning-order",qty:1});
+      const holdA={...Staging,stage:async options=>{
+        const upload=await Staging.stage(options);
+        notifyStaging();
+        await allowA;
+        return upload;
+      }};
+      const savingA=Commit.save({...a.context,stager:holdA,
+        state:pendingA,expectedRevision:REV,
+        clientId:"racingA",timeNow:()=>REV+1,
+        prepare:x=>x,scan:()=>({contaminated:false})});
+      let resultA;
+      try{
+        await stagedA;
+        const resultB=await Commit.save({...b.context,
+          state:pendingB,expectedRevision:REV,
+          clientId:"racingB",timeNow:()=>REV+2,
+          prepare:x=>x,scan:()=>({contaminated:false})});
+        assert.equal(resultB.saved,true,JSON.stringify(resultB));
+      }finally{
+        releaseStage();
+      }
+      resultA=await savingA;
+      assert.equal(resultA.saved,false);
+      assert.equal(resultA.errorCode,"revision_conflict");
+      assert.equal(resultA.stateWriteAttempted,false);
+      assert.equal(resultA.indeterminate,false);
+      const current=await Router.resolve(a.router);
+      assert.equal(current.mode,"sharded");
+      assert.equal(current.revision,REV+2);
+      assert.equal(current.state.orderRequests.some(row=>row.id==="winning-order"),true);
+      assert.equal(current.state.inventory.some(row=>row.id==="losing-inventory"),false);
+      assert.equal(current.state.maintenanceOccurrencesV2.length,baseline.maintenanceOccurrencesV2.length);
+      assert.deepEqual((await getDoc(doc(a.db,STATE_PATH))).data(),baseline);
+      // The losing immutable staging objects remain, but the active pointer
+      // must not reference them. Never garbage-collect them automatically.
+      assert.ok(storage.objects.size>staged.archiveObjects);
+    }finally{await env.cleanup();}
+  });
