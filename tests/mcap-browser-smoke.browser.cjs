@@ -72,9 +72,12 @@ test("MCAP migration scripts preserve real legacy UI load, protected saves and r
     if(!window.OMAXDevSafe?.active||typeof firebase!=="undefined")
       throw Error("Disposable fixture gate failed.");
     const next={...window.__lastLoadedCloudState,...source};
-    next.settingsFolders=[{
-      id:"fixture-category",name:"Fixture",parent:null,order:1
-    }];
+    next.settingsFolders=[
+      {id:"fixture-category",name:"Fixture",parent:"root",order:1},
+      {id:"root",name:"All Tasks",parent:null,order:3},
+      {id:"interval",name:"Per Interval",parent:"root",order:2},
+      {id:"asreq",name:"As Required",parent:"root",order:1}
+    ];
     // Representative fixture originally used pumpEff:{entries:[]}, while
     // the canonical existing app model includes these empty baseline fields.
     // Align ONLY this disposable fixture, then compare the complete saved
