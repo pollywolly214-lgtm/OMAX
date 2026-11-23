@@ -75,6 +75,14 @@ test("MCAP migration scripts preserve real legacy UI load, protected saves and r
     next.settingsFolders=[{
       id:"fixture-category",name:"Fixture",parent:null,order:1
     }];
+    // Representative fixture originally used pumpEff:{entries:[]}, while
+    // the canonical existing app model includes these empty baseline fields.
+    // Align ONLY this disposable fixture, then compare the complete saved
+    // pumpEff object byte-for-byte like every other protected field.
+    next.pumpEff={...next.pumpEff,
+      notes:Array.isArray(next.pumpEff?.notes)?next.pumpEff.notes:[],
+      baselineRPM:next.pumpEff?.baselineRPM??null,
+      baselineDateISO:next.pumpEff?.baselineDateISO??null};
     next.tasksInterval.forEach((task,index)=>Object.assign(task,{
       cat:"fixture-category",parentTask:null,order:index+1,
       pn:"",manualLink:"",storeLink:"",note:""
