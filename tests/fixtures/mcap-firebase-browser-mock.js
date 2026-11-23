@@ -111,6 +111,7 @@
           window.__mcapStageEvidence={fields:staged.fieldCount,objects:staged.archiveObjects};
           authReady=true;
           await callback(user);
+          window.__mcapCallbackFinished=true;
         }catch(error){window.__mcapMockError=String(error?.stack||error);}
       });
       return()=>{};
