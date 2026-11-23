@@ -19,6 +19,16 @@ function pure(value=initial().pumpEff){
   vm.runInContext(model+section(pump,"function pumpPercentChange","const PUMP_DELTA_CLASS_COLORS")+retention+merging,c);
   return c;
 }
+for(const withBaselineHistory of [false,true])test("unchanged pump history survives unrelated saves exactly, baseline history="+withBaselineHistory,()=>{
+  const pump=initial().pumpEff;
+  pump.entries.push({id:"earlier-reading",dateISO:"2026-06-02",rpm:3495.75,timeISO:"08:17",opaque:{retain:"exact"}});
+  if(withBaselineHistory)pump.baselineHistory=[baseline("initial","2026-06-01",3480)];
+  const local=clone(pump),remote=clone(pump),model=pure(pump);
+  const actual=model.mergePumpEffForSave(local,remote);
+  assert.deepEqual(clone(actual),pump,"No sorting, rounding, trimming or defaults on unchanged history");
+  actual.entries[0].rpm=1;
+  assert.deepEqual(local,pump);assert.deepEqual(remote,pump);
+});
 function harness(options={}){
   let cloud=clone(options.initial||initial()),local=clone(cloud),commits=0,reads=0,preflights=0,ids=0,adoptions=0,diagnostics=0;
   const window={pumpEff:local.pumpEff,OMAXAtomicPersistence:atomic,CuttingFileContentFirewall:firewall,__cloudLoadAttemptComplete:true,__initialAdoptComplete:true,

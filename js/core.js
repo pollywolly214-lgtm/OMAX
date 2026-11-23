@@ -7880,6 +7880,13 @@ function mergePumpEffForSave(localPump, remotePump){
     const retention = validatePumpBaselineRetention(remote,{...local,baselineHistory});
     if (!retention.valid) throw Error(retention.error);
   }
+  // An unrelated whole-app save is not a pump edit. Preserve identical
+  // authoritative history verbatim, including record order, RPM precision,
+  // note whitespace and extension fields; retain the merge for actual drift.
+  if (localPump && remotePump && typeof localPump === "object" && typeof remotePump === "object"
+    && !Array.isArray(localPump) && !Array.isArray(remotePump)
+    && stableStringifyForIntegrity(local) === stableStringifyForIntegrity(remote))
+    return JSON.parse(JSON.stringify(remote));
   const evidence = pump=>Object.fromEntries(Object.entries(pump).filter(([field])=>field !== "baselineHistory"));
   // Baseline-only changes must not round, re-date, reorder or trim measurements
   // and notes. Preserve the complete unchanged evidence verbatim.
