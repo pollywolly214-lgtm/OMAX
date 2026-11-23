@@ -2308,6 +2308,18 @@ function getCurrentAppStateForDiagnostics(){
 
 async function readCurrentCloudStateReadOnly(){
   if (!FB.ready || !FB.docRef) return null;
+  // Every cloud inspection/import/repair must read the same authority that
+  // startup and guarded writes use. After a cutover the legacy state is a
+  // historical snapshot, NEVER a valid source for recovery or repair.
+  if (!window.OMAXDevSafe?.active && FB.app?.options?.projectId === "wj-tracker-v2"){
+    if (typeof window.OMAXAuthorityRouter?.fromBrowser !== "function")
+      throw Error("Verified OMAX authority reader unavailable. Do not use legacy state.");
+    const routed = await window.OMAXAuthorityRouter.fromBrowser();
+    if (!routed?.verified || !["legacy","sharded"].includes(routed.mode))
+      throw Error("Authoritative cloud read was not independently verified.");
+    return routed.state;
+  }
+  // Preserve the existing disposable development/test read semantics.
   const snap = await FB.docRef.get({ source:"server" });
   return snap && snap.exists ? (typeof snap.data === "function" ? snap.data() : snap.data) : null;
 }
@@ -5429,7 +5441,7 @@ window.cuttingJobImporter = window.CuttingJobImporter?.createApi({
   saveCloudNow:options=>saveCloudNow(options)
 });
 const cuttingJobRepairBackup=async()=>{const state=snapshotState({skipLocalFileCacheSync:true});let materialSettings=null;try{materialSettings=JSON.parse(localStorage.getItem("job_material_pricing_v1")||"null");}catch(_){}if(!exportJsonDownload(`omax-cutting-job-repair-backup-${Date.now()}.json`,{...state,cjiLocalMaterialSettings:materialSettings}))throw new Error("Full-state backup download did not start.");return true;};
-const cuttingJobRepairEnv={state:getCuttingJobImporterState,categories:()=>window.jobFolders||[],baseline:()=>window.__lastLoadedCloudState,setCategories:value=>{setJobFolders(value);jobFolders=window.jobFolders;},revalidateBaseline:async()=>{if(!FB.docRef||!FB.user)return false;const snap=await FB.docRef.get();if(!snap.exists)return false;return Number((snap.data()||{}).syncMeta?.rev||0)===Number((window.__lastLoadedCloudState||{}).syncMeta?.rev||0);},backup:cuttingJobRepairBackup,saveCloudNow:()=>saveCloudNow()};
+const cuttingJobRepairEnv={state:getCuttingJobImporterState,categories:()=>window.jobFolders||[],baseline:()=>window.__lastLoadedCloudState,setCategories:value=>{setJobFolders(value);jobFolders=window.jobFolders;},revalidateBaseline:async()=>{if(!FB.docRef||!FB.user)return false;const state=await readCurrentCloudStateReadOnly();if(!state)return false;return Number(state.syncMeta?.rev||0)===Number((window.__lastLoadedCloudState||{}).syncMeta?.rev||0);},backup:cuttingJobRepairBackup,saveCloudNow:()=>saveCloudNow()};
 const runReadOnlyCuttingJobRepairAudit=window.CuttingJobRepair.createReadOnlyAuditRunner(cuttingJobRepairEnv);
 window.auditCuttingJobHistoryRepair=()=>({...runReadOnlyCuttingJobRepairAudit(),
   financial:window.OMAXFinancialReconciliation.audit(window.completedCuttingJobs,{profit:computeCuttingJobProfit})});
@@ -8372,8 +8384,7 @@ async function runRecoveryInspect(){
   let cloudState = null;
   try {
     if (FB.ready && FB.docRef){
-      const snap = await FB.docRef.get();
-      cloudState = snap?.exists ? (typeof snap.data === "function" ? snap.data() : snap.data) : null;
+      cloudState = await readCurrentCloudStateReadOnly();
     }
   } catch (err){ console.warn("Recovery inspect cloud read failed", err); }
   const localBackup = readLocalStateBackup();
