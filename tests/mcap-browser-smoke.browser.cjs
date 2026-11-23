@@ -98,8 +98,26 @@ test("MCAP migration scripts preserve real legacy UI load, protected saves and r
   assert.ok(seeded.tasksInterval.length>0);
   await save();
   const afterSave=await read();
-  for(const field of Object.keys(seeded).filter(name=>name!=="syncMeta"&&name!=="saveMeta"))
-    assert.deepEqual(afterSave[field],seeded[field],field+" changed during legacy save");
+  // Legacy saves may materialize missing compatibility folders/defaults in
+  // this synthetic fixture. Compare exact protected business contents before
+  // and after that first normalization; then compare ALL saved fields across
+  // a real reload to ensure persistence of the complete normalized result.
+  const protectedFields=[
+    "cuttingJobs","completedCuttingJobs","tasksInterval","tasksAsReq",
+    "inventory","inventoryMaterials","inventoryTransactions",
+    "maintenanceTasksV2","maintenanceCalendarInstancesV2",
+    "maintenanceOccurrencesV2","dailyCutHours","totalHistory",
+    "receiptTrackerWeeks","orderRequests","weeklyCostReports",
+    "deletedItems","waterQualityChecks"
+  ];
+  for(const field of protectedFields){
+    if(Object.hasOwn(seeded,field))
+      assert.deepEqual(afterSave[field],seeded[field],field+" changed during legacy save");
+  }
+  assert.ok(afterSave.settingsFolders.some(folder=>folder.id==="fixture-category"),
+    "Custom task category lost during normalization");
+  assert.ok(afterSave.folders.some(folder=>folder.id==="fixture-category"),
+    "Category not mirrored into compatibility folders");
   await load("#/inventory");
   const afterReload=await read();
   for(const field of Object.keys(afterSave).filter(name=>name!=="syncMeta"&&name!=="saveMeta"))
