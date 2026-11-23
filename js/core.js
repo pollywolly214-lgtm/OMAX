@@ -8482,9 +8482,18 @@ async function loadFromCloud(){
   try {
     // Active authority index wins; a missing/unverifiable index read must
     // never be treated as permission to use a stale legacy document.
-    const routed = !window.OMAXDevSafe?.active && window.OMAXAuthorityRouter
-      && FB.app?.options?.projectId === "wj-tracker-v2"
-      ? await window.OMAXAuthorityRouter.fromBrowser() : null;
+    // In an authenticated production workspace, an inaccessible/missing
+    // authority selector must never silently fall back to a stale legacy
+    // document. The disposable OMAXDevSafe backend remains unchanged.
+    let routed = null;
+    if (!window.OMAXDevSafe?.active){
+      if (FB.app?.options?.projectId !== "wj-tracker-v2"
+        || typeof window.OMAXAuthorityRouter?.fromBrowser !== "function")
+        throw Error("OMAX authoritative source router unavailable. Cloud writes remain disabled.");
+      routed = await window.OMAXAuthorityRouter.fromBrowser();
+      if (!routed?.verified || !["legacy","sharded"].includes(routed.mode))
+        throw Error("OMAX authoritative source verification failed.");
+    }
     const snap = routed ? null : await FB.docRef.get({ source:"server" });
     const data = routed ? routed.state : (snap?.exists ? snap.data() : null);
     authoritativeBackendMode = routed?.mode || "legacy";
