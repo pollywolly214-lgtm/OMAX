@@ -99,6 +99,12 @@ test("actual OMAX browser performs verified Storage-backed save and reload in is
       before,
       after,
       firstExact:sameFirst,
+      logicalBytes:new TextEncoder().encode(
+        window.OMAXShardedState.canonical(original)).length,
+      syntheticExtensionRetained:window.OMAXShardedState.canonical(
+        current.state.mcapSyntheticLargeExtension)===
+        window.OMAXShardedState.canonical(original.mcapSyntheticLargeExtension),
+      stageEvidence:window.__mcapStageEvidence,
       saved:result?.saved===true,
       saveResult:result?.saved?null:{
         error:result?.error,errorCode:result?.errorCode,
@@ -120,6 +126,11 @@ test("actual OMAX browser performs verified Storage-backed save and reload in is
   const proof=JSON.stringify({...inspection,consoleErrors,errors});
   assert.equal(inspection.backend,"sharded",proof);
   assert.equal(inspection.firstExact,true,proof);
+  assert.ok(inspection.logicalBytes>975000,
+    "Fixture must exceed the monolithic Firestore size limit: "+proof);
+  assert.ok(inspection.stageEvidence.objects>inspection.stageEvidence.fields+1,
+    "Oversized field must be split into at least two Storage shards: "+proof);
+  assert.equal(inspection.syntheticExtensionRetained,true,proof);
   assert.equal(inspection.saved,true,proof);
   assert.equal(inspection.newBackendMode,"sharded",proof);
   assert.equal(inspection.matchingCurrent,true,proof);
