@@ -36,6 +36,7 @@ jobs:
           node --check js/omaxAuthorityRouter.js
           node --check js/omaxShardedActivation.js
           node --check js/omaxShardedCommit.js
+          node --check js/omaxShardedAcknowledgement.js
           node --check js/omaxShardedState.js
           node --check js/omaxWorkingShards.js
           node --check js/omaxShardedReadback.js
@@ -49,6 +50,7 @@ jobs:
           tests/omax-working-storage.test.js
           tests/omax-working-shards.test.js
           tests/omax-sharded-commit.test.js
+          tests/omax-sharded-acknowledgement.test.js
           tests/omax-sharded-activation.test.js
           tests/omax-authority-router.test.js
 
