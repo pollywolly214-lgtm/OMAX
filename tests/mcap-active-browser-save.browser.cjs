@@ -183,5 +183,73 @@ test("actual OMAX browser performs verified Storage-backed save and reload in is
   assert.equal(restored.autosaveDisabled,false,refreshProof);
   assert.equal(restored.counters.databaseWrites,0,
     "Reload must not write or reseed any data: "+refreshProof);
+  // Exercise an actual application business-history setter, not just a
+  // no-op save. Preserve everything else, including oversized opaque fields.
+  const historyChange=await page.evaluate(async()=>{
+    const before=window.__lastLoadedCloudState;
+    const baseline=window.OMAXShardedState.canonical(
+      before.mcapSyntheticLargeExtension);
+    const changed=window.setDailyCutHoursEntry("2026-11-22",3.5,{
+      source:"manual"
+    });
+    const saved=await saveCloudNow();
+    const verified=await window.OMAXAuthorityRouter.fromBrowser();
+    const day=verified.state.dailyCutHours.find(row=>
+      row.dateISO==="2026-11-22");
+    const result={
+      changed,saved:saved?.saved===true,
+      error:saved?.saved?null:saved,
+      dateISO:day?.dateISO,hours:day?.hours,
+      source:day?.source,
+      revision:verified.revision,
+      previousRevision:before.syncMeta.rev,
+      retainedOpaque:window.OMAXShardedState.canonical(
+        verified.state.mcapSyntheticLargeExtension)===baseline,
+      retainedMaintenance:window.OMAXShardedState.canonical(
+        verified.state.maintenanceOccurrencesV2)===
+        window.OMAXShardedState.canonical(before.maintenanceOccurrencesV2),
+      legacyRev:window.__mcapMockLegacy()?.syncMeta?.rev,
+      matchingLoaded:window.OMAXShardedState.canonical(verified.state)===
+        window.OMAXShardedState.canonical(window.__lastLoadedCloudState)
+    };
+    window.__mcapPersistSnapshot(window.__lastLoadedCloudState);
+    return result;
+  });
+  const historyProof=JSON.stringify(historyChange);
+  assert.equal(historyChange.changed,true,historyProof);
+  assert.equal(historyChange.saved,true,historyProof);
+  assert.equal(historyChange.dateISO,"2026-11-22",historyProof);
+  assert.equal(historyChange.hours,3.5,historyProof);
+  assert.equal(historyChange.source,"manual",historyProof);
+  assert.ok(historyChange.revision>historyChange.previousRevision,historyProof);
+  assert.equal(historyChange.retainedOpaque,true,historyProof);
+  assert.equal(historyChange.retainedMaintenance,true,historyProof);
+  assert.equal(historyChange.legacyRev,1,historyProof);
+  assert.equal(historyChange.matchingLoaded,true,historyProof);
+  await page.reload({waitUntil:"load"});
+  await page.waitForFunction(()=>!!window.__mcapMockError||
+    window.__mcapCallbackFinished===true,null,{timeout:25000});
+  const dayAfterReload=await page.evaluate(async()=>{
+    const active=await window.OMAXAuthorityRouter.fromBrowser();
+    return {
+      error:window.__mcapMockError||null,
+      revision:active.revision,
+      adoptedRevision:window.__lastLoadedCloudState?.syncMeta?.rev,
+      day:active.state.dailyCutHours.find(row=>row.dateISO==="2026-11-22"),
+      exact:window.OMAXShardedState.canonical(active.state)===
+        window.OMAXShardedState.canonical(window.__lastLoadedCloudState),
+      writes:window.__mcapMockCounters().databaseWrites,
+      legacyRev:window.__mcapMockLegacy()?.syncMeta?.rev
+    };
+  });
+  const dayProof=JSON.stringify(dayAfterReload);
+  assert.equal(dayAfterReload.error,null,dayProof);
+  assert.equal(dayAfterReload.revision,historyChange.revision,dayProof);
+  assert.equal(dayAfterReload.adoptedRevision,historyChange.revision,dayProof);
+  assert.equal(dayAfterReload.day?.hours,3.5,dayProof);
+  assert.equal(dayAfterReload.day?.source,"manual",dayProof);
+  assert.equal(dayAfterReload.exact,true,dayProof);
+  assert.equal(dayAfterReload.writes,0,dayProof);
+  assert.equal(dayAfterReload.legacyRev,1,dayProof);
   assert.deepEqual(errors,[],"Uncaught browser errors");
 });
