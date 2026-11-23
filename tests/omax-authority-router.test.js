@@ -28,7 +28,12 @@ function fixture(){
     metadata:{fromCache:false,hasPendingWrites:false},
     data:()=>clone(contents)
   });
-  const db={runTransaction:async()=>{throw Error("Router must not issue a transaction.");},
+  const db={runTransaction:async fn=>fn({
+      get:async ref=>ref.get({source:"server"}),
+      set:()=>{throw Error("Authority resolver may never write.");},
+      update:()=>{throw Error("Authority resolver may never update.");},
+      delete:()=>{throw Error("Authority resolver may never delete.");}
+    }),
     doc:path=>({path,get:async({source})=>{
       assert.equal(source,"server");
       if(error && path===Router.INDEX_PATH)throw error;
