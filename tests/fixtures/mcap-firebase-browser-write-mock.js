@@ -9,6 +9,29 @@
   const user=Object.freeze({uid:"GntsaU7i2tXdDf05ds8cws5dfi63",email:"mcap-test@example.invalid"});
   const clone=x=>x==null?x:JSON.parse(JSON.stringify(x));
   const documents=new Map(),files=new Map(),listeners=new Map();
+  const SNAPSHOT_KEY="__mcapDisposableStorageSnapshotV1";
+  const persisted=(()=>{
+    try{return JSON.parse(sessionStorage.getItem(SNAPSHOT_KEY)||"null")}
+    catch(_){return null}
+  })();
+  const fromBase64=text=>{
+    const binary=atob(text),bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    return bytes;
+  };
+  const toBase64=bytes=>{
+    let body="";
+    for(let i=0;i<bytes.length;i+=8192)
+      body+=String.fromCharCode(...bytes.subarray(i,i+8192));
+    return btoa(body);
+  };
+  if(persisted?.version===1 && Array.isArray(persisted.documents)
+      && Array.isArray(persisted.files)){
+    for(const [key,value]of persisted.documents)documents.set(key,value);
+    for(const [key,value]of persisted.files)files.set(key,{
+      body:fromBase64(value.body),options:value.options
+    });
+  }
   let databaseWrites=0,storageUploads=0,authReady=false;
   function snapshot(ref){
     const body=documents.get(ref.path);
@@ -97,6 +120,14 @@
     onAuthStateChanged:callback=>{
       queueMicrotask(async()=>{
         try{
+          if(persisted?.version===1 && documents.has(INDEX_PATH)){
+            window.__mcapExpectedState=clone(persisted.expectedState);
+            window.__mcapStageEvidence=clone(persisted.stageEvidence);
+            authReady=true;
+            await callback(user);
+            window.__mcapCallbackFinished=true;
+            return;
+          }
           // Main app's buildCleanState is now defined. Stage using the real
           // production sharding and independent readback libraries.
           // buildCleanState intentionally omits syncMeta and several
@@ -166,4 +197,20 @@
     indexPresent:documents.has(INDEX_PATH),storedObjects:files.size});
   window.__mcapMockReadState=()=>clone(documents.get(INDEX_PATH));
   window.__mcapMockLegacy=()=>clone(documents.get("workspaces/github-prod/app/state"));
+  window.__mcapPersistSnapshot=expectedState=>{
+    if(!expectedState||!documents.has(INDEX_PATH))
+      throw Error("No verified active state to persist for localhost reload.");
+    const archive={
+      version:1,
+      documents:[...documents.entries()].map(([k,v])=>[k,clone(v)]),
+      files:[...files.entries()].map(([k,v])=>[k,{
+        body:toBase64(v.body),options:clone(v.options)
+      }]),
+      expectedState:clone(expectedState),
+      stageEvidence:clone(window.__mcapStageEvidence)
+    };
+    sessionStorage.setItem(SNAPSHOT_KEY,JSON.stringify(archive));
+    return {objectCount:archive.files.length,
+      stateRevision:archive.expectedState.syncMeta?.rev};
+  };
 })();
