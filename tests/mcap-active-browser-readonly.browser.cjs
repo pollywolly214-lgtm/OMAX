@@ -48,11 +48,20 @@ test("actual OMAX browser reads verified active Storage authority, keeps Recover
   page.setDefaultTimeout(15000);
   await page.goto(origin+"/");
   await page.waitForFunction(()=>
-    !!window.__mcapMockError ||
-    (window.__mcapMockCounters?.().authReady &&
-     window.__cloudLoadAttemptComplete && window.__initialAdoptComplete),
-    {timeout:25000}
+    !!window.__mcapMockError || window.__mcapCallbackFinished===true,
+    null,{timeout:25000}
   );
+  const initial=await page.evaluate(()=>({
+    mockError:window.__mcapMockError||null,
+    mockReady:window.__mcapMockCounters?.()||null,
+    cloudLoadAttemptComplete:!!window.__cloudLoadAttemptComplete,
+    initialAdoptComplete:!!window.__initialAdoptComplete,
+    backend:window.__omaxActiveStateBackend||null,
+    recoveryReason:window.__recoveryReason||null
+  }));
+  assert.equal(initial.mockError,null,JSON.stringify(initial));
+  assert.equal(initial.cloudLoadAttemptComplete,true,JSON.stringify(initial));
+  assert.equal(initial.initialAdoptComplete,true,JSON.stringify(initial));
   const inspection=await page.evaluate(async()=>{
     if(window.__mcapMockError)throw Error(window.__mcapMockError);
     const expected=window.__mcapExpectedState;
