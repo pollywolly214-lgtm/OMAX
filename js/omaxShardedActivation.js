@@ -30,12 +30,14 @@
     return {app,reader,sharder,working,cryptoApi,fetchImpl,db,
       legacyRef:db.doc(LEGACY),indexRef:db.doc(INDEX)};
   }
-  async function serverSnapshot(ref){
-    const snap=await ref.get({source:"server"});
-    if(!snap||snap.metadata?.fromCache!==false
-      ||snap.metadata?.hasPendingWrites!==false
+  async function serverSnapshot(ctx,ref){
+    // The cutover cannot trust Firebase v8's possibly stale listener-backed
+    // server get. Verify authority with an independent read-only transaction.
+    const snap=await ctx.db.runTransaction(async tx=>tx.get(ref));
+    if(!snap||snap.metadata?.fromCache===true
+      ||snap.metadata?.hasPendingWrites===true
       ||snap.ref?.path!==ref.path)
-      fail("unverified_read","Server read cannot establish a trustworthy revision.");
+      fail("unverified_read","Backend transaction cannot establish a trustworthy revision.");
     return snap;
   }
   function normalizedCandidate(candidate){
@@ -60,10 +62,10 @@
   }
   async function verify({candidate,...args}={}){
     const ctx=context(args),selected=normalizedCandidate(candidate);
-    const existing=await serverSnapshot(ctx.indexRef);
+    const existing=await serverSnapshot(ctx,ctx.indexRef);
     if(existing.exists)
       fail("already_indexed","A state index already exists. Review it before any migration.");
-    const first=await serverSnapshot(ctx.legacyRef);
+    const first=await serverSnapshot(ctx,ctx.legacyRef);
     if(!first.exists)fail("missing_legacy","Original Firestore state is missing.");
     const original=ctx.working.validateSource(first.data());
     if(original.syncMeta.rev!==selected.sourceRevision)
@@ -73,7 +75,7 @@
     const restored=ctx.working.validateSource(reconstructed.state);
     if(ctx.sharder.canonical(original)!==ctx.sharder.canonical(restored))
       fail("copy_mismatch","Storage copy does not exactly match Firestore.");
-    const second=await serverSnapshot(ctx.legacyRef);
+    const second=await serverSnapshot(ctx,ctx.legacyRef);
     if(!second.exists||ctx.sharder.canonical(second.data())!==ctx.sharder.canonical(original))
       fail("source_changed","Original state changed while verifying the copy.");
     const proof=Object.freeze({verified:true,candidate:selected,revision:original.syncMeta.rev,
@@ -121,7 +123,7 @@
           "Index write was queued but acknowledgement is uncertain; inspect server state before any retry.");
       throw error;
     }
-    const indexed=await serverSnapshot(ctx.indexRef);
+    const indexed=await serverSnapshot(ctx,ctx.indexRef);
     if(!indexed.exists||ctx.sharder.canonical(indexed.data())!==ctx.sharder.canonical(index))
       fail("activation_indeterminate","Index commit cannot be verified. Suspend all writes.");
     return Object.freeze({activated:true,indexPath:INDEX,sourceRevision:selected.sourceRevision,
@@ -134,7 +136,7 @@
     if(approval!=="ROLL BACK OMAX BEFORE FIRST SHARDED SAVE"||rulesEnforced!==true)
       fail("approval_missing","Reviewed rollback rules and explicit approval required.");
     const ctx=context(args);
-    const indexed=await serverSnapshot(ctx.indexRef);
+    const indexed=await serverSnapshot(ctx,ctx.indexRef);
     if(!indexed.exists)fail("missing_index","Active index is absent.");
     const baselineIndex=indexed.data();
     if(baselineIndex.mode!=="active"||baselineIndex.schemaVersion!==1
@@ -143,7 +145,7 @@
       ||!integer(baselineIndex.revision)
       ||baselineIndex.actorUid!==ctx.app.auth().currentUser?.uid)
       fail("rollback_unsafe","Storage authority has changed or post-activation saves may exist.");
-    const original=await serverSnapshot(ctx.legacyRef);
+    const original=await serverSnapshot(ctx,ctx.legacyRef);
     if(!original.exists)fail("missing_legacy","Original state no longer exists.");
     const legacyState=ctx.working.validateSource(original.data());
     if(legacyState.syncMeta.rev!==baselineIndex.revision)
@@ -173,8 +175,8 @@
         "Rollback may have been committed. Inspect the index and original state before retrying.");
       throw error;
     }
-    const afterIndex=await serverSnapshot(ctx.indexRef);
-    const afterLegacy=await serverSnapshot(ctx.legacyRef);
+    const afterIndex=await serverSnapshot(ctx,ctx.indexRef);
+    const afterLegacy=await serverSnapshot(ctx,ctx.legacyRef);
     if(afterIndex.exists||!afterLegacy.exists
       ||ctx.sharder.canonical(afterLegacy.data())!==originalKey)
       fail("rollback_indeterminate","Rollback readback does not match expected original state.");
