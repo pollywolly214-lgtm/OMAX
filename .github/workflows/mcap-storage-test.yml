@@ -34,6 +34,9 @@ on:
       - "tests/cjo04c-readback.test.js"
       - "tests/cfr05-cloud-cutting-files.test.js"
       - "tests/cfr05-storage-cleanup-rules.test.js"
+      - "tests/cfr05-cloud-presentation.test.js"
+      - "tests/cfr05-hydration-navigation.test.js"
+      - "js/cloudFilePresentation.js"
       - "tests/fixtures/mcap-cutting-files.cjs"
       - "tests/fixtures/mcap-job-import-ui.cjs"
       - "tests/rfs02-normal-harness.cjs"
@@ -98,6 +101,8 @@ jobs:
           tests/cjo04-review.test.js
           tests/cfr05-cloud-cutting-files.test.js
           tests/cfr05-storage-cleanup-rules.test.js
+          tests/cfr05-cloud-presentation.test.js
+          tests/cfr05-hydration-navigation.test.js
           tests/omax-sharded-chronology-deadline.test.js
           tests/cjo04b-verification.test.js
           tests/cjo04c-readback.test.js

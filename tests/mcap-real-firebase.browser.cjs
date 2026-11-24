@@ -27,7 +27,7 @@ function token(uid){
 test("real Firebase browser: active Storage saves, rules, multi-client convergence and recovery",{timeout:600000},async t=>{
   assertEmulators();
   if(process.env.MCAP_EMULATOR_ONLY){
-    assert.ok(["native calendar","lost real commit","history import","archive","corrupt field","actor change","in-flight","cutting file","specialized","job workbook","job restore"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
+    assert.ok(["native calendar","lost real commit","history import","archive","corrupt field","actor change","in-flight","cutting file","specialized","job workbook","job restore","job flows"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
     assert.ok(!process.env.CI,"CI must run every real Firebase browser acceptance case");
     t.diagnostic("Development-only selection: "+process.env.MCAP_EMULATOR_ONLY);
   }
@@ -99,9 +99,14 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
   // instead of obscuring its evidence with failures caused by a broken fixture.
   const step=async(name,work)=>{
     const only=process.env.MCAP_EMULATOR_ONLY;
-    if(only&&!name.startsWith("actual SDK ordinary")&&!name.includes(only))return;
+    const selected=only==="job flows"?/^(?:specialized|job )/.test(name):name.includes(only);
+    if(only&&!name.startsWith("actual SDK ordinary")&&!selected)return;
     let failure;
-    await t.test(name,async()=>{try{await work();}catch(error){failure=error;throw error;}});
+    await t.test(name,async()=>{try{await work();}catch(error){
+      failure=error;
+      t.diagnostic(JSON.stringify({name,errors,consoleErrors:consoleErrors.slice(-12),page:await a.evaluate(()=>({hash:location.hash,headings:Array.from(document.querySelectorAll("#content h1,#content h2,#content h3")).map(node=>node.textContent),recovery:window.__recoveryReason,block:window.__lastCloudSaveBlock,loaded:window.__loadedCloudRevisionForSaveGuard,trash:(window.deletedItems||[]).map(row=>row.id),jobs:(window.cuttingJobs||[]).map(row=>row.id),restore:window.__mcapRestoreOutcome})).catch(()=>null)}));
+      throw error;
+    }});
     if(failure)throw failure;
   };
   const exact=async(page,expected)=>{

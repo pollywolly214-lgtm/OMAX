@@ -21191,6 +21191,9 @@ window.refreshCfr05CloudPresentation = refreshCfr05CloudPresentation;
 
 function hydrateVisibleCfr05CloudFiles(content){
   if (!content || !cfr05CloudPresentation || typeof window.listCfr05CloudFiles !== "function") return;
+  const viewRoot=content.firstElementChild;
+  // The content container survives navigation; only its captured view owns this read.
+  const isCurrentView=()=>viewRoot&&document.getElementById("content")===content&&content.firstElementChild===viewRoot&&["#/jobs","#jobs"].includes(String(location.hash||"").split("?")[0].toLowerCase());
   const ids = new Set();
   content.querySelectorAll("[data-cfr05-cloud-job-id]").forEach(node=>{
     const id = String(node.getAttribute("data-cfr05-cloud-job-id") || "").trim();
@@ -21199,7 +21202,7 @@ function hydrateVisibleCfr05CloudFiles(content){
   const missing = [...ids].filter(id=>!cfr05CloudPresentation.has(id) && !cfr05CloudPresentation.isLoading(id));
   if (!missing.length) return;
   Promise.allSettled(missing.map(id=>refreshCfr05CloudPresentation(id))).then(()=>{
-    if (document.getElementById("content") === content && typeof renderJobs === "function") renderJobs();
+    if (isCurrentView() && typeof renderJobs === "function") renderJobs();
   });
 }
 
@@ -21217,11 +21220,14 @@ window.getCfr05CloudPreviewDiagnostics=()=>cfr05CloudPreviewCache?.diagnostics?.
 
 function setupCfr05InlinePreviewHydration(content){
   if (!content || !cfr05CloudPreviewCache) return;
+  const viewRoot=content.firstElementChild;
+  const isCurrentView=()=>viewRoot&&document.getElementById("content")===content&&content.firstElementChild===viewRoot&&["#/jobs","#jobs"].includes(String(location.hash||"").split("?")[0].toLowerCase());
   if (window.__cfr05PreviewObserver){window.__cfr05PreviewObserver.disconnect();window.__cfr05PreviewObserver=null;}
   const activate=target=>{
+    if(!isCurrentView()||!content.contains(target))return;
     const identity={jobId:target.dataset.cfr05JobId,fileId:target.dataset.cfr05FileId,sha256:target.dataset.cfr05Sha256};
     if(cfr05CloudPreviewCache.has(identity)||cfr05CloudPreviewCache.isLoading(identity))return;
-    hydrateCfr05DxfPreview(target).then(()=>{if(document.getElementById("content")===content)renderJobs();});
+    hydrateCfr05DxfPreview(target).then(()=>{if(isCurrentView())renderJobs();});
   };
   const targets=Array.from(content.querySelectorAll("[data-cfr05-preview-target]"));
   if(typeof window.IntersectionObserver==="function"){

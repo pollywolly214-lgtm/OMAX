@@ -90,13 +90,19 @@ module.exports=async function importUi({step,a,b,read,exact,ready,seedDoc,member
     assert.equal(removed.saved,true,JSON.stringify(removed));
     const archived=await read(a),entry=archived.deletedItems.find(row=>row.type==="job"&&row.payload.id===job.id);assert.deepEqual(entry.payload,job);
     await a.reload();await ready(a);await a.evaluate(()=>location.hash="#/deleted");
-    await a.evaluate(()=>{window.__mcapRestoreOutcome=null;const restore=window.restoreDeletedItem;window.restoreDeletedItem=async(...args)=>{const result=await restore(...args);window.__mcapRestoreOutcome=result;return result;};});
+    await a.evaluate(()=>{
+      window.__mcapRestoreOutcome=null;const restore=window.restoreDeletedItem;
+      window.restoreDeletedItem=async(...args)=>{const result=await restore(...args);window.__mcapRestoreOutcome=result;return result;};
+    });
     await seedDoc("workspaces/github-prod/members/"+OWNER,member("viewer"));
     try{
       await a.locator(`[data-trash-restore="${entry.id}"]`).click();await a.waitForFunction(()=>window.__mcapRestoreOutcome!==null,null,{timeout:90000});
       const denied=await a.evaluate(()=>window.__mcapRestoreOutcome);assert.equal(denied.saved,false,JSON.stringify(denied));assert.equal(denied.ok,false);assert.equal(denied.indeterminate===true,false);
+      assert.equal(denied.rolledBack,true,JSON.stringify(denied));
     }finally{await seedDoc("workspaces/github-prod/members/"+OWNER,member("owner"));}
-    await exact(a,archived);assert.equal(await a.locator(`[data-trash-restore="${entry.id}"]`).count(),1);
+    await exact(a,archived);
+    for(const key of ["cuttingJobs","completedCuttingJobs","deletedItems"])assert.deepEqual(await a.evaluate(key=>window[key],key),archived[key],"Live rollback retains authoritative "+key);
+    await a.locator(`[data-trash-restore="${entry.id}"]`).waitFor();
     await a.evaluate(()=>window.__mcapRestoreOutcome=null);await a.locator(`[data-trash-restore="${entry.id}"]`).click();
     await a.waitForFunction(()=>window.__mcapRestoreOutcome!==null,null,{timeout:90000});
     const restored=await a.evaluate(()=>window.__mcapRestoreOutcome);assert.equal(restored.saved,true,JSON.stringify(restored));assert.equal(restored.ok,true);
