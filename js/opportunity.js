@@ -431,8 +431,13 @@
     ? window.saveCloudDebounced.bind(window)
     : null;
 
-  async function saveOpportunityRollups(rows){
+  async function saveOpportunityRollups(rows, { preserveAuthoritative = false } = {}){
     const normalized = Array.isArray(rows) ? cloneRollupRows(rows) : [];
+    window.__opportunityDisplayRollups = normalized;
+    // Derived display refreshes must not become unrelated Storage mutations.
+    // Keep legacy/DevSafe persistence, but bind that choice across async calculation.
+    const legacyContext=window.OMAXDevSafe?.active||window.__omaxActiveStateBackend==="legacy";
+    if(preserveAuthoritative||!legacyContext)return;
     window.opportunityRollups = normalized;
     if (opportunityDataReady){
       const saver = originalSaveCloudDebounced
@@ -484,6 +489,7 @@
     recomputePending = false;
 
     try {
+      const preserveAuthoritative=!window.OMAXDevSafe?.active&&window.__omaxActiveStateBackend!=="legacy";
       const now = new Date();
       const periods = [
         { label: "Last 1 Month", months: 1 },
@@ -535,7 +541,7 @@
         };
       });
 
-      await saveOpportunityRollups(rows);
+      await saveOpportunityRollups(rows, { preserveAuthoritative });
       notifyOpportunityListeners({ rollups: rows, updatedAt: new Date().toISOString() });
     } catch (err) {
       console.error("Failed to recompute opportunity cost", err);

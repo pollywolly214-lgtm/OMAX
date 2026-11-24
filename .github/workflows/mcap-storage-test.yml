@@ -42,6 +42,8 @@ on:
       - "tests/purchase-orders.browser.cjs"
       - "tests/purchase-financials.test.js"
       - "tests/weekly-cost-report-baseline.test.js"
+      - "tests/opportunity-authority.test.js"
+      - "js/opportunity.js"
       - "js/purchaseOrders.js"
       - "js/purchaseFinancials.js"
       - "js/cloudFilePresentation.js"
@@ -82,6 +84,7 @@ jobs:
           node --check js/core.js
           node --check js/cuttingJobChronology.js
           node --check js/renderers.js
+          node --check js/opportunity.js
           node --check js/omaxAuthorityRouter.js
           node --check js/omaxShardedActivation.js
           node --check js/omaxShardedCommit.js
@@ -125,6 +128,7 @@ jobs:
           tests/purchase-orders.test.js
           tests/purchase-financials.test.js
           tests/weekly-cost-report-baseline.test.js
+          tests/opportunity-authority.test.js
 
   cutover-rules:
     name: Test proposed cutover rules in disposable Firestore emulator

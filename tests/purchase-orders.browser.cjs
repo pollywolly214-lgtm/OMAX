@@ -254,9 +254,12 @@ test("PHv2-02C real browser with disposable local backend only",{timeout:120000}
       await row.locator('[data-order-edit-inventory]').click();await h.page.waitForFunction(()=>location.hash==="#/settings");
       const task=h.page.locator(`details.task[data-task-id="${taskId}"]`);await h.page.waitForFunction(id=>document.querySelector(`details.task[data-task-id="${id}"]`)?.open,taskId);
       await task.locator('[data-edit-task]').click();await task.locator('[data-k="pn"]').fill("UPDATED-PN");await task.locator('[data-k="pn"]').press("Tab");
+      await h.page.waitForFunction(id=>window.__lastLoadedCloudState?.tasksInterval.find(task=>task.id===id)?.pn==="UPDATED-PN"&&!hasPendingLocalChanges,taskId);
+      assert.equal((await h.cloud()).tasksInterval.find(task=>task.id===taskId).pn,"UPDATED-PN","The part-number edit settles before the independent price edit");
       await task.locator('[data-k="price"]').fill("11");await task.locator('[data-k="price"]').press("Tab");
       await h.page.waitForFunction(id=>window.tasksInterval.find(task=>task.id===id)?.price===11,taskId);
       assert.equal((await h.page.evaluate(()=>saveCloudNow())).saved,true);await h.page.waitForFunction(()=>!hasPendingLocalChanges);await h.page.locator('#tab-costs').click();await h.page.locator('[data-purchase-order-editor]').waitFor({state:"visible"});
+      const updatedTask=(await h.cloud()).tasksInterval.find(task=>task.id===taskId);assert.equal(updatedTask.pn,"UPDATED-PN");assert.equal(updatedTask.price,11);
       row=h.page.locator('[data-purchase-order-items] tr').first();assert.equal(await row.locator('[data-order-field="qty"]').inputValue(),"3");assert.equal(await row.locator('[data-order-field="cost"]').inputValue(),"11");assert.equal(await row.locator('[data-order-field="partNumber"]').inputValue(),"UPDATED-PN");assert.equal(await row.locator('[data-order-field="inventoryItemId"]').inputValue(),"fixture-inv-a");
       assert.equal(await h.page.locator('[data-purchase-order-po]').inputValue(),"0001-resume");
       await h.page.waitForFunction(()=>!hasPendingLocalChanges);const inventoryAfterSettings=(await h.cloud()).inventory;await h.save();

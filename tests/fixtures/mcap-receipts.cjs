@@ -80,6 +80,7 @@ async function receipts({step,a,b,read,exact,ready,seedDoc,member,OWNER,STORAGE,
     await cost.fill("2.50");await a.locator("[data-receipt-save-week]").click();
     await a.waitForFunction(()=>window.__mcapReceiptSave!==null,null,{timeout:120000});
     const result=await a.evaluate(()=>window.__mcapReceiptSave);assert.equal(result.saved,true,JSON.stringify(result));assert.equal(result.stateWriteCompleted,true);assert.equal(result.indeterminate===true,false);
+    await a.waitForFunction(()=>window.__opportunityDisplayRollups?.length===4);
     const after=await read(a),expected=structuredClone(before.receiptTrackerWeeks);expected.find(week=>week.key==="2026-W48").rows[0].cost=2.5;
     assert.deepEqual(after.receiptTrackerWeeks,expected);for(const key of Object.keys(before))if(!["receiptTrackerWeeks","syncMeta","saveMeta","syncProcessLog"].includes(key))assert.deepEqual(after[key],before[key],key);
     await converge(after);
@@ -96,11 +97,12 @@ async function receipts({step,a,b,read,exact,ready,seedDoc,member,OWNER,STORAGE,
     await a.locator("[data-receipt-range-select]").selectOption("all");const range=await download("[data-receipt-export-range]");assert.equal(range.name,"receipt-range-all.xls");assert.equal(range.document.tables[0].rows.length,4);assert.equal(range.document.tables[0].footer.at(-1),"143.75");
     await a.locator("[data-receipt-close]").click();await a.locator("[data-cost-weekly-select]").selectOption("2026-10-26");const selected=await a.locator("[data-cost-weekly-select]").inputValue();
     const report=await download("[data-cost-weekly-export]");assert.equal(report.name,`weekly-cost-report-${selected}.xls`);assert.equal(report.document.title,"Weekly Cost Report");assert.equal(report.document.tables.length,2);
-    assert.ok(report.document.tables[1].rows.some(row=>row[0]==="Synthetic retained service task"&&/^\$5(?:\.00)?$/.test(row.at(-1))),"Weekly report exports the retained recorded maintenance cost");
+    assert.ok(report.document.tables[1].rows.some(row=>row[0]==="Synthetic retained service task"&&row[2]==="TEST-001"&&row.at(-1)==="-$5.00"),"Weekly report retains the maintenance identity and negative cost impact: "+JSON.stringify(report.document.tables[1]));
     await unchanged(before,pointer);await a.reload();await ready(a);await unchanged(before,pointer);
   });
 }
 receipts.initialState={
+  opportunityRollups:[{period:"Reviewed historical source",totalCost:42.125,operatorNote:"Retain original evidence",extension:{retain:"unknown rollup fields"}}],
   receiptTrackerWeeks:[
     {key:"2026-W47",year:2026,week:47,startISO:"2026-11-16",endISO:"2026-11-22",customWeek:{retain:"earlier receipt week"},rows:[{date:"2026-11-17",purchased:"Retained earlier receipt",partNumber:"LEGACY-PREV",qty:1,cost:4,shipping:.5,tax:.25,custom:{evidence:"earlier original"}}]},
     {key:"2026-W48",year:2026,week:48,startISO:"2026-11-23",endISO:"2026-11-29",customWeek:{retain:"current receipt week"},rows:[{date:"2026-11-23",purchased:'Retained "legacy" & receipt',partNumber:"000-LG",qty:1.5,cost:2,shipping:.25,tax:0,custom:{evidence:"current original"}}]}
