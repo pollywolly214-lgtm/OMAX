@@ -42,7 +42,7 @@ function harness(active = [job("a"), job("b", 2)], completed = [], options = {})
     cloud = next; commits++;
     if (options.loseAcknowledgement) throw Error("Connection lost after commit");
   } };
-  const context = vm.createContext({ window, TextEncoder, Blob, structuredClone, URLSearchParams,
+  const context = vm.createContext({ authoritativeBackendMode:"legacy",MCAP_SHARDED_WRITES_ACTIVE:false,window, TextEncoder, Blob, structuredClone, URLSearchParams,
     console:{error(){},warn(){},info(){},table(){}}, setTimeout, clearTimeout, document:{getElementById:()=>null},
     APP_SCHEMA:72, WORKSPACE_ID:"fixture", FB:{ready:true,user:{uid:"fixture"},db,docRef:{path:"workspaces/fixture/app/state",get:async()=>{reads++;return{exists:true,data:()=>clone(cloud)};}}},
     normalizeInventoryMaterials:value=>value || {}, normalizeAppConfig:value=>value || {},
@@ -64,6 +64,7 @@ function harness(active = [job("a"), job("b", 2)], completed = [], options = {})
     FIRESTORE_WARN_BYTES:800000,FIRESTORE_STRONG_WARN_BYTES:900000,FIRESTORE_BLOCK_BYTES:950000 });
   const constants = ["PROTECTED_STATE_FIELDS","REQUIRED_PROTECTED_DATA_PATHS","PROTECTED_FIELD_REGISTRY","DATA_SAFETY_PREFLIGHT_COUNT_DROP_RATIO","DATA_SAFETY_PREFLIGHT_MIN_BASELINE_COUNT","DATA_SAFETY_PREFLIGHT_TOTAL_DROP_RATIO","DATA_SAFETY_PREFLIGHT_SIZE_DROP_RATIO","LARGE_CONTENT_KEY_PATTERN","SAFE_FILE_METADATA_KEY_PATTERN","EMBEDDED_CONTENT_KEY_PATTERN"];
   const functions = ["cloneStructured","estimatePayloadBytes","countObjectKeys","countTaskNestedMapEntries","countTaskNestedArrayEntries","countJobManualLogs","getValueAtPath","getDataSafetyShape","countCollectionValue","countNestedProtectedValues","stableStringifyForIntegrity","hashIntegrityString","fingerprintProtectedValue","countProtectedField","validateProtectedFieldShape","getProtectedFieldRegistryCoverage","buildProtectedFieldIntegritySummary","buildDataIntegritySummary","hasAnyProtectedData","hasAnyProtectedFieldPresence","isDangerousShapeChange","chooseProtectedSaveBaseline","detectDangerousIntegrityReduction","validateProtectedSavePreflight","buildProtectedFieldSummary","compareProtectedFieldSummaries","detectDangerousProtectedFieldReduction","isRecoveryMode","canWriteCloud","blockCloudSave","buildTrashLabel","refreshGlobalCollections","snapshotState","isDataUrl","isLikelyEmbeddedFileContent","isSafeMetadataString","isProtectedBusinessDataKey","sanitizeValueForStorage","compactStateForStorage","scanAuthoritativeCutFileContent","captureCuttingJobSaveTarget","cuttingJobSaveTargetIsCurrent","readMaintenanceTaskAuthoritativeState","performCloudSave","saveCloudNow","saveCloudDebounced","adoptAuthoritativeRecoveryState","debounce","resetHistoryToCurrent","captureHistorySnapshot","captureHistoryState","applyHistorySnapshot","undoLastChange","redoLastUndo"];
+  functions.push("restoreDeletedItem");window.CuttingJobHistory=require("../js/cuttingJobHistory");
   const deletion = source.slice(source.indexOf("// CJD authorizes"), source.indexOf("async function writeReviewedGlobalIdentityRepair"));
   vm.runInContext(bindings.map(name=>`let ${name}=window.${name};`).join("\n") +
     "\nlet lastAppliedCloudRevision=7,lastLocalMutationAt=0,hasPendingLocalChanges=false;let cloudSaveQueue=Promise.resolve();" +
@@ -76,7 +77,7 @@ function harness(active = [job("a"), job("b", 2)], completed = [], options = {})
   window.__lastLoadedCloudState=clone(cloud);
   context.adoptState=data=>context.api.adoptAuthoritativeRecoveryState(data);
   context.resetHistoryToCurrent();
-  return { window, context, api:context.api, delete:(collection,id)=>context.deleteCuttingJob(collection,id),
+  return { window, context, api:context.api, delete:(collection,id)=>context.deleteCuttingJob(collection,id),restore:id=>context.restoreDeletedItem(id),
     get cloud(){return clone(cloud);}, get commits(){return commits;}, get diagnostics(){return diagnostics;}, get confirmations(){return confirmations;}, get reads(){return reads;},
     get backup(){return clone(backup);}, get transactions(){return transactions;}, get historyCaptures(){return context.api.history().undo.length;},
     alterCloud:mutate=>mutate(cloud), reload(){context.api.adoptAuthoritativeRecoveryState(clone(cloud));},

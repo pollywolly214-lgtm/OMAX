@@ -27,7 +27,7 @@ function token(uid){
 test("real Firebase browser: active Storage saves, rules, multi-client convergence and recovery",{timeout:600000},async t=>{
   assertEmulators();
   if(process.env.MCAP_EMULATOR_ONLY){
-    assert.ok(["native calendar","lost real commit","history import","archive","corrupt field","actor change","in-flight","cutting file","specialized"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
+    assert.ok(["native calendar","lost real commit","history import","archive","corrupt field","actor change","in-flight","cutting file","specialized","job workbook","job restore"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
     assert.ok(!process.env.CI,"CI must run every real Firebase browser acceptance case");
     t.diagnostic("Development-only selection: "+process.env.MCAP_EMULATOR_ONLY);
   }
@@ -319,6 +319,7 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     await a.reload();await ready(a);await exact(a,completed);
     await b.waitForFunction(rev=>window.__loadedCloudRevisionForSaveGuard===rev,completed.syncMeta.rev);await exact(b,completed);
   });
+  await require("./fixtures/mcap-job-import-ui.cjs")({step,a,b,read,exact,ready,seedDoc,member,OWNER,legacy});
   const importHistory=async(kind,rows,fields)=>{
     const before=await read(a),downloads=[],onDownload=download=>downloads.push(download);
     const preview=await a.evaluate(({kind,rows})=>historicalImport.preview(kind,rows),{kind,rows});

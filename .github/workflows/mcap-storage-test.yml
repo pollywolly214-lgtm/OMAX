@@ -35,6 +35,18 @@ on:
       - "tests/cfr05-cloud-cutting-files.test.js"
       - "tests/cfr05-storage-cleanup-rules.test.js"
       - "tests/fixtures/mcap-cutting-files.cjs"
+      - "tests/fixtures/mcap-job-import-ui.cjs"
+      - "tests/rfs02-normal-harness.cjs"
+      - "tests/cjd01-job-deletion.test.js"
+      - "tests/cjd02-job-restore.test.js"
+      - "tests/cutting-job-import.test.js"
+      - "tests/cji-*.test.js"
+      - "tests/import-selective-rollback.test.js"
+      - "js/renderers.js"
+      - "js/cuttingJobImporter.js"
+      - "js/cuttingJobImportDownload.js"
+      - "js/cuttingJobHistory.js"
+      - "assets/vendor/cji-xlsx-parser.js"
       - "tests/fixtures/mcap-firebase-browser-write-mock.js"
       - "tests/fixtures/mcap-firebase-browser-mock.js"
       - "mcap-firestore-emulator.json"
@@ -58,6 +70,7 @@ jobs:
         run: |
           node --check js/core.js
           node --check js/cuttingJobChronology.js
+          node --check js/renderers.js
           node --check js/omaxAuthorityRouter.js
           node --check js/omaxShardedActivation.js
           node --check js/omaxShardedCommit.js
@@ -88,6 +101,14 @@ jobs:
           tests/omax-sharded-chronology-deadline.test.js
           tests/cjo04b-verification.test.js
           tests/cjo04c-readback.test.js
+          tests/cjd01-job-deletion.test.js
+          tests/cjd02-job-restore.test.js
+          tests/cutting-job-import.test.js
+          tests/cji-02a-backup-action.test.js
+          tests/cji-02d-preview-stability.test.js
+          tests/cji-02g-cutting-import-identities.test.js
+          tests/cji-02-project-category-import.test.js
+          tests/import-selective-rollback.test.js
 
   cutover-rules:
     name: Test proposed cutover rules in disposable Firestore emulator
@@ -176,6 +197,7 @@ jobs:
           node --check tests/mcap-real-firebase.browser.cjs
           node --check tests/fixtures/mcap-emulator-identity.cjs
           node --check tests/fixtures/mcap-cutting-files.cjs
+          node --check tests/fixtures/mcap-job-import-ui.cjs
           node scripts/mcap-emulator-browser.cjs
       - name: Retain synthetic emulator diagnostics on failure
         if: failure()

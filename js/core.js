@@ -3290,40 +3290,9 @@ function applyRestoreByType(entry, index){
       return { blocked:true, error:"Use the confirmed Restore action in Deleted History to restore this task with its exact original ID and verified history." };
     case "inventory":
       return { blocked:true, error:"Use the verified Restore action in Deleted History to restore the original inventory identity." };
-    case "job": {
-      const gate = window.CuttingJobHistory?.planDirectResequence([...(cuttingJobs || []), clone], window.completedCuttingJobs);
-      if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
-      if (!Array.isArray(cuttingJobs)) cuttingJobs = [];
-      if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
-      if (!Array.isArray(clone.files)) clone.files = [];
-      if (!clone.id) clone.id = genId(clone.name || "job");
-      const existing = new Set(cuttingJobs.filter(Boolean).map(job => String(job.id)));
-      while (existing.has(String(clone.id))){
-        clone.id = genId(clone.name || "job");
-      }
-      const resequence = window.CuttingJobHistory.resequence([...cuttingJobs, clone], window.completedCuttingJobs);
-      if (window.CuttingJobHistory.isResequenceBlocked(resequence))return {...resequence,ok:false,blocked:true};
-      cuttingJobs.push(clone);
-      window.cuttingJobs = cuttingJobs;
-      return { handledRemoval: false, value: { type: "job", id: clone.id } };
-    }
-    case "completed-job": {
-      const gate = window.CuttingJobHistory?.planDirectResequence(window.cuttingJobs, [...(completedCuttingJobs || []), clone]);
-      if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
-      if (!Array.isArray(completedCuttingJobs)) completedCuttingJobs = [];
-      if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
-      if (!Array.isArray(clone.files)) clone.files = [];
-      if (!clone.id) clone.id = genId(clone.name || "job");
-      const existing = new Set(completedCuttingJobs.filter(Boolean).map(job => String(job.id)));
-      while (existing.has(String(clone.id))){
-        clone.id = genId(clone.name || "job");
-      }
-      const resequence = window.CuttingJobHistory.resequence(window.cuttingJobs, [...completedCuttingJobs, clone]);
-      if (window.CuttingJobHistory.isResequenceBlocked(resequence))return {...resequence,ok:false,blocked:true};
-      completedCuttingJobs.push(clone);
-      window.completedCuttingJobs = completedCuttingJobs;
-      return { handledRemoval: false, value: { type: "completed-job", id: clone.id } };
-    }
+    case "job":
+    case "completed-job":
+      return {blocked:true,error:"Use the verified Restore action in Deleted History to retain the original cutting-job identity and cloud proof."};
     case "folder": {
       window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
       const existing = new Set(window.settingsFolders.map(f => String(f.id)));
@@ -3438,6 +3407,7 @@ function applyRestoreByType(entry, index){
 }
 
 function restoreDeletedItem(id, confirmedArchiveKey){
+  if(!canWriteCloud("restore deleted item"))return {...cuttingJobDeletionFailure("Restoration is blocked while a save or recovery review is unresolved."),ok:false};
   const inventoryEntry=window.deletedItems?.find(entry=>entry?.id===id&&entry.type==="inventory");
   if(inventoryEntry){
     return (async()=>{
@@ -3459,7 +3429,16 @@ function restoreDeletedItem(id, confirmedArchiveKey){
     const active = candidate.type === "job" ? [...(cuttingJobs || []), candidate.payload] : cuttingJobs;
     const completed = candidate.type === "completed-job" ? [...(completedCuttingJobs || []), candidate.payload] : completedCuttingJobs;
     const gate = window.CuttingJobHistory?.planDirectResequence(active, completed);
-    if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
+    if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate)){
+      const error=gate?.error || "Cutting-job chronology is unavailable; review required.";
+      return {...cuttingJobDeletionFailure(error),...gate,ok:false,blocked:true,error};
+    }
+    const collection=candidate.type==="job"?"cuttingJobs":"completedCuttingJobs";
+    const archiveKey=stableStringifyForIntegrity(candidate),originalId=candidate.payload?.id;
+    return restoreCuttingJobHistory(collection,String(originalId),null,String(candidate.id),archiveKey).then(result=>({
+      ...result,ok:result.saved===true&&result.verified===true&&result.stateWriteCompleted===true,
+      value:result.saved&&result.verified?{type:candidate.type,id:originalId}:undefined
+    }));
   }
   purgeExpiredDeletedItems();
   const idx = deletedItems.findIndex(entry => entry && entry.id === id);
@@ -4335,7 +4314,7 @@ function reconcileCuttingJobHistorySnapshot(snapshot, mutation){
     if (matches.length !== 1 || stableStringifyForIntegrity(matches[0]) !== mutation.restoredKey) return null;
     jobs.splice(jobs.indexOf(matches[0]), 1);
     if (state.deletedItems.some(entry => entry.id === mutation.trash.id)) return null;
-    state.deletedItems.unshift(cloneStructured(mutation.trash));
+    state.deletedItems.splice(Math.min(mutation.trashIndex??0,state.deletedItems.length),0,cloneStructured(mutation.trash));
   } else {
     if (matches.length) return null;
     jobs.splice(Math.min(mutation.before.findIndex(job => String(job?.id) === mutation.id), jobs.length), 0, cloneStructured(mutation.job));
@@ -4590,13 +4569,13 @@ function rollbackCuttingJobHistoryRestore(mutation){
     const byId = new Map(current.map(job => [String(job?.id), job]));
     current.splice(0, current.length, ...mutation.before.map(job => byId.get(String(job?.id))));
   }
-  window.deletedItems.unshift(mutation.trash);
+  window.deletedItems.splice(Math.min(mutation.trashIndex??0,window.deletedItems.length),0,mutation.trash);
   refreshGlobalCollections();
   persistLocalStateBackup(snapshotState({ skipLocalFileCacheSync:true }));
   return true;
 }
 
-async function restoreCuttingJobHistory(collection, id, target){
+async function restoreCuttingJobHistory(collection, id, target, archiveId = null, expectedArchiveKey = null){
   const firebaseOperation = window.OMAXFirebaseOperations?.begin("updating");
   try {
   if (cuttingJobDeletionInProgress || !canWriteCloud("cutting-job history restoration")) return cuttingJobDeletionFailure("Another operation or recovery review prevents history restoration.");
@@ -4609,13 +4588,27 @@ async function restoreCuttingJobHistory(collection, id, target){
     } else await cloudSaveQueue;
     if (!canWriteCloud("cutting-job history restoration")) return cuttingJobDeletionFailure("Cloud writes are blocked.");
     const before = compactStateForStorage(snapshotState({ skipLocalFileCacheSync:true }));
-    const archive = before.deletedItems?.[0];
+    const archiveIndex=archiveId===null?0:before.deletedItems?.findIndex(entry=>String(entry?.id)===archiveId);
+    const archive=before.deletedItems?.[archiveIndex];
+    if(archiveId!==null){
+      if(!["cuttingJobs","completedCuttingJobs"].includes(collection)||!archive||before.deletedItems.filter(entry=>String(entry?.id)===archiveId).length!==1
+        ||stableStringifyForIntegrity(archive)!==expectedArchiveKey||!Number.isFinite(Date.parse(archive.deletedAt))
+        ||Date.now()-Date.parse(archive.deletedAt)>30*24*60*60*1000)return cuttingJobDeletionFailure("The selected job archive is missing, changed, ambiguous or expired.");
+      if(!archive.payload||typeof archive.payload!=="object"||Array.isArray(archive.payload)||archive.payload.id==null||!String(archive.payload.id).trim()||String(archive.payload.id)!==id)return cuttingJobDeletionFailure("The archived job identity is invalid.");
+      const payload=cloneStructured(archive.payload),others=[...before.cuttingJobs,...before.completedCuttingJobs];
+      if(payload?.cutNumber&&others.some(job=>job?.cutNumber===payload.cutNumber))return cuttingJobDeletionFailure("The archived cut number is now in use. Review chronology before restoring.");
+      const restored=before[collection].map(cloneStructured);
+      const priority=Number(payload?.priority),position=collection==="cuttingJobs"&&Number.isFinite(priority)&&priority>0?Math.min(restored.length,Math.max(0,Math.floor(priority)-1)):restored.length;
+      restored.splice(position,0,payload);
+      if(collection==="cuttingJobs")restored.forEach((job,index)=>{if(index!==position)job.priority=index+1;});
+      target={...before,[collection]:restored,deletedItems:before.deletedItems.filter((_,index)=>index!==archiveIndex)};
+    }
     const restored = target[collection].filter(job => String(job?.id) === id);
     const existing = [...before.cuttingJobs, ...before.completedCuttingJobs].filter(job => String(job?.id) === id);
     if (existing.length || restored.length !== 1 || !archive || archive.type !== (collection === "cuttingJobs" ? "job" : "completed-job")
       || stableStringifyForIntegrity(archive.payload) !== stableStringifyForIntegrity(restored[0])
       || cuttingJobDeletionProtectedKey(before) !== cuttingJobDeletionProtectedKey(window.__lastLoadedCloudState)) return cuttingJobDeletionFailure("History restoration does not match one exact archived job and the current cloud baseline.");
-    const inverse = { ...target, [collection]:cuttingJobDeletionArray(target[collection], collection, id), deletedItems:[archive, ...target.deletedItems] };
+    const inverse = { ...target, [collection]:cuttingJobDeletionArray(target[collection], collection, id), deletedItems:[...target.deletedItems.slice(0,archiveIndex),archive,...target.deletedItems.slice(archiveIndex)] };
     if (cuttingJobDeletionProtectedKey(inverse) !== cuttingJobDeletionProtectedKey(before)) return cuttingJobDeletionFailure("History restoration would change unrelated protected data.");
     const expectedRevision = window.__loadedCloudRevisionForSaveGuard;
     const proof = Object.freeze({ expectedRevision, sourceKey:cuttingJobDeletionProtectedKey(before), pendingKey:cuttingJobDeletionProtectedKey(target), expiresAt:Date.now() + 60000 });
@@ -4635,8 +4628,8 @@ async function restoreCuttingJobHistory(collection, id, target){
       return live;
     });
     mutation = { restoring:true, collection, id, job, restoredKey:stableStringifyForIntegrity(job), before:before[collection], staged,
-      trash:window.deletedItems[0], trashArray:window.deletedItems, priorities };
-    window[collection] = staged; window.deletedItems.shift(); refreshGlobalCollections();
+      trash:window.deletedItems[archiveIndex], trashIndex:archiveIndex, trashArray:window.deletedItems, priorities };
+    window[collection] = staged; window.deletedItems.splice(archiveIndex,1); refreshGlobalCollections();
     beginCuttingJobHistoryMutation(mutation);
     const saving = saveCloudNowForHistory({ firebaseOperationToken:firebaseOperation?.token, expectedRevision, cuttingJobHistoryRestoreToken:token });
     try { writeOutcome = await saving; }

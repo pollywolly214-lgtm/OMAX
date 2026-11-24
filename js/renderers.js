@@ -26665,6 +26665,7 @@ function renderDeletedItems(options){
       if (!id) return;
       try {
         const entry=window.deletedItems?.find(entry=>entry.id===id&&entry.type==="task");
+        const verifiedJob=window.deletedItems?.some(entry=>entry.id===id&&["job","completed-job"].includes(entry.type));
         let confirmedArchiveKey;
         if(entry){
           confirmedArchiveKey=window.OMAXMaintenanceTaskArchive.key(entry);
@@ -26672,13 +26673,14 @@ function renderDeletedItems(options){
           if(!confirmed)return;
           btn.disabled=true;btn.textContent="Verifying…";
         }
+        if(verifiedJob){btn.disabled=true;btn.textContent="Verifying…";}
         const result = typeof restoreDeletedItem === "function" ? await restoreDeletedItem(id,confirmedArchiveKey) : { ok:false };
         if (result && result.ok){
-          toast(entry?"Maintenance task restored and verified":"Item restored");
+          toast(entry?"Maintenance task restored and verified":verifiedJob?"Cutting job restored and verified":"Item restored");
           renderDeletedItems();
         } else {
           alert(result?.error || "Unable to restore this item.");
-          if(entry)renderDeletedItems();
+          if(entry||verifiedJob)renderDeletedItems();
         }
       } catch (err) {
         console.error("Restore failed", err);
