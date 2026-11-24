@@ -597,4 +597,4 @@ async function realFirebaseBrowser(t,additional){
   diagnostics();
 }
 module.exports=realFirebaseBrowser;
-if(require.main===module)test("real Firebase browser: active Storage saves, rules, multi-client convergence and recovery",{timeout:600000},t=>realFirebaseBrowser(t));
+if(require.main===module)test("real Firebase browser: active Storage saves, rules, multi-client convergence and recovery",{timeout:900000},t=>realFirebaseBrowser(t));

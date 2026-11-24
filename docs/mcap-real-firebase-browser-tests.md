@@ -23,6 +23,8 @@ For a focused local diagnosis, set `MCAP_EMULATOR_ONLY` to `native calendar`, `l
 
 The `receipts` selection is a separate complete suite, not a case filter; it rejects `MCAP_EMULATOR_ONLY`. The runner accepts only the fixed `core` and `receipts` entries and never accepts an arbitrary command. Both suites use the same exported emulator bootstrap, full oversized-state provisioning, exact-origin restrictions and end-of-run diagnostics. Both are mandatory in CI. Artifact names include the suite so failures cannot overwrite each other's diagnostics.
 
+The complete core sequence has a 15-minute parent budget; receipts keep ten minutes. Each CI emulator job has twenty minutes for installation, execution and cleanup. This follows a measured CI cancellation at the old ten-minute core limit after fifteen passing scenarios, during the first attachment case. Individual request/UI/readback deadlines and every assertion stay unchanged; the extra parent time lets the complete oversized-state sequence finish on slower runners.
+
 ## Test-only configuration boundaries
 
 The real SDK browser bundles come from the installed Firebase package and are served locally. Requests are allowed only to the test HTTP server and those three emulator origins. Normal Firebase operations use native emulator requests. Explicit fault cases below intercept individual real responses to drop a committed acknowledgement, hold a staging response during sign-out, or tamper with field-download bytes; they do not supply synthetic authority or replace a service.
