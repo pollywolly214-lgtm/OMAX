@@ -83,7 +83,7 @@ function base(){return {schema:72,syncMeta:{rev:7},saveMeta:{retain:"exact"},syn
   receiptTrackerWeeks:[{key:"2025-W01",year:2025,week:1,startISO:"2024-12-30",endISO:"2025-01-05",rows:[{date:"2025-01-03",purchased:"Legacy",cost:"3.125",qty:"1.5",shipping:"2.125",import_event_id:"legacy-source",custom:{retain:true}}]}],customEvidence:{retain:true}};}
 function harness(flags={}){
   let server=clone(flags.initialState || base()),live=clone(server),version=0,commits=0,reads=0,writes=0,adoptions=0,backups=0;
-  let context,releaseRead;const callbacks={};
+  let context,releaseRead;const callbacks={},deadlines=[];
   const db={async runTransaction(callback){for(let retry=0;retry<3;retry++){
     const priorVersion=version;let pending;
     const result=await callback({get:async ref=>{
@@ -105,10 +105,10 @@ function harness(flags={}){
     return result;
   }throw Object.assign(Error("contention"),{code:"aborted"});}};
   const localCopies=new Map();
-  const window={OMAXPurchaseOrders:orders,OMAXAtomicPersistence:atomic,CuttingFileContentFirewall:firewall,__lastLoadedCloudState:clone(server),__loadedCloudRevisionForSaveGuard:server.syncMeta.rev,
+  const window={OMAXPurchaseOrders:{...orders,createApi:env=>{context.orderEnv=env;return orders.createApi(env);}},OMAXShardedCommit:{INDEX_PATH:"workspaces/github-prod/app/stateIndexV1"},OMAXAtomicPersistence:atomic,CuttingFileContentFirewall:firewall,__lastLoadedCloudState:clone(server),__loadedCloudRevisionForSaveGuard:server.syncMeta.rev,
     localStorage:{setItem:(key,value)=>{if(flags.backupFailure)throw Error("recovery copy unavailable");localCopies.set(key,value);},getItem:key=>localCopies.get(key)},
     addEventListener:(event,callback)=>{callbacks[event]=callback;}};
-  context=vm.createContext({window,FB:{ready:true,user:{uid:"fixture"},db,docRef:{path:"workspaces/fixture/app/state"},app:{options:{projectId:"fixture"}}},cloudSaveQueue:Promise.resolve(),hasPendingLocalChanges:!!flags.pending,lastLocalMutationAt:0,
+  context=vm.createContext({window,authoritativeBackendMode:"legacy",FB:{ready:true,user:{uid:"fixture"},db,docRef:{path:"workspaces/fixture/app/state"},app:{options:{projectId:"fixture"}}},cloudSaveQueue:Promise.resolve(),hasPendingLocalChanges:!!flags.pending,lastLocalMutationAt:0,
     canWriteCloud:()=>!flags.readonly&&!window.__recoveryInspectMode&&!window.__autosaveDisabled,isVercelPreviewRuntime:()=>!!flags.preview,
     snapshotState:()=>clone(live),compactStateForStorage:value=>value,persistLocalStateBackup:()=>{backups++;},scanAuthoritativeCutFileContent:firewall.scanCuttingFileContent,
     cloudSaveNoWriteFailure:(code,error)=>({saved:false,stateWriteAttempted:false,definiteFailure:true,errorCode:code,error}),
@@ -117,16 +117,45 @@ function harness(flags={}){
     detectDangerousProtectedFieldReduction:()=>({blocked:false}),readLocalStateBackup:()=>null,buildWindowProtectedStateForCoverage:()=>clone(live),getSaveSchemaCoverageReport:()=>({}),
     mergeTotalHistoryForSave:()=>assert.fail("Unchanged history must not be normalized"),mergeDailyCutHoursForSave:()=>assert.fail("Unchanged hours must not be normalized"),mergePumpEffForSave:()=>assert.fail("Unchanged pump must not be normalized"),
     estimatePayloadBytes:value=>Buffer.byteLength(JSON.stringify(value)),FIRESTORE_BLOCK_BYTES:975000,
-    enterMissingStateRecovery(){},renderRecoveryDiagnosticsPanel(){},setTimeout:flags.readTimeout?(callback=>setTimeout(callback,5)):setTimeout,clearTimeout,console
+    enterMissingStateRecovery(){},renderRecoveryDiagnosticsPanel(){},setTimeout:(callback,delay)=>{deadlines.push(delay);return setTimeout(callback,flags.readTimeout?5:delay);},clearTimeout,console
   });
   function extractFunction(text,name){const a=text.search(new RegExp("^(?:async )?function "+name+"\\(","m")),b=text.indexOf("\n}",a);assert.ok(a>=0&&b>a,name);return text.slice(a,b+2);}
-  for(const name of ["validateCuttingJobDeletionSave","validateCuttingJobHistoryRestoreSave","cuttingJobDeletionSafetyBaseline","reportCloudSaveSecondaryError","stableStringifyForIntegrity"])vm.runInContext(extractFunction(core,name),context);
+  for(const name of ["captureCuttingJobSaveTarget","cuttingJobSaveTargetIsCurrent","validateCuttingJobDeletionSave","validateCuttingJobHistoryRestoreSave","cuttingJobDeletionSafetyBaseline","reportCloudSaveSecondaryError","stableStringifyForIntegrity"])vm.runInContext(extractFunction(core,name),context);
   vm.runInContext(extractFunction(core,"writeAuthoritativeStateSnapshot"),context);
   if(flags.noAck){const original=context.writeAuthoritativeStateSnapshot;context.writeAuthoritativeStateSnapshot=async(...args)=>{await original(...args);return undefined;};}
   if(flags.incompleteAck){const original=context.writeAuthoritativeStateSnapshot;context.writeAuthoritativeStateSnapshot=async(...args)=>{await original(...args);return {saved:false};};}
   vm.runInContext(extractFunction(renderers,"getPurchaseOrderApi")+";this.api=getPurchaseOrderApi()",context);
-  return {api:context.api,context,window,callbacks,releaseRead:()=>releaseRead?.(),get server(){return clone(server);},get live(){return clone(live);},get commits(){return commits;},get reads(){return reads;},get writes(){return writes;},get adoptions(){return adoptions;},get backups(){return backups;}};
+  return {api:context.api,context,window,callbacks,deadlines,releaseRead:()=>releaseRead?.(),get server(){return clone(server);},get live(){return clone(live);},get commits(){return commits;},get reads(){return reads;},get writes(){return writes;},get adoptions(){return adoptions;},get backups(){return backups;}};
 }
+
+test("purchase adapter independently reads captured Storage authority without touching the legacy document",async()=>{
+  const h=harness(),active={...h.server,syncMeta:{rev:88},extension:{exact:"active authority"}};
+  h.context.authoritativeBackendMode="sharded";h.context.readShardedAuthoritativeState=async()=>clone(active);
+  const token=h.context.orderEnv.capture();assert.equal(token.authority.path,h.window.OMAXShardedCommit.INDEX_PATH);
+  assert.deepEqual(await h.context.orderEnv.read(token),active);assert.equal(h.reads,0);assert.equal(h.writes,0);assert.equal(h.deadlines[0],60000);
+});
+for(const change of ["backend","actor","document","database"])test(`purchase adapter rejects ${change} changes during a captured Storage read`,async()=>{
+  const h=harness();h.context.authoritativeBackendMode="sharded";
+  h.context.readShardedAuthoritativeState=async()=>{
+    if(change==="backend")h.context.authoritativeBackendMode="legacy";
+    if(change==="actor")h.context.FB.user={uid:"other"};
+    if(change==="document")h.context.FB.docRef={path:"workspaces/other/app/state"};
+    if(change==="database")h.context.FB.db={runTransaction(){throw Error("Wrong database");}};
+    return h.server;
+  };
+  const token=h.context.orderEnv.capture();await assert.rejects(h.context.orderEnv.read(token),/changed/);
+  assert.equal(h.reads,0);assert.equal(h.commits,0);assert.equal(h.adoptions,0);
+});
+test("purchase adapter bounds Storage proof and never adopts late completion",async()=>{
+  const h=harness({readTimeout:true});h.context.authoritativeBackendMode="sharded";let finish;
+  h.context.readShardedAuthoritativeState=()=>new Promise(resolve=>{finish=resolve;});
+  await assert.rejects(h.context.orderEnv.read(h.context.orderEnv.capture()),/timed out/);assert.equal(h.deadlines[0],60000);
+  finish(h.server);await new Promise(resolve=>setImmediate(resolve));assert.equal(h.reads,0);assert.equal(h.commits,0);assert.equal(h.adoptions,0);
+});
+test("purchase adapter retains its independent legacy transaction and deadline",async()=>{
+  const h=harness();const token=h.context.orderEnv.capture();assert.deepEqual(await h.context.orderEnv.read(token),h.server);
+  assert.equal(h.reads,1);assert.equal(h.deadlines[0],15000);assert.equal(token.authority.backend,"firestore");
+});
 test("real adapter + protected writer/CAS save every line once, read independently, adopt and reload metadata",async()=>{
   const h=harness(),before=h.server,source=draft([item("a",10,3),item("b",70)],20),result=await h.api.save(source);
   assert.equal(result.saved,true,result.error);assert.equal(result.verificationCompleted,true);assert.equal(h.commits,1);assert.equal(h.adoptions,1);assert.equal(h.reads,3);assert.equal(h.backups,2);

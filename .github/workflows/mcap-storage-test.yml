@@ -20,6 +20,8 @@ on:
       - "tests/fixtures/mcap-active-browser.cjs"
       - "scripts/mcap-emulator-browser.cjs"
       - "tests/mcap-real-firebase.browser.cjs"
+      - "tests/mcap-real-firebase-receipts.browser.cjs"
+      - "tests/fixtures/mcap-receipts.cjs"
       - "tests/fixtures/mcap-emulator-identity.cjs"
       - "storage.rules"
       - "tests/water-quality-persistence.test.js"
@@ -36,6 +38,12 @@ on:
       - "tests/cfr05-storage-cleanup-rules.test.js"
       - "tests/cfr05-cloud-presentation.test.js"
       - "tests/cfr05-hydration-navigation.test.js"
+      - "tests/purchase-orders.test.js"
+      - "tests/purchase-orders.browser.cjs"
+      - "tests/purchase-financials.test.js"
+      - "tests/weekly-cost-report-baseline.test.js"
+      - "js/purchaseOrders.js"
+      - "js/purchaseFinancials.js"
       - "js/cloudFilePresentation.js"
       - "tests/fixtures/mcap-cutting-files.cjs"
       - "tests/fixtures/mcap-job-import-ui.cjs"
@@ -114,6 +122,9 @@ jobs:
           tests/cji-02g-cutting-import-identities.test.js
           tests/cji-02-project-category-import.test.js
           tests/import-selective-rollback.test.js
+          tests/purchase-orders.test.js
+          tests/purchase-financials.test.js
+          tests/weekly-cost-report-baseline.test.js
 
   cutover-rules:
     name: Test proposed cutover rules in disposable Firestore emulator
@@ -171,10 +182,14 @@ jobs:
           node --check tests/fixtures/mcap-active-browser.cjs
           node --check tests/fixtures/mcap-firebase-browser-write-mock.js
           node --check tests/fixtures/mcap-firebase-browser-mock.js
-          node --test --test-concurrency=1 tests/mcap-browser-smoke.browser.cjs tests/mcap-active-browser-readonly.browser.cjs tests/mcap-active-browser-save.browser.cjs tests/mcap-specialized-browser.browser.cjs tests/mcap-recovery-browser.browser.cjs
+          node --test --test-concurrency=1 tests/mcap-browser-smoke.browser.cjs tests/mcap-active-browser-readonly.browser.cjs tests/mcap-active-browser-save.browser.cjs tests/mcap-specialized-browser.browser.cjs tests/mcap-recovery-browser.browser.cjs tests/purchase-orders.browser.cjs
 
   real-firebase-browser:
-    name: Actual Firebase SDK browser with Auth, Firestore and Storage emulators
+    name: Actual Firebase SDK browser (${{ matrix.suite }}) with Auth, Firestore and Storage emulators
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [core, receipts]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -200,15 +215,17 @@ jobs:
         run: |
           node --check scripts/mcap-emulator-browser.cjs
           node --check tests/mcap-real-firebase.browser.cjs
+          node --check tests/mcap-real-firebase-receipts.browser.cjs
+          node --check tests/fixtures/mcap-receipts.cjs
           node --check tests/fixtures/mcap-emulator-identity.cjs
           node --check tests/fixtures/mcap-cutting-files.cjs
           node --check tests/fixtures/mcap-job-import-ui.cjs
-          node scripts/mcap-emulator-browser.cjs
+          node scripts/mcap-emulator-browser.cjs ${{ matrix.suite }}
       - name: Retain synthetic emulator diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: mcap-demo-browser-emulator-logs
+          name: mcap-demo-browser-emulator-logs-${{ matrix.suite }}
           path: |
             firebase-debug.log
             firestore-debug.log

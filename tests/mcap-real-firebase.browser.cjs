@@ -24,7 +24,7 @@ function token(uid){
   return enc({alg:"none",typ:"JWT"})+"."+enc({iss:"mcap-test",sub:"mcap-test",aud:"https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit",uid,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600})+".";
 }
 
-test("real Firebase browser: active Storage saves, rules, multi-client convergence and recovery",{timeout:600000},async t=>{
+async function realFirebaseBrowser(t,additional){
   assertEmulators();
   if(process.env.MCAP_EMULATOR_ONLY){
     assert.ok(["native calendar","lost real commit","history import","archive","corrupt field","actor change","in-flight","cutting file","specialized","job workbook","job restore","job flows"].includes(process.env.MCAP_EMULATOR_ONLY),"Unknown development test selection");
@@ -114,8 +114,9 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     assert.deepEqual(await page.evaluate(()=>window.__lastLoadedCloudState),expected);
   };
   const a=await client();
-  const legacy=await a.evaluate(({rev,owner})=>{
+  const legacy=await a.evaluate(({rev,owner,additions})=>{
     const source=JSON.parse(JSON.stringify(snapshotState({skipLocalFileCacheSync:true})));
+    Object.assign(source,additions);
     source.syncMeta.rev=rev;source.totalHistory=[{dateISO:"2026-11-23",hours:1,fixtureOnly:true}];
     source.jobFolders.push({id:"mcap-project",name:"1241 Synthetic MCAP",projectNumber:"1241",parent:"jobs_root",order:2});
     source.tasksAsReq.push({id:"emulator_archive_task",name:"Synthetic retained service task",mode:"asreq",variant:"template",templateId:"emulator_archive_task",cat:"root",parentTask:null,order:100,inventoryId:"emulator_archive_inventory",pn:"TEST-001",price:5,downtimeHours:0.25,manualLink:"",storeLink:"",note:"Retain definition and history",completedDates:["2026-11-01"],manualHistory:[{dateISO:"2026-11-01",status:"completed",hours:0.25,calendarPrice:5,note:"Retain original completion"}],occurrenceHours:{"2026-11-01":0.25},occurrenceNotes:{"2026-11-01":"Retain historical note"},removedOccurrences:[]});
@@ -123,7 +124,7 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     const planned=CuttingJobDateEditing.prepareMutation(source,{type:"create",job:{id:"mcap_attachment_job",name:"Synthetic attachment acceptance",cat:"mcap-project",projectNumber:"1241",startISO:"2026-11-21",dueISO:"2026-11-22",estimateHours:1,chargeRate:100,costRate:30,material:"Steel",materialCost:5,materialQty:1,priority:1,manualLogs:[],files:[],notes:"Keep attachments outside business state"}},{audit:{operationId:"mcap_attachment_seed",actorUid:owner,atISO:"2026-11-23T12:00:00.000Z"},validateCategory:(job,state)=>CuttingJobHistory.validateManualProjectCategory(job.cat,job.projectNumber,state.jobFolders,[...state.cuttingJobs,...state.completedCuttingJobs],null).ok});
     if(!planned.ok)throw Error("Synthetic attachment job fixture is invalid: "+JSON.stringify(planned));
     return planned.nextState;
-  },{rev:REV,owner:OWNER});
+  },{rev:REV,owner:OWNER,additions:additional?.initialState||{}});
   await seedDoc("workspaces/github-prod/members/"+OWNER,member("owner"));
   await seedDoc(STATE,legacy);
   await signIn(a);
@@ -154,6 +155,15 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     await b.waitForFunction(rev=>window.__loadedCloudRevisionForSaveGuard===rev,saved.syncMeta.rev);
     await exact(b,saved);await a.reload();await ready(a);await exact(a,saved);
   });
+  const diagnostics=()=>{
+    assert.deepEqual(errors,[],"No uncaught application errors");
+    assert.deepEqual(serverErrors,[],"All local app/SDK assets served successfully");
+    assert.ok(!deniedExternal.some(origin=>/googleapis|firebaseio|firebasestorage|gstatic/.test(origin)),JSON.stringify(deniedExternal));
+  };
+  if(additional){
+    await additional({step,a,b,read,exact,ready,seedDoc,member,OWNER,STORAGE,BUCKET,legacy});
+    diagnostics();return;
+  }
   await step("specialized water, pump, materials and cutting-job commits survive real Storage reload",async()=>{
     const before=await read(a);
     const water=await a.evaluate(()=>saveWaterQualityCheck({record:{id:"emulator_water",date:"2026-11-22",time:"09:15",ppm:125,softness:"Pass",initials:"MC",note:"Synthetic real-emulator check"},legacy:[]}));
@@ -584,8 +594,7 @@ test("real Firebase browser: active Storage saves, rules, multi-client convergen
     assert.equal((await a.evaluate(()=>saveCloudNow())).saved,false);
     assert.deepEqual(await a.evaluate(async()=>(await FB.docRef.get({source:"server"})).data()),legacy);
   });
-  assert.deepEqual(errors,[],"No uncaught application errors");
-  assert.deepEqual(serverErrors,[],"All local app/SDK assets served successfully");
-  // External libraries/fonts are denied; no Firebase service may escape localhost.
-  assert.ok(!deniedExternal.some(origin=>/googleapis|firebaseio|firebasestorage|gstatic/.test(origin)),JSON.stringify(deniedExternal));
-});
+  diagnostics();
+}
+module.exports=realFirebaseBrowser;
+if(require.main===module)test("real Firebase browser: active Storage saves, rules, multi-client convergence and recovery",{timeout:600000},t=>realFirebaseBrowser(t));

@@ -13616,7 +13616,8 @@ function getPurchaseOrderApi(){
     return Object.fromEntries(Object.keys(source).map(name=> [name, ["schema", "syncMeta", "saveMeta", "syncProcessLog"].includes(name) ? source[name] : Object.prototype.hasOwnProperty.call(snapshot, name) ? snapshot[name] : source[name]]));
   };
   const targetMatches = token=> FB.ready && FB.db === token.db && FB.docRef === token.docRef && FB.user?.uid === token.actor
-    && String(FB.app?.options?.projectId || "") === token.projectId && FB.docRef?.path === token.path;
+    && String(FB.app?.options?.projectId || "") === token.projectId && FB.docRef?.path === token.path
+    && cuttingJobSaveTargetIsCurrent(token.authority);
   const matches = (source, token)=> targetMatches(token) && canWriteCloud("purchase order") && !isVercelPreviewRuntime()
     && !window.__lastIndeterminateSave && !window.__inventoryMaterialMutationPending && !window.__pumpBaselineMutationPending && lastLocalMutationAt === token.version
     && window.__loadedCloudRevisionForSaveGuard === token.revision && token.revision === source.syncMeta.rev
@@ -13629,20 +13630,24 @@ function getPurchaseOrderApi(){
       await cloudSaveQueue;
       if (hasPendingLocalChanges) throw Error("Other changes are pending. Wait for their save or reload before saving the order.");
     },
-    capture:()=> ({db:FB.db, docRef:FB.docRef, path:FB.docRef?.path, actor:FB.user?.uid, projectId:String(FB.app?.options?.projectId || ""), version:lastLocalMutationAt, revision:window.__loadedCloudRevisionForSaveGuard}),
+    capture:()=> ({db:FB.db, docRef:FB.docRef, path:FB.docRef?.path, actor:FB.user?.uid, projectId:String(FB.app?.options?.projectId || ""), version:lastLocalMutationAt, revision:window.__loadedCloudRevisionForSaveGuard, authority:captureCuttingJobSaveTarget()}),
     matches,
     read:async token=>{
       if (!targetMatches(token) || typeof token.db?.runTransaction !== "function") throw Error("The order backend changed or cannot perform an independent server read.");
       let timer;
       try {
         return await Promise.race([
-          token.db.runTransaction(async transaction=>{
+          token.authority.backend === "sharded" ? (async()=>{
+            const state=await readShardedAuthoritativeState();
+            if(!targetMatches(token))throw Error("The order workspace/backend changed during Storage verification.");
+            return state;
+          })() : token.db.runTransaction(async transaction=>{
             const snapshot = await transaction.get(token.docRef);
             if (!targetMatches(token) || !snapshot?.exists || snapshot.metadata?.fromCache || snapshot.metadata?.hasPendingWrites
               || (snapshot.ref?.path && snapshot.ref.path !== token.path) || (snapshot.ref?.firestore && snapshot.ref.firestore !== token.db)) throw Error("A complete authoritative order snapshot is unavailable.");
             return snapshot.data();
           }),
-          new Promise((_, reject)=>{ timer = setTimeout(()=> reject(Error("Order server verification timed out. Review before retrying.")), 15000); })
+          new Promise((_, reject)=>{ timer = setTimeout(()=> reject(Error("Order server verification timed out. Review before retrying.")), token.authority.backend === "sharded" ? 60000 : 15000); })
         ]);
       } finally { clearTimeout(timer); }
     },
@@ -13664,7 +13669,8 @@ function getPurchaseOrderApi(){
       if (edit){
         // The existing Trash has no purchase-order restore type. Keep one exact
         // local before-image, independently of the rolling workspace backup.
-        const evidence = {atISO:new Date().toISOString(), path:FB.docRef.path, projectId:String(FB.app?.options?.projectId || ""), expected:edit.expected, confirmedRemovedLineIds:edit.confirmedRemovedLineIds};
+        const authority=captureCuttingJobSaveTarget();
+        const evidence = {atISO:new Date().toISOString(), path:authority.path, backend:authority.backend, projectId:authority.projectId, expected:edit.expected, confirmedRemovedLineIds:edit.confirmedRemovedLineIds};
         if (!window.localStorage) throw Error("A local order recovery copy is unavailable. Your edit draft is retained.");
         window.localStorage.setItem("omax_purchase_order_edit_backup_v1", JSON.stringify(evidence));
         window.__lastPurchaseOrderEditBackup = evidence;
@@ -13674,7 +13680,7 @@ function getPurchaseOrderApi(){
       const sourceKey = orders.key(source), preparedKey = orders.key(pending);
       const queued = cloudSaveQueue.then(()=>{
         if (!matches(source, token)) return cloudSaveNoWriteFailure("order_source_changed", "Local or backend state changed before the order transaction.");
-        return writeAuthoritativeStateSnapshot(pending, {merge:true}, {expectedRevision:source.syncMeta.rev,
+        return writeAuthoritativeStateSnapshot(pending, {merge:true}, {expectedRevision:source.syncMeta.rev, authoritativeTarget:token.authority,
           validateSourceState:remote=> orders.key(remote) === sourceKey && matches(source, token),
           validatePreparedState:next=> orders.key(next) === preparedKey && matches(source, token)});
       });

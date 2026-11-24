@@ -5,6 +5,9 @@ const fs=require("node:fs/promises"),path=require("node:path"),os=require("node:
 const {spawn}=require("node:child_process");
 const {PROJECT,AUTH,FIRESTORE,STORAGE,bindIdentity}=require("../tests/fixtures/mcap-emulator-identity.cjs");
 (async()=>{
+  const selection=process.argv[2]||"core";
+  if(!["core","receipts"].includes(selection)||process.argv.length>3)throw Error("Choose core or receipts acceptance; no arbitrary test command is accepted.");
+  const suite=selection==="receipts"?"tests/mcap-real-firebase-receipts.browser.cjs":"tests/mcap-real-firebase.browser.cjs";
   const root=path.resolve(__dirname,".."),dir=await fs.mkdtemp(path.join(os.tmpdir(),"omax-mcap-emulators-"));
   for(const [source,target]of [["storage.rules","storage.rules"],["docs/firestore-sharded-cutover-PROPOSAL.rules","firestore.rules"]]){
     await fs.writeFile(path.join(dir,target),bindIdentity(await fs.readFile(path.join(root,source),"utf8")));
@@ -15,7 +18,7 @@ const {PROJECT,AUTH,FIRESTORE,STORAGE,bindIdentity}=require("../tests/fixtures/m
   const configPath=path.join(dir,"firebase.json");await fs.writeFile(configPath,JSON.stringify(config,null,2));
   const cli=require.resolve("firebase-tools/lib/bin/firebase.js");
   const child=spawn(process.execPath,[cli,"emulators:exec","--only","auth,firestore,storage","--project",PROJECT,"--config",configPath,
-    "node --test --test-concurrency=1 tests/mcap-real-firebase.browser.cjs"],{
+    "node --test --test-concurrency=1 "+suite],{
     cwd:root,stdio:"inherit",env:{...process.env,GCLOUD_PROJECT:PROJECT,MCAP_REAL_EMULATORS:"1",
       FIREBASE_AUTH_EMULATOR_HOST:AUTH,FIRESTORE_EMULATOR_HOST:FIRESTORE,FIREBASE_STORAGE_EMULATOR_HOST:STORAGE,
       FIREBASE_CLI_DISABLE_UPDATE_CHECK:"true"}});
