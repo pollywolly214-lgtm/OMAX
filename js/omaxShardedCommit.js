@@ -65,26 +65,37 @@
       ||typeof working?.validateSource!=="function"||!cryptoApi?.subtle?.digest
       ||typeof fetchImpl!=="function"||typeof newId!=="function"||typeof now!=="function")
       throw fail("environment_mismatch","Firebase or sharded commit environment mismatch.");
-    if(!validID(app.auth().currentUser?.uid))
+    const actorUid=app.auth().currentUser?.uid;
+    if(!validID(actorUid))
       throw fail("unauthenticated","Authenticated owner required.");
     const db=app.firestore(),indexRef=db.doc(INDEX_PATH);
     if(!db||!indexRef||typeof db.runTransaction!=="function")
       throw fail("transaction_unavailable","Atomic Firestore index transactions unavailable.");
-    return {db,indexRef,app,reader,stager,sharder,working,cryptoApi,fetchImpl,newId,now};
+    return {db,indexRef,app,actorUid,reader,stager,sharder,working,cryptoApi,fetchImpl,newId,now};
+  }
+  function assertCurrent(ctx){
+    if(ctx.app.auth().currentUser?.uid!==ctx.actorUid)
+      throw fail("actor_changed","Authenticated user changed during the captured operation.");
+    if(ctx.app.firestore()!==ctx.db||ctx.app.options?.projectId!==PROJECT||ctx.app.options?.storageBucket!==BUCKET)
+      throw fail("environment_mismatch","Captured Firebase backend changed during the operation.");
   }
   async function readIndex(ctx){
     // Firebase v8 server-get can reuse a stale listener snapshot. A read-only
     // transaction independently fetches the current backend pointer, which
     // matters especially for post-commit acknowledgement and CAS conflicts.
+    assertCurrent(ctx);
     const snap=await ctx.db.runTransaction(async tx=>tx.get(ctx.indexRef));
+    assertCurrent(ctx);
     if(!snap?.exists||snap.metadata?.fromCache===true
       ||snap.metadata?.hasPendingWrites===true||snap.ref?.path!==INDEX_PATH)
       throw fail("index_unavailable","Active index is not independently verified.");
     return checkIndex(snap.data());
   }
   async function readComplete(ctx,index){
+    assertCurrent(ctx);
     const result=await ctx.reader.read({...index,sourceRevision:index.revision,
       app:ctx.app,sharder:ctx.sharder,cryptoApi:ctx.cryptoApi,fetchImpl:ctx.fetchImpl});
+    assertCurrent(ctx);
     if(rev(result.state)!==index.revision)
       throw fail("revision_mismatch","Reconstructed state disagrees with active index revision.");
     ctx.working.validateSource(result.state);
@@ -122,10 +133,14 @@
       staged=await ctx.stager.stage({confirmation:ctx.stager.PHRASE,app:ctx.app,
         sharder:ctx.sharder,working:ctx.working,cryptoApi:ctx.cryptoApi,
         fetchImpl:ctx.fetchImpl,newId:ctx.newId,now:ctx.now,providedSource:next});
+      assertCurrent(ctx);
+      if(staged.actorUid!==ctx.actorUid)
+        throw fail("actor_changed","Staged objects belong to another authenticated actor.");
       if(!staged.verified||staged.revision!==next.syncMeta.rev||staged.sourceEvidence!=="verified-caller-supplied")
         throw fail("staging_invalid","Staging did not independently verify proposed state.");
       const independentlyLoaded=await ctx.reader.read({...staged,sourceRevision:staged.revision,
         app:ctx.app,sharder:ctx.sharder,cryptoApi:ctx.cryptoApi,fetchImpl:ctx.fetchImpl});
+      assertCurrent(ctx);
       if(ctx.sharder.canonical(independentlyLoaded.state)!==ctx.sharder.canonical(next))
         throw fail("staging_mismatch","Independent staged reconstruction differs from pending state.");
       committedIndex={
@@ -135,7 +150,9 @@
         operationId:staged.operationId,actorUid:staged.actorUid,createdAtISO:staged.createdAtISO
       };
       await ctx.db.runTransaction(async transaction=>{
+        assertCurrent(ctx);
         const snap=await transaction.get(ctx.indexRef);
+        assertCurrent(ctx);
         if(!snap.exists)throw fail("index_missing","Active index was removed during save.");
         const latest=checkIndex(snap.data());
         if(latest.revision!==baselineIndex.revision

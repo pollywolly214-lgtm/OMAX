@@ -158,3 +158,36 @@ test("authority index decoder rejects fields the backend rules would reject",asy
     assert.throws(()=>Commit.checkIndex(mutation),{code:"invalid_index"});
   }
 });
+
+function mutableActor(e){const auth={currentUser:{uid}};e.args.app.auth=()=>auth;return auth;}
+const save=(e,state)=>Commit.save({...e.args,state,expectedRevision:11,prepare:pending=>pending,scan:()=>({contaminated:false}),clientId:"actor_phase_client",timeNow:()=>12});
+test("actor replacement during CAS lookup cannot queue an index write",async()=>{
+  const e=setup(),source=await initialize(e),auth=mutableActor(e),baseline=structuredClone(e.index()),ref=e.args.app.firestore().doc(Commit.INDEX_PATH),get=ref.get;let reads=0;
+  ref.get=async()=>{const result=await get();if(++reads===2)auth.currentUser={uid:"replacement_actor"};return result;};
+  const result=await save(e,source);assert.equal(result.saved,false);assert.equal(result.errorCode,"actor_changed");assert.equal(result.stateWriteAttempted,false);assert.equal(result.indeterminate,false);assert.equal(e.transactions(),0);assert.deepEqual(e.index(),baseline);
+});
+test("sign-out after staged reconstruction cannot advance the index",async()=>{
+  const e=setup(),source=await initialize(e),auth=mutableActor(e),baseline=structuredClone(e.index());let reads=0;
+  e.args.reader={...Readback,read:async args=>{const result=await Readback.read(args);if(++reads===2)auth.currentUser=null;return result;}};
+  const result=await save(e,source);assert.equal(result.saved,false);assert.equal(result.errorCode,"actor_changed");assert.equal(result.stateWriteAttempted,false);assert.equal(e.transactions(),0);assert.deepEqual(e.index(),baseline);
+});
+test("actor replacement at final committed reconstruction stays indeterminate with no acknowledgement",async()=>{
+  const e=setup(),source=await initialize(e),auth=mutableActor(e);let reads=0;
+  e.args.reader={...Readback,read:async args=>{const result=await Readback.read(args);if(++reads===3)auth.currentUser={uid:"replacement_actor"};return result;}};
+  const result=await save(e,{...source,unknown:{retained:true,newIntent:"one committed record"}});
+  assert.equal(result.saved,false);assert.equal(result.errorCode,"actor_changed");assert.equal(result.indeterminate,true);assert.equal(result.stateWriteAttempted,true);assert.equal(result.stateWriteCompleted,false);assert.equal(result.committedState,undefined);assert.equal(e.index().revision,12);assert.equal(e.transactions(),1);
+});
+test("database replacement after staging cannot write through the old captured backend",async()=>{
+  const e=setup(),source=await initialize(e),stage=e.args.stager.stage,baseline=structuredClone(e.index());
+  e.args.stager={...Stager,stage:async args=>{const result=await stage(args);e.args.app.firestore=()=>({doc(){throw Error("Wrong backend");}});return result;}};
+  const result=await save(e,source);assert.equal(result.saved,false);assert.equal(result.errorCode,"environment_mismatch");assert.equal(result.stateWriteAttempted,false);assert.equal(e.transactions(),0);assert.deepEqual(e.index(),baseline);
+});
+test("independent complete reads reject actor replacement before returning state",async()=>{
+  const e=setup();await initialize(e);const auth=mutableActor(e);
+  e.args.reader={...Readback,read:async args=>{const result=await Readback.read(args);auth.currentUser={uid:"replacement_actor"};return result;}};
+  await assert.rejects(Commit.read(e.args),{code:"actor_changed"});assert.equal(e.transactions(),0);
+});
+test("a refreshed auth object for the same actor still permits one exact commit",async()=>{
+  const e=setup(),source=await initialize(e);e.args.app.auth=()=>({currentUser:{uid,refreshMarker:++sequence}});
+  const result=await save(e,source);assert.equal(result.saved,true);assert.equal(e.transactions(),1);assert.equal(e.index().actorUid,uid);
+});

@@ -114,7 +114,12 @@ async function realFirebaseBrowser(t,additional){
     assert.deepEqual(await page.evaluate(()=>window.__lastLoadedCloudState),expected);
   };
   const a=await client();
-  const legacy=await a.evaluate(({rev,owner,additions})=>{
+  let legacy,initial;
+  if(additional?.restoreEvidence){
+    legacy=additional.restoreEvidence.legacy;
+    await signIn(a);await ready(a);initial=await read(a);await exact(a,additional.restoreEvidence.state);
+  }else{
+  legacy=await a.evaluate(({rev,owner,additions})=>{
     const source=JSON.parse(JSON.stringify(snapshotState({skipLocalFileCacheSync:true})));
     Object.assign(source,additions);
     source.syncMeta.rev=rev;source.totalHistory=[{dateISO:"2026-11-23",hours:1,fixtureOnly:true}];
@@ -146,10 +151,11 @@ async function realFirebaseBrowser(t,additional){
   });
   assert.ok(staging.bytes>975000);assert.ok(staging.objects>staging.fields+1);
   await a.reload();await ready(a);
-  const initial=await read(a);await exact(a,initial);
+  initial=await read(a);await exact(a,initial);
+  }
   const b=await client();await signIn(b);await ready(b);await exact(b,initial);
 
-  await step("actual SDK ordinary save, refresh and two-browser listener convergence",async()=>{
+  if(!additional?.restoreEvidence)await step("actual SDK ordinary save, refresh and two-browser listener convergence",async()=>{
     const result=await a.evaluate(()=>saveCloudNow());assert.equal(result.saved,true,JSON.stringify(result));
     const saved=await read(a);assert.ok(saved.syncMeta.rev>initial.syncMeta.rev);
     await b.waitForFunction(rev=>window.__loadedCloudRevisionForSaveGuard===rev,saved.syncMeta.rev);
@@ -161,7 +167,7 @@ async function realFirebaseBrowser(t,additional){
     assert.ok(!deniedExternal.some(origin=>/googleapis|firebaseio|firebasestorage|gstatic/.test(origin)),JSON.stringify(deniedExternal));
   };
   if(additional){
-    await additional({step,a,b,read,exact,ready,seedDoc,member,OWNER,STORAGE,BUCKET,legacy});
+    await additional({step,a,b,read,exact,ready,seedDoc,member,OWNER,STORAGE,BUCKET,FIRESTORE,PROJECT,INDEX,STATE,legacy,signIn,client,localRequest});
     diagnostics();return;
   }
   await step("specialized water, pump, materials and cutting-job commits survive real Storage reload",async()=>{

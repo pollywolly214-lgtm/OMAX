@@ -21,7 +21,12 @@ on:
       - "scripts/mcap-emulator-browser.cjs"
       - "tests/mcap-real-firebase.browser.cjs"
       - "tests/mcap-real-firebase-receipts.browser.cjs"
+      - "tests/mcap-real-firebase-recovery.browser.cjs"
+      - "tests/mcap-real-firebase-backup.browser.cjs"
       - "tests/fixtures/mcap-receipts.cjs"
+      - "tests/fixtures/mcap-recovery-phases.cjs"
+      - "tests/fixtures/mcap-database-backup.cjs"
+      - "tests/fixtures/mcap-backup-inventory.cjs"
       - "tests/fixtures/mcap-emulator-identity.cjs"
       - "storage.rules"
       - "tests/water-quality-persistence.test.js"
@@ -193,7 +198,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [core, receipts]
+        suite: [core, receipts, recovery, backup]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -220,7 +225,12 @@ jobs:
           node --check scripts/mcap-emulator-browser.cjs
           node --check tests/mcap-real-firebase.browser.cjs
           node --check tests/mcap-real-firebase-receipts.browser.cjs
+          node --check tests/mcap-real-firebase-recovery.browser.cjs
+          node --check tests/mcap-real-firebase-backup.browser.cjs
           node --check tests/fixtures/mcap-receipts.cjs
+          node --check tests/fixtures/mcap-recovery-phases.cjs
+          node --check tests/fixtures/mcap-database-backup.cjs
+          node --check tests/fixtures/mcap-backup-inventory.cjs
           node --check tests/fixtures/mcap-emulator-identity.cjs
           node --check tests/fixtures/mcap-cutting-files.cjs
           node --check tests/fixtures/mcap-job-import-ui.cjs
@@ -234,4 +244,5 @@ jobs:
             firebase-debug.log
             firestore-debug.log
             storage-debug.log
+            artifacts/mcap-database-backup-*/
           if-no-files-found: ignore
