@@ -21199,7 +21199,8 @@ function hydrateVisibleCfr05CloudFiles(content){
     const id = String(node.getAttribute("data-cfr05-cloud-job-id") || "").trim();
     if (id) ids.add(id);
   });
-  const missing = [...ids].filter(id=>!cfr05CloudPresentation.has(id) && !cfr05CloudPresentation.isLoading(id));
+  // A newer view subscribes to the cache's shared in-flight read as well.
+  const missing = [...ids].filter(id=>!cfr05CloudPresentation.has(id));
   if (!missing.length) return;
   Promise.allSettled(missing.map(id=>refreshCfr05CloudPresentation(id))).then(()=>{
     if (isCurrentView() && typeof renderJobs === "function") renderJobs();
@@ -21226,7 +21227,7 @@ function setupCfr05InlinePreviewHydration(content){
   const activate=target=>{
     if(!isCurrentView()||!content.contains(target))return;
     const identity={jobId:target.dataset.cfr05JobId,fileId:target.dataset.cfr05FileId,sha256:target.dataset.cfr05Sha256};
-    if(cfr05CloudPreviewCache.has(identity)||cfr05CloudPreviewCache.isLoading(identity))return;
+    if(cfr05CloudPreviewCache.has(identity))return;
     hydrateCfr05DxfPreview(target).then(()=>{if(isCurrentView())renderJobs();});
   };
   const targets=Array.from(content.querySelectorAll("[data-cfr05-preview-target]"));
