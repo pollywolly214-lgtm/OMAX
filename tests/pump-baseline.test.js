@@ -15,10 +15,36 @@ const initial=()=>({schema:72,syncMeta:{rev:7,retained:"keep"},saveMeta:{keep:"e
 const create=(date="2026-09-20",rpm=3515)=>({kind:"create",rpm,effectiveDateISO:date});
 const edit=(id,rpm,date)=>({kind:"edit",id,rpm,effectiveDateISO:date,reason:"Correct transcription"});
 function pure(value=initial().pumpEff){
-  const window={pumpEff:clone(value)},c=vm.createContext({window,Date,console,stableStringifyForIntegrity:identity.key,normalizeDateISO:value=>value||null});
+  const window={pumpEff:clone(value)},c=vm.createContext({authoritativeBackendMode:"legacy",MCAP_SHARDED_WRITES_ACTIVE:false,window,Date,console,stableStringifyForIntegrity:identity.key,normalizeDateISO:value=>value||null});
   vm.runInContext(model+section(pump,"function pumpPercentChange","const PUMP_DELTA_CLASS_COLORS")+retention+merging,c);
   return c;
 }
+for(const withBaselineHistory of [false,true])test("unchanged pump history survives unrelated saves exactly, baseline history="+withBaselineHistory,()=>{
+  const pump=initial().pumpEff;
+  pump.entries.push({id:"earlier-reading",dateISO:"2026-06-02",rpm:3495.75,timeISO:"08:17",opaque:{retain:"exact"}});
+  if(withBaselineHistory)pump.baselineHistory=[baseline("initial","2026-06-01",3480)];
+  const local=clone(pump),remote=clone(pump),model=pure(pump);
+  const actual=model.mergePumpEffForSave(local,remote);
+  assert.deepEqual(clone(actual),pump,"No sorting, rounding, trimming or defaults on unchanged history");
+  actual.entries[0].rpm=1;
+  assert.deepEqual(local,pump);assert.deepEqual(remote,pump);
+});
+test("reviewed measurement append preserves pre-existing precision, order and note evidence",()=>{
+  const remote=initial().pumpEff;
+  remote.entries.push({id:"older",dateISO:"2026-06-02",rpm:3495.75,timeISO:"08:17",opaque:{retain:"exact"}});
+  const local=clone(remote);
+  local.entries.unshift({dateISO:"2025-01-03",rpm:3400,timeISO:"12:00",import_event_id:"reviewed_append",importProvenance:{sourceRecord:{date:"2025-01-03",rpm:3400}}});
+  const actual=pure(remote).mergePumpEffForSave(local,remote);
+  assert.deepEqual(clone(actual),local,"Adding a reviewed row must not normalize retained history");
+});
+test("measurement append cannot discard a remote-only record",()=>{
+  const remote=initial().pumpEff,local=clone(remote);
+  remote.entries.push({id:"remote-only",dateISO:"2026-06-02",rpm:3495,timeISO:"08:17"});
+  local.entries.unshift({dateISO:"2025-01-03",rpm:3400,timeISO:"12:00"},{dateISO:"2025-01-04",rpm:3401,timeISO:"12:00"});
+  const actual=pure(remote).mergePumpEffForSave(local,remote);
+  assert.ok(actual.entries.some(row=>row.id==="remote-only"));
+  assert.equal(actual.entries.length,4);
+});
 function harness(options={}){
   let cloud=clone(options.initial||initial()),local=clone(cloud),commits=0,reads=0,preflights=0,ids=0,adoptions=0,diagnostics=0;
   const window={pumpEff:local.pumpEff,OMAXAtomicPersistence:atomic,CuttingFileContentFirewall:firewall,__cloudLoadAttemptComplete:true,__initialAdoptComplete:true,
@@ -42,7 +68,7 @@ function harness(options={}){
     }
     return result;
   }};
-  const c=vm.createContext({window,Date,console,Map,Set,FB:{ready:true,user:{uid:"actor-fixture"},db,docRef},
+  const c=vm.createContext({authoritativeBackendMode:"legacy",MCAP_SHARDED_WRITES_ACTIVE:false,window,Date,console,Map,Set,FB:{ready:true,user:{uid:"actor-fixture"},db,docRef},
     cloneStructured:clone,stableStringifyForIntegrity:identity.key,stableStringify:identity.key,normalizeDateISO:value=>value||null,
     getCloudSyncClientId:()=>"client-fixture",genId:prefix=>prefix+"_"+(++ids),blockCloudSave:()=>false,
     isRecoveryMode:()=>!!window.__recoveryInspectMode,isVercelPreviewRuntime:()=>!!options.preview,

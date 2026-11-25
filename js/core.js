@@ -102,6 +102,10 @@ function blockCloudSave(reason, details = null){
 
 function canWriteCloud(reason = "cloud save"){
   if (typeof window === "undefined") return false;
+  // MCAP read-side integration is intentionally fail-closed. Do not let any
+  // legacy writer mutate app/state after a Storage index becomes authoritative.
+  if (authoritativeBackendMode === "sharded" && !MCAP_SHARDED_WRITES_ACTIVE) return blockCloudSave(
+    `${reason}; Storage-backed authority is still read-only until full writer cutover tests pass.`);
   if (isRecoveryMode()) return blockCloudSave(`${reason}; Recovery Mode is read-only, cloud saves disabled.`);
   if (window.__autosaveDisabled) return blockCloudSave(`${reason}; autosave is disabled.`);
   if (window.maintenanceCalendarCancellationApi?.isBusy() && reason !== "maintenance calendar cancellation") return blockCloudSave(`${reason}; a maintenance cancellation is being verified.`);
@@ -664,6 +668,11 @@ let firebaseInitStarted = false;
 let firebaseSettingsApplied = false;
 let workspaceMetadataWritesBlocked = false;
 let workspaceStateUnsubscribe = null;
+let authorityIndexUnsubscribe = null;
+let authoritativeBackendMode = "unknown";
+// Keep closed until Storage CAS, protected mutations and old-client lockout
+// have passed authoritative integration tests. Not a browser-configurable flag.
+const MCAP_SHARDED_WRITES_ACTIVE = false;
 let lastAppliedCloudRevision = 0;
 let hasPendingLocalChanges = false;
 let lastLocalMutationAt = 0;
@@ -2299,6 +2308,18 @@ function getCurrentAppStateForDiagnostics(){
 
 async function readCurrentCloudStateReadOnly(){
   if (!FB.ready || !FB.docRef) return null;
+  // Every cloud inspection/import/repair must read the same authority that
+  // startup and guarded writes use. After a cutover the legacy state is a
+  // historical snapshot, NEVER a valid source for recovery or repair.
+  if (!window.OMAXDevSafe?.active && FB.app?.options?.projectId === "wj-tracker-v2"){
+    if (typeof window.OMAXAuthorityRouter?.fromBrowser !== "function")
+      throw Error("Verified OMAX authority reader unavailable. Do not use legacy state.");
+    const routed = await window.OMAXAuthorityRouter.fromBrowser();
+    if (!routed?.verified || !["legacy","sharded"].includes(routed.mode))
+      throw Error("Authoritative cloud read was not independently verified.");
+    return routed.state;
+  }
+  // Preserve the existing disposable development/test read semantics.
   const snap = await FB.docRef.get({ source:"server" });
   return snap && snap.exists ? (typeof snap.data === "function" ? snap.data() : snap.data) : null;
 }
@@ -2549,7 +2570,10 @@ function applyFirestoreSettings(db){
       return;
     }
     try {
-      db.settings({ ...currentSettings, ignoreUndefinedProperties: true });
+      // Firebase v8's public wrapper does not expose the private settings
+      // getters above. Use its supported merge option so adding this flag
+      // cannot reset a previously configured host/SSL or other transport.
+      db.settings({ ...currentSettings, ignoreUndefinedProperties: true, merge:true });
       firebaseSettingsApplied = true;
     } catch (err) {
       console.warn("Failed to enable ignoreUndefinedProperties", err);
@@ -2569,7 +2593,7 @@ function applyFirestoreSettings(db){
     }
 
     try {
-      db.settings(mergedSettings);
+      db.settings({ ...mergedSettings, merge:true });
       firebaseSettingsApplied = true;
     } catch (err) {
       console.warn("Failed to enable ignoreUndefinedProperties", err);
@@ -2703,6 +2727,12 @@ async function initFirebase(){
       try { workspaceStateUnsubscribe(); } catch (err) { console.warn("Failed to stop workspace sync listener", err); }
       workspaceStateUnsubscribe = null;
     }
+    if (typeof authorityIndexUnsubscribe === "function"){
+      try { authorityIndexUnsubscribe(); } catch (err) { console.warn("Failed to stop authority index watcher", err); }
+      authorityIndexUnsubscribe = null;
+    }
+    authoritativeBackendMode = "unknown";
+    window.__omaxActiveStateBackend = null;
     lastAppliedCloudRevision = 0;
     if (user){
       if (statusEl) statusEl.textContent = `Signed in as: ${user.email || user.uid}`;
@@ -2741,6 +2771,9 @@ async function initFirebase(){
 
 function startWorkspaceStateListener(){
   if (!FB.ready || !FB.docRef || typeof FB.docRef.onSnapshot !== "function") return;
+  // A failed authority load must stay stopped. Starting a legacy index watcher
+  // here would repeatedly retry a missing/corrupt Storage manifest forever.
+  if (!["legacy","sharded"].includes(authoritativeBackendMode)) return;
   if (typeof workspaceStateUnsubscribe === "function") return;
   const localClientId = getCloudSyncClientId();
   let deferredRouteTimer = null;
@@ -2789,7 +2822,52 @@ function startWorkspaceStateListener(){
       console.warn("Route refresh after workspace sync failed", err);
     }
   };
-  workspaceStateUnsubscribe = FB.docRef.onSnapshot((snap)=>{
+  const shardedListener = authoritativeBackendMode === "sharded";
+  const listenerRef = shardedListener
+    ? FB.db.doc("workspaces/github-prod/app/stateIndexV1") : FB.docRef;
+  let shardedRetryTimer = null;
+  const listenerDb = FB.db, listenerDoc = FB.docRef, listenerActor = FB.user?.uid;
+  const unsubscribe = listenerRef.onSnapshot(function onWorkspaceSnapshot(snap){
+    if (shardedListener){
+      // The active index is authoritative; never read a legacy state echo.
+      if (!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites) return;
+      if (!snap.exists){
+        window.__autosaveDisabled = true;
+        window.__recoveryInspectMode = true;
+        window.__recoveryReason = "Active Storage index is missing. Writes remain disabled.";
+        renderRecoveryDiagnosticsPanel();
+        return;
+      }
+      try{
+        const index = window.OMAXShardedCommit.checkIndex(snap.data());
+        clearTimeout(shardedRetryTimer);
+        shardedRetryTimer = null;
+        if (index.revision <= Number(window.__loadedCloudRevisionForSaveGuard || 0)) return;
+        if (isRecoveryMode()) return;
+        // The owning mutation must finish exact readback and adoption before a
+        // realtime echo can load anything. Keep a newer notification pending:
+        // it may belong to another client, not just our own successful commit.
+        if (hasPendingLocalChanges || window.OMAXFirebaseOperations?.snapshot?.().pending > 0
+          || window.inventoryDeletionApi?.isBusy() || window.maintenanceTaskDeletionApi?.isBusy()
+          || window.maintenanceCalendarCancellationApi?.isBusy() || window.inventoryMaterialMutationApi?.isBusy()
+          || window.isCuttingJobChronologySaving?.() || window.__categoryMutationPending
+          || window.__pumpBaselineMutationPending || window.__pumpLogMutationPending || window.__waterQualityMutationPending){
+          shardedRetryTimer = setTimeout(()=>{
+            if (workspaceStateUnsubscribe === unsubscribe && FB.db === listenerDb
+              && FB.docRef === listenerDoc && FB.user?.uid === listenerActor) onWorkspaceSnapshot(snap);
+          }, 100);
+          return;
+        }
+        window.__autosaveDisabled = true;
+        loadFromCloud().then(refreshRouteSafely);
+      }catch(error){
+        window.__autosaveDisabled = true;
+        window.__recoveryInspectMode = true;
+        window.__recoveryReason = "Invalid Storage index: " + String(error?.message || error);
+        renderRecoveryDiagnosticsPanel();
+      }
+      return;
+    }
     // Cache and pending local echoes cannot establish authoritative corruption
     // or absence. Keep the adopted baseline until a confirmed server event.
     if (!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites) return;
@@ -2822,7 +2900,45 @@ function startWorkspaceStateListener(){
     refreshRouteSafely();
   }, (err)=>{
     console.warn("Workspace realtime sync listener error", err);
+    if(shardedListener){
+      window.__autosaveDisabled=true;
+      window.__recoveryInspectMode=true;
+      window.__recoveryReason="Storage index listener failed: "+String(err?.message||err);
+      renderRecoveryDiagnosticsPanel();
+    }
   });
+  workspaceStateUnsubscribe = unsubscribe;
+
+  // A legacy session already open when migration occurs must notice the new
+  // authority index and stop all old-document writes before adopting anything.
+  if (!shardedListener && !window.OMAXDevSafe?.active
+      && window.OMAXAuthorityRouter && !authorityIndexUnsubscribe){
+    const indexRef=FB.db.doc("workspaces/github-prod/app/stateIndexV1");
+    authorityIndexUnsubscribe=indexRef.onSnapshot((snap)=>{
+      if(!snap || snap.metadata?.fromCache || snap.metadata?.hasPendingWrites || !snap.exists) return;
+      window.__autosaveDisabled=true;
+      window.__recoveryInspectMode=true;
+      if(typeof workspaceStateUnsubscribe==="function"){
+        try{workspaceStateUnsubscribe();}catch(_){}
+        workspaceStateUnsubscribe=null;
+      }
+      if(typeof authorityIndexUnsubscribe==="function"){
+        try{authorityIndexUnsubscribe();}catch(_){}
+        authorityIndexUnsubscribe=null;
+      }
+      loadFromCloud().then(()=>{
+        startWorkspaceStateListener();
+        refreshRouteSafely();
+      });
+    },error=>{
+      // An unreadable authority selector is never evidence that legacy state
+      // is writable. Stop saves rather than silently continuing.
+      window.__autosaveDisabled=true;
+      window.__recoveryInspectMode=true;
+      window.__recoveryReason="Authority index watcher failed: "+String(error?.message||error);
+      renderRecoveryDiagnosticsPanel();
+    });
+  }
 }
 
 
@@ -3174,40 +3290,9 @@ function applyRestoreByType(entry, index){
       return { blocked:true, error:"Use the confirmed Restore action in Deleted History to restore this task with its exact original ID and verified history." };
     case "inventory":
       return { blocked:true, error:"Use the verified Restore action in Deleted History to restore the original inventory identity." };
-    case "job": {
-      const gate = window.CuttingJobHistory?.planDirectResequence([...(cuttingJobs || []), clone], window.completedCuttingJobs);
-      if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
-      if (!Array.isArray(cuttingJobs)) cuttingJobs = [];
-      if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
-      if (!Array.isArray(clone.files)) clone.files = [];
-      if (!clone.id) clone.id = genId(clone.name || "job");
-      const existing = new Set(cuttingJobs.filter(Boolean).map(job => String(job.id)));
-      while (existing.has(String(clone.id))){
-        clone.id = genId(clone.name || "job");
-      }
-      const resequence = window.CuttingJobHistory.resequence([...cuttingJobs, clone], window.completedCuttingJobs);
-      if (window.CuttingJobHistory.isResequenceBlocked(resequence))return {...resequence,ok:false,blocked:true};
-      cuttingJobs.push(clone);
-      window.cuttingJobs = cuttingJobs;
-      return { handledRemoval: false, value: { type: "job", id: clone.id } };
-    }
-    case "completed-job": {
-      const gate = window.CuttingJobHistory?.planDirectResequence(window.cuttingJobs, [...(completedCuttingJobs || []), clone]);
-      if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
-      if (!Array.isArray(completedCuttingJobs)) completedCuttingJobs = [];
-      if (!Array.isArray(clone.manualLogs)) clone.manualLogs = [];
-      if (!Array.isArray(clone.files)) clone.files = [];
-      if (!clone.id) clone.id = genId(clone.name || "job");
-      const existing = new Set(completedCuttingJobs.filter(Boolean).map(job => String(job.id)));
-      while (existing.has(String(clone.id))){
-        clone.id = genId(clone.name || "job");
-      }
-      const resequence = window.CuttingJobHistory.resequence(window.cuttingJobs, [...completedCuttingJobs, clone]);
-      if (window.CuttingJobHistory.isResequenceBlocked(resequence))return {...resequence,ok:false,blocked:true};
-      completedCuttingJobs.push(clone);
-      window.completedCuttingJobs = completedCuttingJobs;
-      return { handledRemoval: false, value: { type: "completed-job", id: clone.id } };
-    }
+    case "job":
+    case "completed-job":
+      return {blocked:true,error:"Use the verified Restore action in Deleted History to retain the original cutting-job identity and cloud proof."};
     case "folder": {
       window.settingsFolders = Array.isArray(window.settingsFolders) ? window.settingsFolders : [];
       const existing = new Set(window.settingsFolders.map(f => String(f.id)));
@@ -3322,6 +3407,7 @@ function applyRestoreByType(entry, index){
 }
 
 function restoreDeletedItem(id, confirmedArchiveKey){
+  if(!canWriteCloud("restore deleted item"))return {...cuttingJobDeletionFailure("Restoration is blocked while a save or recovery review is unresolved."),ok:false};
   const inventoryEntry=window.deletedItems?.find(entry=>entry?.id===id&&entry.type==="inventory");
   if(inventoryEntry){
     return (async()=>{
@@ -3343,7 +3429,16 @@ function restoreDeletedItem(id, confirmedArchiveKey){
     const active = candidate.type === "job" ? [...(cuttingJobs || []), candidate.payload] : cuttingJobs;
     const completed = candidate.type === "completed-job" ? [...(completedCuttingJobs || []), candidate.payload] : completedCuttingJobs;
     const gate = window.CuttingJobHistory?.planDirectResequence(active, completed);
-    if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate))return {...gate,ok:false,blocked:true,error:gate?.error || "Cutting-job chronology is unavailable; review required."};
+    if (!gate || window.CuttingJobHistory.isResequenceBlocked(gate)){
+      const error=gate?.error || "Cutting-job chronology is unavailable; review required.";
+      return {...cuttingJobDeletionFailure(error),...gate,ok:false,blocked:true,error};
+    }
+    const collection=candidate.type==="job"?"cuttingJobs":"completedCuttingJobs";
+    const archiveKey=stableStringifyForIntegrity(candidate),originalId=candidate.payload?.id;
+    return restoreCuttingJobHistory(collection,String(originalId),null,String(candidate.id),archiveKey).then(result=>({
+      ...result,ok:result.saved===true&&result.verified===true&&result.stateWriteCompleted===true,
+      value:result.saved&&result.verified?{type:candidate.type,id:originalId}:undefined
+    }));
   }
   purgeExpiredDeletedItems();
   const idx = deletedItems.findIndex(entry => entry && entry.id === id);
@@ -4219,7 +4314,7 @@ function reconcileCuttingJobHistorySnapshot(snapshot, mutation){
     if (matches.length !== 1 || stableStringifyForIntegrity(matches[0]) !== mutation.restoredKey) return null;
     jobs.splice(jobs.indexOf(matches[0]), 1);
     if (state.deletedItems.some(entry => entry.id === mutation.trash.id)) return null;
-    state.deletedItems.unshift(cloneStructured(mutation.trash));
+    state.deletedItems.splice(Math.min(mutation.trashIndex??0,state.deletedItems.length),0,cloneStructured(mutation.trash));
   } else {
     if (matches.length) return null;
     jobs.splice(Math.min(mutation.before.findIndex(job => String(job?.id) === mutation.id), jobs.length), 0, cloneStructured(mutation.job));
@@ -4474,13 +4569,13 @@ function rollbackCuttingJobHistoryRestore(mutation){
     const byId = new Map(current.map(job => [String(job?.id), job]));
     current.splice(0, current.length, ...mutation.before.map(job => byId.get(String(job?.id))));
   }
-  window.deletedItems.unshift(mutation.trash);
+  window.deletedItems.splice(Math.min(mutation.trashIndex??0,window.deletedItems.length),0,mutation.trash);
   refreshGlobalCollections();
   persistLocalStateBackup(snapshotState({ skipLocalFileCacheSync:true }));
   return true;
 }
 
-async function restoreCuttingJobHistory(collection, id, target){
+async function restoreCuttingJobHistory(collection, id, target, archiveId = null, expectedArchiveKey = null){
   const firebaseOperation = window.OMAXFirebaseOperations?.begin("updating");
   try {
   if (cuttingJobDeletionInProgress || !canWriteCloud("cutting-job history restoration")) return cuttingJobDeletionFailure("Another operation or recovery review prevents history restoration.");
@@ -4493,13 +4588,27 @@ async function restoreCuttingJobHistory(collection, id, target){
     } else await cloudSaveQueue;
     if (!canWriteCloud("cutting-job history restoration")) return cuttingJobDeletionFailure("Cloud writes are blocked.");
     const before = compactStateForStorage(snapshotState({ skipLocalFileCacheSync:true }));
-    const archive = before.deletedItems?.[0];
+    const archiveIndex=archiveId===null?0:before.deletedItems?.findIndex(entry=>String(entry?.id)===archiveId);
+    const archive=before.deletedItems?.[archiveIndex];
+    if(archiveId!==null){
+      if(!["cuttingJobs","completedCuttingJobs"].includes(collection)||!archive||before.deletedItems.filter(entry=>String(entry?.id)===archiveId).length!==1
+        ||stableStringifyForIntegrity(archive)!==expectedArchiveKey||!Number.isFinite(Date.parse(archive.deletedAt))
+        ||Date.now()-Date.parse(archive.deletedAt)>30*24*60*60*1000)return cuttingJobDeletionFailure("The selected job archive is missing, changed, ambiguous or expired.");
+      if(!archive.payload||typeof archive.payload!=="object"||Array.isArray(archive.payload)||archive.payload.id==null||!String(archive.payload.id).trim()||String(archive.payload.id)!==id)return cuttingJobDeletionFailure("The archived job identity is invalid.");
+      const payload=cloneStructured(archive.payload),others=[...before.cuttingJobs,...before.completedCuttingJobs];
+      if(payload?.cutNumber&&others.some(job=>job?.cutNumber===payload.cutNumber))return cuttingJobDeletionFailure("The archived cut number is now in use. Review chronology before restoring.");
+      const restored=before[collection].map(cloneStructured);
+      const priority=Number(payload?.priority),position=collection==="cuttingJobs"&&Number.isFinite(priority)&&priority>0?Math.min(restored.length,Math.max(0,Math.floor(priority)-1)):restored.length;
+      restored.splice(position,0,payload);
+      if(collection==="cuttingJobs")restored.forEach((job,index)=>{if(index!==position)job.priority=index+1;});
+      target={...before,[collection]:restored,deletedItems:before.deletedItems.filter((_,index)=>index!==archiveIndex)};
+    }
     const restored = target[collection].filter(job => String(job?.id) === id);
     const existing = [...before.cuttingJobs, ...before.completedCuttingJobs].filter(job => String(job?.id) === id);
     if (existing.length || restored.length !== 1 || !archive || archive.type !== (collection === "cuttingJobs" ? "job" : "completed-job")
       || stableStringifyForIntegrity(archive.payload) !== stableStringifyForIntegrity(restored[0])
       || cuttingJobDeletionProtectedKey(before) !== cuttingJobDeletionProtectedKey(window.__lastLoadedCloudState)) return cuttingJobDeletionFailure("History restoration does not match one exact archived job and the current cloud baseline.");
-    const inverse = { ...target, [collection]:cuttingJobDeletionArray(target[collection], collection, id), deletedItems:[archive, ...target.deletedItems] };
+    const inverse = { ...target, [collection]:cuttingJobDeletionArray(target[collection], collection, id), deletedItems:[...target.deletedItems.slice(0,archiveIndex),archive,...target.deletedItems.slice(archiveIndex)] };
     if (cuttingJobDeletionProtectedKey(inverse) !== cuttingJobDeletionProtectedKey(before)) return cuttingJobDeletionFailure("History restoration would change unrelated protected data.");
     const expectedRevision = window.__loadedCloudRevisionForSaveGuard;
     const proof = Object.freeze({ expectedRevision, sourceKey:cuttingJobDeletionProtectedKey(before), pendingKey:cuttingJobDeletionProtectedKey(target), expiresAt:Date.now() + 60000 });
@@ -4519,8 +4628,8 @@ async function restoreCuttingJobHistory(collection, id, target){
       return live;
     });
     mutation = { restoring:true, collection, id, job, restoredKey:stableStringifyForIntegrity(job), before:before[collection], staged,
-      trash:window.deletedItems[0], trashArray:window.deletedItems, priorities };
-    window[collection] = staged; window.deletedItems.shift(); refreshGlobalCollections();
+      trash:window.deletedItems[archiveIndex], trashIndex:archiveIndex, trashArray:window.deletedItems, priorities };
+    window[collection] = staged; window.deletedItems.splice(archiveIndex,1); refreshGlobalCollections();
     beginCuttingJobHistoryMutation(mutation);
     const saving = saveCloudNowForHistory({ firebaseOperationToken:firebaseOperation?.token, expectedRevision, cuttingJobHistoryRestoreToken:token });
     try { writeOutcome = await saving; }
@@ -4567,6 +4676,12 @@ async function writeReviewedInventoryIdentityRepair(next,{source,expectedRevisio
 }
 
 async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true }, options = {}){
+  const shardedBackend=authoritativeBackendMode==="sharded";
+  if(shardedBackend && !MCAP_SHARDED_WRITES_ACTIVE)
+    return {saved:false,blocked:true,definiteFailure:true,indeterminate:false,
+      stateWriteAttempted:false,stateWriteCompleted:false,
+      errorCode:"storage_writes_not_activated",
+      error:"Storage authority is read-only while full migration integration is under review."};
   const target=options.authoritativeTarget;
   if(target&&!cuttingJobSaveTargetIsCurrent(target))return {saved:false,blocked:true,definiteFailure:true,stateWriteAttempted:false,stateWriteCompleted:false,error:"Cutting-job workspace/backend changed before the transaction."};
   const identityProof=inventoryIdentityRepairAuthorizations.get(options.inventoryIdentityRepairToken);
@@ -4583,7 +4698,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
     if (!cuttingJobHistoryRestoreProofs.has(historyRestoreProof) || cuttingJobHistoryRestoreTransactions.has(historyRestoreProof)) return cuttingJobDeletionFailure("History restoration transaction proof is invalid or already used.");
     cuttingJobHistoryRestoreTransactions.add(historyRestoreProof);
   }
-  const writer = window.OMAXAtomicPersistence?.save;
+  const writer = shardedBackend ? window.OMAXShardedCommit?.save : window.OMAXAtomicPersistence?.save;
   if (typeof writer !== "function" || !window.CuttingFileContentFirewall){
     return { saved:false, blocked:true, definiteFailure:true, indeterminate:false, error:"Cutting-file content firewall is unavailable.", errorCode:"cutting_file_firewall_unavailable", stateWriteAttempted:false, stateWriteCompleted:false, findings:scanAuthoritativeCutFileContent(state).findings };
   }
@@ -4591,7 +4706,19 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
   const loadedState = window.__lastLoadedCloudState;
   const totalHistoryBaseline = loadedState?.syncMeta?.rev === expectedRevision && Array.isArray(loadedState.totalHistory)
     ? loadedState.totalHistory.map(entry => ({ ...entry })) : null;
-  const result = await writer({ db:target?.db||FB.db, docRef:target?.docRef||FB.docRef, state, setOptions,
+  // Same protected mutation prepare() / data-loss guards for both backends.
+  // Storage coordinator handles immutable upload + independent readback +
+  // atomic CAS of stateIndexV1; it never writes the old monolithic state.
+  const shardedArgs = shardedBackend ? {
+    app:FB.app,reader:window.OMAXShardedReadback,
+    stager:window.OMAXWorkingShards,sharder:window.OMAXShardedState,
+    working:window.OMAXWorkingStorage,cryptoApi:crypto,
+    fetchImpl:fetch.bind(window),
+    newId:()=>crypto.randomUUID().replace(/-/g,"_"),
+    now:()=>new Date().toISOString()
+  } : {};
+  const result = await writer({ ...shardedArgs,db:target?.db||FB.db,
+    docRef:target?.docRef||FB.docRef, state, setOptions,
     expectedRevision,
     clientId:getCloudSyncClientId(), scan:scanAuthoritativeCutFileContent,
     prepare:(pending, remote)=>{
@@ -4601,7 +4728,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
       }
       if(identityAuthorized){
         if(stableStringify(remote)!==identityProof.sourceKey||stableStringify(pending)!==identityProof.pendingKey)throw Object.assign(new Error("Inventory repair source or exact authorized changes no longer match."),{definite:true,code:"inventory_repair_conflict"});
-        if(estimatePayloadBytes(pending)>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
+        if(!shardedBackend&&estimatePayloadBytes(pending)>=FIRESTORE_BLOCK_BYTES)throw Object.assign(new Error("Inventory repair payload is too large."),{definite:true,code:"payload_too_large"});
         return pending;
       }
       const proof = options.repairProof;
@@ -4689,7 +4816,7 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
             throw Object.assign(Error("Pump log change differs from the selected record."), {definite:true,code:"pump_log_mutation_rejected"});
         } else pending.pumpEff = mergeUnlessIdentical("pumpEff",mergePumpEffForSave);
       }
-      if (estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
+      if (!shardedBackend && estimatePayloadBytes(pending) >= FIRESTORE_BLOCK_BYTES) throw Object.assign(new Error("Merged state payload is too large."), { definite:true, code:"payload_too_large" });
       // Additional restriction after all existing protected merges. Validation
       // receives an isolated copy and cannot alter the guarded save or bypass
       // CAS, identity, content, size or protected-state gates.
@@ -4724,17 +4851,25 @@ async function writeAuthoritativeStateSnapshot(state, setOptions = { merge:true 
 }
 
 function captureCuttingJobSaveTarget(){
-  const target={db:FB.db,docRef:FB.docRef,path:String(FB.docRef?.path||""),projectId:String(FB.app?.options?.projectId||""),actorUid:String(FB.user?.uid||""),backend:window.OMAXDevSafe?.active?"disposable":"firestore"};
+  const sharded=authoritativeBackendMode==="sharded";
+  const target={db:FB.db,docRef:FB.docRef,path:String(sharded?window.OMAXShardedCommit.INDEX_PATH:FB.docRef?.path||""),projectId:String(FB.app?.options?.projectId||""),actorUid:String(FB.user?.uid||""),backend:window.OMAXDevSafe?.active?"disposable":sharded?"sharded":"firestore"};
   if(!target.db||!target.docRef||!target.path||!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend is unavailable or changed.");
   return Object.freeze(target);
 }
 function cuttingJobSaveTargetIsCurrent(target){
-  if(!target || target.db!==FB.db || target.docRef!==FB.docRef || target.path!==FB.docRef?.path || target.projectId!==String(FB.app?.options?.projectId||"") || target.actorUid!==String(FB.user?.uid||"") || target.backend!==(window.OMAXDevSafe?.active?"disposable":"firestore"))return false;
+  const sharded=authoritativeBackendMode==="sharded";
+  const path=sharded?window.OMAXShardedCommit.INDEX_PATH:FB.docRef?.path;
+  if(!target || target.db!==FB.db || target.docRef!==FB.docRef || target.path!==path || target.projectId!==String(FB.app?.options?.projectId||"") || target.actorUid!==String(FB.user?.uid||"") || target.backend!==(window.OMAXDevSafe?.active?"disposable":sharded?"sharded":"firestore"))return false;
   const aliases=[FB.workspaceRef,window.workspaceRef].filter(Boolean);
-  return (!target.docRef.firestore||target.docRef.firestore===target.db)&&aliases.every(ref=>ref.path===target.path&&(!ref.firestore||ref.firestore===target.db));
+  return (!target.docRef.firestore||target.docRef.firestore===target.db)&&aliases.every(ref=>ref.path===target.docRef.path&&(!ref.firestore||ref.firestore===target.db));
 }
 async function readCuttingJobAuthoritativeSnapshot(target){
   if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend changed before server verification.");
+  if(authoritativeBackendMode === "sharded"){
+    const data=await readShardedAuthoritativeState();
+    if(!cuttingJobSaveTargetIsCurrent(target))throw Error("Cutting-job workspace/backend changed during Storage verification.");
+    return {state:data,fromCache:false,hasPendingWrites:false,path:target.path,backendMatches:true};
+  }
   const snapshot=await target.docRef.get({source:"server"});
   return {state:snapshot?.exists?snapshot.data():null,fromCache:snapshot?.metadata?.fromCache,hasPendingWrites:snapshot?.metadata?.hasPendingWrites,path:snapshot?.ref?.path||target.path,backendMatches:!snapshot?.ref?.firestore||snapshot.ref.firestore===target.db};
 }
@@ -4822,6 +4957,19 @@ function getInventoryIdentityRepairLocalState(){
   return live;
 }
 
+// A single independent reader for current Storage-backed authority, shared by
+// all specialized transaction and verification paths. Missing/changed indices,
+// incomplete shards and missing permissions must block, never fall back.
+async function readShardedAuthoritativeState(){
+  if(!FB.ready||!FB.user||authoritativeBackendMode !== "sharded"
+    ||typeof window.OMAXAuthorityRouter?.fromBrowser!=="function")
+    throw Error("Storage authority cannot be independently verified.");
+  const routed=await window.OMAXAuthorityRouter.fromBrowser();
+  if(routed?.mode!=="sharded"||routed?.verified!==true)
+    throw Error("Storage authority changed or failed readback.");
+  return routed.state;
+}
+
 // Firebase v8 document.get({source:"server"}) uses a SnapshotListener and can
 // reuse an active view that has not observed a just-committed transaction yet.
 // Transaction.get performs a backend lookup independent of that view. This
@@ -4830,6 +4978,12 @@ async function readInventoryMaterialAuthoritativeState(){
   const db = FB.db, docRef = FB.docRef;
   if (!FB.ready || !docRef || typeof db?.runTransaction !== "function")
     throw Error("A backend transaction read is unavailable; material verification cannot use a cached view.");
+  if(authoritativeBackendMode === "sharded"){
+    const state=await readShardedAuthoritativeState();
+    if(!FB.ready || FB.db!==db || FB.docRef!==docRef)
+      throw Error("Material authority changed during Storage verification.");
+    return {revision:state.syncMeta.rev,state,path:window.OMAXShardedCommit.INDEX_PATH,readSource:"storage_manifest_verified"};
+  }
   return db.runTransaction(async transaction=>{
     const snapshot = await transaction.get(docRef);
     const state = snapshot?.exists ? (typeof snapshot.data === "function" ? snapshot.data() : snapshot.data) : null;
@@ -4841,6 +4995,12 @@ async function readInventoryMaterialAuthoritativeState(){
 async function readMaintenanceTaskAuthoritativeState(target){
   if(!cuttingJobSaveTargetIsCurrent(target)||typeof target.db?.runTransaction!=="function")
     throw Error("Task archive transfer requires an independent backend transaction read for the captured workspace.");
+  if(authoritativeBackendMode === "sharded"){
+    const state=await readShardedAuthoritativeState();
+    if(!cuttingJobSaveTargetIsCurrent(target))
+      throw Error("Task archive transfer workspace/backend changed during Storage verification.");
+    return state;
+  }
   // Firebase v8 server-get can still return a stale listener view after commit.
   // Read only through the captured backend; never fall back to document.get.
   const state=await target.db.runTransaction(async transaction=>{
@@ -5303,7 +5463,7 @@ window.cuttingJobImporter = window.CuttingJobImporter?.createApi({
   saveCloudNow:options=>saveCloudNow(options)
 });
 const cuttingJobRepairBackup=async()=>{const state=snapshotState({skipLocalFileCacheSync:true});let materialSettings=null;try{materialSettings=JSON.parse(localStorage.getItem("job_material_pricing_v1")||"null");}catch(_){}if(!exportJsonDownload(`omax-cutting-job-repair-backup-${Date.now()}.json`,{...state,cjiLocalMaterialSettings:materialSettings}))throw new Error("Full-state backup download did not start.");return true;};
-const cuttingJobRepairEnv={state:getCuttingJobImporterState,categories:()=>window.jobFolders||[],baseline:()=>window.__lastLoadedCloudState,setCategories:value=>{setJobFolders(value);jobFolders=window.jobFolders;},revalidateBaseline:async()=>{if(!FB.docRef||!FB.user)return false;const snap=await FB.docRef.get();if(!snap.exists)return false;return Number((snap.data()||{}).syncMeta?.rev||0)===Number((window.__lastLoadedCloudState||{}).syncMeta?.rev||0);},backup:cuttingJobRepairBackup,saveCloudNow:()=>saveCloudNow()};
+const cuttingJobRepairEnv={state:getCuttingJobImporterState,categories:()=>window.jobFolders||[],baseline:()=>window.__lastLoadedCloudState,setCategories:value=>{setJobFolders(value);jobFolders=window.jobFolders;},revalidateBaseline:async()=>{if(!FB.docRef||!FB.user)return false;const state=await readCurrentCloudStateReadOnly();if(!state)return false;return Number(state.syncMeta?.rev||0)===Number((window.__lastLoadedCloudState||{}).syncMeta?.rev||0);},backup:cuttingJobRepairBackup,saveCloudNow:()=>saveCloudNow()};
 const runReadOnlyCuttingJobRepairAudit=window.CuttingJobRepair.createReadOnlyAuditRunner(cuttingJobRepairEnv);
 window.auditCuttingJobHistoryRepair=()=>({...runReadOnlyCuttingJobRepairAudit(),
   financial:window.OMAXFinancialReconciliation.audit(window.completedCuttingJobs,{profit:computeCuttingJobProfit})});
@@ -7259,12 +7419,12 @@ async function performCloudSave(saveOptions = {}){
       return cloudSaveNoWriteFailure("core_business_reduction_blocked", "Core business data reduction was blocked.");
     }
     const sizeBytes = estimatePayloadBytes(snap);
-    if (sizeBytes >= FIRESTORE_WARN_BYTES){
+    if (authoritativeBackendMode !== "sharded" && sizeBytes >= FIRESTORE_WARN_BYTES){
       console.warn("Cloud state size warning", { sizeBytes, warnAt: FIRESTORE_WARN_BYTES, strongWarnAt: FIRESTORE_STRONG_WARN_BYTES, blockAt: FIRESTORE_BLOCK_BYTES });
       logStateSizeDiagnostics(snap, "before-save");
       if (sizeBytes >= FIRESTORE_STRONG_WARN_BYTES) console.error("Cloud state size strong warning", { sizeBytes, strongWarnAt: FIRESTORE_STRONG_WARN_BYTES });
     }
-    if (sizeBytes >= FIRESTORE_BLOCK_BYTES){
+    if (authoritativeBackendMode !== "sharded" && sizeBytes >= FIRESTORE_BLOCK_BYTES){
       if (explicitTrace){
         explicitTrace.payloadSizeBlocked = true;
         explicitTrace.saveCloudInternalReturnValue = "payload_size_blocked";
@@ -7398,17 +7558,36 @@ async function performCloudSave(saveOptions = {}){
     // advancing the loaded revision or reporting success. Retained server log
     // evidence is the sole top-level omission made by ordinary compaction.
     const verified = await readMaintenanceTaskAuthoritativeState(saveTarget);
-    const expectedState = {...snap};
-    if (!Object.prototype.hasOwnProperty.call(expectedState,"syncProcessLog") && Object.prototype.hasOwnProperty.call(remoteData||{},"syncProcessLog")) expectedState.syncProcessLog = remoteData.syncProcessLog;
-    if (!writeResult.committedState || !Number.isSafeInteger(verified?.syncMeta?.rev) || verified.syncMeta.rev <= expectedRevision
-      || stableStringifyForIntegrity(verified) !== stableStringifyForIntegrity(expectedState)
-      || stableStringifyForIntegrity(snap) !== stableStringifyForIntegrity(writeResult.committedState)) throw Error("Acknowledged save did not match independent backend readback. Preserve local evidence and verify before retrying.");
+    if (authoritativeBackendMode === "sharded"){
+      // The immutable coordinator advances syncMeta.rev after preparing the
+      // transaction. Comparing verified data to the OLD local snap would
+      // falsely reject a successful CAS and suspend every Storage-backed save.
+      // Compare instead to the exact committed state, with independent
+      // Storage reconstruction and active-index revision proof.
+      const confirm = window.OMAXShardedAcknowledgement?.confirm;
+      if (typeof confirm !== "function") throw Error("Storage acknowledgement verifier unavailable; preserve commit evidence.");
+      confirm({
+        committedState:writeResult.committedState,
+        verifiedState:verified,
+        expectedRevision,
+        canonical:window.OMAXShardedState?.canonical
+      });
+      writeRev = verified.syncMeta.rev;
+    }else{
+      // Legacy Firestore verification must remain unchanged.
+      const expectedState = {...snap};
+      if (!Object.prototype.hasOwnProperty.call(expectedState,"syncProcessLog") && Object.prototype.hasOwnProperty.call(remoteData||{},"syncProcessLog")) expectedState.syncProcessLog = remoteData.syncProcessLog;
+      if (!writeResult.committedState || !Number.isSafeInteger(verified?.syncMeta?.rev) || verified.syncMeta.rev <= expectedRevision
+        || stableStringifyForIntegrity(verified) !== stableStringifyForIntegrity(expectedState)
+        || stableStringifyForIntegrity(snap) !== stableStringifyForIntegrity(writeResult.committedState)) throw Error("Acknowledged save did not match independent backend readback. Preserve local evidence and verify before retrying.");
+    }
     if (!canWriteCloud("saveCloudInternal")) throw Error("Save committed, but a separate write blocker prevents verified acknowledgement.");
     authoritativeStateVerified = true;
     // An independent read proves this commit, but a listener may already have
     // adopted a newer authoritative revision while the read was in flight.
     if (typeof window !== "undefined" && Math.max(Number(window.__loadedCloudRevisionForSaveGuard||0),Number(window.__lastLoadedCloudState?.syncMeta?.rev||0)) <= verified.syncMeta.rev){
-      window.__loadedCloudRevisionForSaveGuard = Number(snap?.syncMeta?.rev || 0);
+      window.__loadedCloudRevisionForSaveGuard = authoritativeBackendMode === "sharded"
+        ? verified.syncMeta.rev : Number(snap?.syncMeta?.rev || 0);
       if (explicitTrace){
         explicitTrace.loadedRevUpdatedAfterSuccessfulSave = true;
         explicitTrace.loadedRevAfterSave = Number(window.__loadedCloudRevisionForSaveGuard || 0);
@@ -7460,7 +7639,9 @@ async function performCloudSave(saveOptions = {}){
       stateWriteAttempted:true,
       stateWriteCompleted:true,
       verified:true,
-      path:FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`,
+      path:authoritativeBackendMode === "sharded"
+        ? (writeResult.path || "workspaces/github-prod/app/stateIndexV1")
+        : (FB.docRef?.path || `workspaces/${WORKSPACE_ID}/app/state`),
       warnings
     };
   }catch(e){
@@ -7692,6 +7873,31 @@ function mergePumpEffForSave(localPump, remotePump){
     const retention = validatePumpBaselineRetention(remote,{...local,baselineHistory});
     if (!retention.valid) throw Error(retention.error);
   }
+  // An unrelated whole-app save is not a pump edit. Preserve identical
+  // authoritative history verbatim, including record order, RPM precision,
+  // note whitespace and extension fields; retain the merge for actual drift.
+  if (localPump && remotePump && typeof localPump === "object" && typeof remotePump === "object"
+    && !Array.isArray(localPump) && !Array.isArray(remotePump)
+    && stableStringifyForIntegrity(local) === stableStringifyForIntegrity(remote))
+    return JSON.parse(JSON.stringify(remote));
+  // A reviewed history append must also keep every existing measurement and
+  // all non-measurement evidence exact. Recognize only a valid, unique-date
+  // superset retaining the complete remote sequence; missing or changed remote
+  // evidence still goes through the existing guarded merge below.
+  const localEntries=Array.isArray(local.entries)?local.entries:null;
+  const remoteEntries=Array.isArray(remote.entries)?remote.entries:null;
+  const withoutEntries=pump=>Object.fromEntries(Object.entries(pump).filter(([field])=>field!=="entries"));
+  const validEntries=entries=>new Set(entries.map(entry=>entry?.dateISO)).size===entries.length
+    &&entries.every(entry=>entry&&typeof entry==="object"&&!Array.isArray(entry)
+      &&typeof entry.dateISO==="string"&&normalizeDateISO(entry.dateISO)===entry.dateISO
+      &&Number.isFinite(Number(entry.rpm))&&Number(entry.rpm)>0);
+  if(localEntries&&remoteEntries&&localEntries.length>remoteEntries.length
+    &&validEntries(localEntries)&&validEntries(remoteEntries)
+    &&stableStringifyForIntegrity(withoutEntries(local))===stableStringifyForIntegrity(withoutEntries(remote))){
+    const remoteDates=new Set(remoteEntries.map(entry=>entry.dateISO));
+    if(stableStringifyForIntegrity(localEntries.filter(entry=>remoteDates.has(entry.dateISO)))===stableStringifyForIntegrity(remoteEntries))
+      return JSON.parse(JSON.stringify(local));
+  }
   const evidence = pump=>Object.fromEntries(Object.entries(pump).filter(([field])=>field !== "baselineHistory"));
   // Baseline-only changes must not round, re-date, reorder or trim measurements
   // and notes. Preserve the complete unchanged evidence verbatim.
@@ -7868,7 +8074,9 @@ async function saveWaterQualityCheck(request){
   };
   const read=async()=>{
     const envelope=await readInventoryMaterialAuthoritativeState();
-    if(!cuttingJobSaveTargetIsCurrent(target)||envelope?.readSource!=="backend_transaction"||envelope.path!==target.path
+    const expectedReadSource=authoritativeBackendMode==="sharded"?"storage_manifest_verified":"backend_transaction";
+    const expectedPath=authoritativeBackendMode==="sharded"?window.OMAXShardedCommit.INDEX_PATH:target.path;
+    if(!cuttingJobSaveTargetIsCurrent(target)||envelope?.readSource!==expectedReadSource||envelope.path!==expectedPath
       ||!envelope.state||!Number.isSafeInteger(envelope.revision)||envelope.revision!==envelope.state.syncMeta?.rev)
       throw Error("Water-quality verification requires an independent read of the current backend document.");
     return cloneStructured(envelope.state);
@@ -7950,7 +8158,8 @@ async function saveCuttingJobCategoryChange(request){
   };
   const read=async()=>{
     const envelope=await readInventoryMaterialAuthoritativeState();
-    if(!cuttingJobSaveTargetIsCurrent(target)||envelope?.path!==target.path
+    const expectedPath=authoritativeBackendMode==="sharded"?window.OMAXShardedCommit.INDEX_PATH:target.path;
+    if(!cuttingJobSaveTargetIsCurrent(target)||envelope?.path!==expectedPath
       ||!envelope.state||!Number.isSafeInteger(envelope.revision)
       ||envelope.revision!==envelope.state.syncMeta?.rev)throw Error("Independent category backend read is incomplete or changed.");
     return cloneStructured(envelope.state);
@@ -8041,7 +8250,8 @@ async function savePumpBaseline(action){
     // a write and cannot reuse Firebase v8's active/cached snapshot view.
     const envelope = await readInventoryMaterialAuthoritativeState();
     const state = envelope?.state;
-    if (!targetMatches() || envelope?.path !== targetDoc?.path || !state || typeof state !== "object" || Array.isArray(state) || !state.pumpEff || typeof state.pumpEff !== "object"
+    const expectedPath=authoritativeBackendMode==="sharded"?window.OMAXShardedCommit.INDEX_PATH:targetDoc?.path;
+    if (!targetMatches() || envelope?.path !== expectedPath || !state || typeof state !== "object" || Array.isArray(state) || !state.pumpEff || typeof state.pumpEff !== "object"
       || !Number.isSafeInteger(envelope.revision) || envelope.revision !== state.syncMeta?.rev) throw Error("Independent authoritative pump read is incomplete or has an invalid revision.");
     return cloneStructured(state);
   };
@@ -8139,7 +8349,8 @@ async function savePumpLogChange(action){
     // a write and cannot reuse Firebase v8's active/cached snapshot view.
     const envelope = await readInventoryMaterialAuthoritativeState();
     const state = envelope?.state;
-    if (!targetMatches() || envelope?.path !== targetDoc?.path || !state || typeof state !== "object" || Array.isArray(state) || !state.pumpEff || typeof state.pumpEff !== "object"
+    const expectedPath=authoritativeBackendMode==="sharded"?window.OMAXShardedCommit.INDEX_PATH:targetDoc?.path;
+    if (!targetMatches() || envelope?.path !== expectedPath || !state || typeof state !== "object" || Array.isArray(state) || !state.pumpEff || typeof state.pumpEff !== "object"
       || !Number.isSafeInteger(envelope.revision) || envelope.revision !== state.syncMeta?.rev) throw Error("Independent authoritative pump read is incomplete or has an invalid revision.");
     return cloneStructured(state);
   };
@@ -8246,8 +8457,7 @@ async function runRecoveryInspect(){
   let cloudState = null;
   try {
     if (FB.ready && FB.docRef){
-      const snap = await FB.docRef.get();
-      cloudState = snap?.exists ? (typeof snap.data === "function" ? snap.data() : snap.data) : null;
+      cloudState = await readCurrentCloudStateReadOnly();
     }
   } catch (err){ console.warn("Recovery inspect cloud read failed", err); }
   const localBackup = readLocalStateBackup();
@@ -8280,7 +8490,11 @@ function checkAuthoritativeIdentityIntegrity(data){
     if((entry.expectedShape==="array"&&!array)||(entry.expectedShape==="object"&&!object)||(entry.expectedShape==="arrayOrObject"&&!array&&!object))blockers.push(`Protected field ${entry.path} has invalid shape.`);
   }
   if(scanAuthoritativeCutFileContent(data).contaminated)blockers.push("Protected cutting-file content firewall rejected authoritative state.");
-  if(estimatePayloadBytes(data)>=FIRESTORE_BLOCK_BYTES)blockers.push("Protected authoritative payload exceeds the save limit.");
+  // Storage-backed data is still validated for schema, identities, retained
+  // records, and dangerous reductions. Its size is not a Firestore document
+  // size issue because this is a verified read-only Storage reconstruction.
+  if(authoritativeBackendMode !== "sharded" && estimatePayloadBytes(data)>=FIRESTORE_BLOCK_BYTES)
+    blockers.push("Protected authoritative payload exceeds the save limit.");
   if(check.valid&&!blockers.length){
     // Assess the authoritative document itself, without treating local caches
     // as restore sources. This runs the existing registry/coverage/compaction
@@ -8339,15 +8553,44 @@ async function loadFromCloud(){
   if (!FB.ready || !FB.docRef) return;
   setCloudLoadGate({ loadComplete:false, adoptComplete:false });
   try {
-    const snap = await FB.docRef.get({ source:"server" });
-    const data = snap.exists ? snap.data() : null;
-    if (!snap.exists || !stateHasMeaningfulData(data)){
+    // Active authority index wins; a missing/unverifiable index read must
+    // never be treated as permission to use a stale legacy document.
+    // In an authenticated production workspace, an inaccessible/missing
+    // authority selector must never silently fall back to a stale legacy
+    // document. The disposable OMAXDevSafe backend remains unchanged.
+    let routed = null;
+    if (!window.OMAXDevSafe?.active){
+      if (FB.app?.options?.projectId !== "wj-tracker-v2"
+        || typeof window.OMAXAuthorityRouter?.fromBrowser !== "function")
+        throw Error("OMAX authoritative source router unavailable. Cloud writes remain disabled.");
+      routed = await window.OMAXAuthorityRouter.fromBrowser();
+      if (!routed?.verified || !["legacy","sharded"].includes(routed.mode))
+        throw Error("OMAX authoritative source verification failed.");
+    }
+    const snap = routed ? null : await FB.docRef.get({ source:"server" });
+    const data = routed ? routed.state : (snap?.exists ? snap.data() : null);
+    authoritativeBackendMode = routed?.mode || "legacy";
+    window.__omaxActiveStateBackend = authoritativeBackendMode;
+    if (!data || !stateHasMeaningfulData(data)){
       enterMissingStateRecovery(data);
       return { loaded:false, recovery:true, reason:"authoritative_state_missing_or_empty" };
     }
-    return adoptIdentityCheckedAuthoritativeState(data);
+    const adopted = adoptIdentityCheckedAuthoritativeState(data);
+    if (routed?.mode === "sharded" && !MCAP_SHARDED_WRITES_ACTIVE){
+      // Storage reads work; writes, specialized mutation handlers and realtime
+      // adoption must stay read-only until all old client save paths are routed.
+      window.__autosaveDisabled = true;
+      window.__recoveryInspectMode = true;
+      window.__recoveryReason = "Storage-backed authority loaded read-only. Full save/cutover implementation is not active.";
+      renderRecoveryDiagnosticsPanel();
+      return {loaded:true,recovery:true,reason:"storage_authority_readonly",
+        revision:routed.revision,backend:"sharded"};
+    }
+    return adopted;
   } catch (error){
     console.error("Cloud load failed:", error);
+    authoritativeBackendMode = "unknown";
+    window.__omaxActiveStateBackend = null;
     setCloudLoadGate({ loadComplete:true, adoptComplete:false });
     window.__recoveryInspectMode = true;
     window.__autosaveDisabled = true;

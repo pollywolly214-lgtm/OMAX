@@ -28,7 +28,7 @@ function client(b,id="computer-b",flags={}){
  if(flags.storageGetterFailure)Object.defineProperty(window,"localStorage",{get(){throw Error("SecurityError");}});
  if(flags.storageWriteFailure)storage.getItem=()=>null;
  for(const name of bindings)window[name]=[];
- const c=vm.createContext({window,Date,TextEncoder,Blob,structuredClone,URLSearchParams,console:{warn(){},error(){},info(){}},FB:{ready:true,user:{uid:"same-authorized-uid"},db:b.db,docRef:{path:"workspaces/fixture/app/state"}},
+ const c=vm.createContext({authoritativeBackendMode:"legacy",MCAP_SHARDED_WRITES_ACTIVE:false,window,Date,TextEncoder,Blob,structuredClone,URLSearchParams,console:{warn(){},error(){},info(){}},FB:{ready:true,user:{uid:"same-authorized-uid"},db:b.db,docRef:{path:"workspaces/fixture/app/state"}},
   WORKSPACE_ID:"fixture",FIRESTORE_BLOCK_BYTES:975000,FIRESTORE_WARN_BYTES:800000,FIRESTORE_STRONG_WARN_BYTES:900000,
   isVercelPreviewRuntime:()=>false,renderRecoveryDiagnosticsPanel(){},showLocalBackupConflictWarning(){},syncRenderTotalsFromHistory(){},resetHistoryToCurrent(){},
   setCloudLoadGate:v=>{window.__cloudLoadAttemptComplete=v.loadComplete;window.__initialAdoptComplete=v.adoptComplete;},

@@ -244,7 +244,10 @@
         // Only older, server-proven revisions qualify for a bounded read-only
         // window. There is exactly one write above this loop, never a mutation
         // replay. Each attempt has its own deadline; late reads cannot adopt.
-        const delays=[0,250,750], readTimeoutMs=3000;
+        // Storage authority reconstructs and hashes every immutable field and
+        // segment. Its read cannot use the single-document Firestore deadline.
+        // Both remain bounded; timeout still suspends without replay/adoption.
+        const delays=[0,250,750], readTimeoutMs=target?.backend==="sharded"?60000:3000;
         if(target?.path){result.verificationDocumentPath=String(target.path).slice(0,200);result.verificationProjectId=String(target.projectId||"").slice(0,80);result.verificationBackend=target.backend;}
         for(let attempt=0;attempt<delays.length;attempt++){
           if(!committed || !Number.isSafeInteger(result.committedRevision) || result.committedRevision<=expectedRevision)break;

@@ -1,0 +1,248 @@
+name: MCAP Storage migration safety
+
+on:
+  pull_request:
+    paths:
+      - "js/omax*.js"
+      - "js/core.js"
+      - "tests/omax-*.test.js"
+      - "tests/mcap-storage-*.test.js"
+      - "tests/mcap-core-write-gate.test.js"
+      - ".github/workflows/mcap-storage-test.yml"
+      - "docs/firestore-sharded-cutover-PROPOSAL.rules"
+      - "tests/mcap-firestore-cutover.emulator.cjs"
+      - "tests/mcap-sharded-backend.emulator.cjs"
+      - "tests/mcap-browser-smoke.browser.cjs"
+      - "tests/mcap-active-browser-readonly.browser.cjs"
+      - "tests/mcap-active-browser-save.browser.cjs"
+      - "tests/mcap-specialized-browser.browser.cjs"
+      - "tests/mcap-recovery-browser.browser.cjs"
+      - "tests/fixtures/mcap-active-browser.cjs"
+      - "scripts/mcap-emulator-browser.cjs"
+      - "tests/mcap-real-firebase.browser.cjs"
+      - "tests/mcap-real-firebase-receipts.browser.cjs"
+      - "tests/mcap-real-firebase-recovery.browser.cjs"
+      - "tests/mcap-real-firebase-backup.browser.cjs"
+      - "tests/fixtures/mcap-receipts.cjs"
+      - "tests/fixtures/mcap-recovery-phases.cjs"
+      - "tests/fixtures/mcap-database-backup.cjs"
+      - "tests/fixtures/mcap-backup-inventory.cjs"
+      - "tests/fixtures/mcap-emulator-identity.cjs"
+      - "storage.rules"
+      - "tests/water-quality-persistence.test.js"
+      - "tests/pump-baseline.test.js"
+      - "tests/polishv2-pump-log.test.js"
+      - "tests/inventory-material-persistence.test.js"
+      - "tests/cjo04-review.test.js"
+      - "js/cfr05CloudCuttingFiles.js"
+      - "js/cfr04WorkspaceMetadata.js"
+      - "js/cuttingJobChronology.js"
+      - "tests/cjo04b-verification.test.js"
+      - "tests/cjo04c-readback.test.js"
+      - "tests/cfr05-cloud-cutting-files.test.js"
+      - "tests/cfr05-storage-cleanup-rules.test.js"
+      - "tests/cfr05-cloud-presentation.test.js"
+      - "tests/cfr05-hydration-navigation.test.js"
+      - "tests/purchase-orders.test.js"
+      - "tests/purchase-orders.browser.cjs"
+      - "tests/purchase-financials.test.js"
+      - "tests/weekly-cost-report-baseline.test.js"
+      - "tests/opportunity-authority.test.js"
+      - "js/opportunity.js"
+      - "js/purchaseOrders.js"
+      - "js/purchaseFinancials.js"
+      - "js/cloudFilePresentation.js"
+      - "tests/fixtures/mcap-cutting-files.cjs"
+      - "tests/fixtures/mcap-job-import-ui.cjs"
+      - "tests/rfs02-normal-harness.cjs"
+      - "tests/cjd01-job-deletion.test.js"
+      - "tests/cjd02-job-restore.test.js"
+      - "tests/cutting-job-import.test.js"
+      - "tests/cji-*.test.js"
+      - "tests/import-selective-rollback.test.js"
+      - "js/renderers.js"
+      - "js/cuttingJobImporter.js"
+      - "js/cuttingJobImportDownload.js"
+      - "js/cuttingJobHistory.js"
+      - "assets/vendor/cji-xlsx-parser.js"
+      - "tests/fixtures/mcap-firebase-browser-write-mock.js"
+      - "tests/fixtures/mcap-firebase-browser-mock.js"
+      - "mcap-firestore-emulator.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: Validate isolated migration modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax validation
+        run: |
+          node --check js/core.js
+          node --check js/cuttingJobChronology.js
+          node --check js/renderers.js
+          node --check js/opportunity.js
+          node --check js/omaxAuthorityRouter.js
+          node --check js/omaxShardedActivation.js
+          node --check js/omaxShardedCommit.js
+          node --check js/omaxShardedAcknowledgement.js
+          node --check js/omaxShardedState.js
+          node --check js/omaxWorkingShards.js
+          node --check js/omaxShardedReadback.js
+      - name: Migration regression suite
+        run: >
+          node --test
+          tests/mcap-storage-foundation.test.js
+          tests/mcap-storage-transport.test.js
+          tests/mcap-core-write-gate.test.js
+          tests/omax-sharded-state.test.js
+          tests/omax-working-storage.test.js
+          tests/omax-working-shards.test.js
+          tests/omax-sharded-commit.test.js
+          tests/omax-sharded-acknowledgement.test.js
+          tests/omax-sharded-activation.test.js
+          tests/omax-authority-router.test.js
+          tests/water-quality-persistence.test.js
+          tests/pump-baseline.test.js
+          tests/polishv2-pump-log.test.js
+          tests/inventory-material-persistence.test.js
+          tests/cjo04-review.test.js
+          tests/cfr05-cloud-cutting-files.test.js
+          tests/cfr05-storage-cleanup-rules.test.js
+          tests/cfr05-cloud-presentation.test.js
+          tests/cfr05-hydration-navigation.test.js
+          tests/omax-sharded-chronology-deadline.test.js
+          tests/cjo04b-verification.test.js
+          tests/cjo04c-readback.test.js
+          tests/cjd01-job-deletion.test.js
+          tests/cjd02-job-restore.test.js
+          tests/cutting-job-import.test.js
+          tests/cji-02a-backup-action.test.js
+          tests/cji-02d-preview-stability.test.js
+          tests/cji-02g-cutting-import-identities.test.js
+          tests/cji-02-project-category-import.test.js
+          tests/import-selective-rollback.test.js
+          tests/purchase-orders.test.js
+          tests/purchase-financials.test.js
+          tests/weekly-cost-report-baseline.test.js
+          tests/opportunity-authority.test.js
+
+  cutover-rules:
+    name: Test proposed cutover rules in disposable Firestore emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GCLOUD_PROJECT: demo-mcap-security
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install isolated emulator-only test dependencies
+        run: |
+          mkdir -p "$RUNNER_TEMP/mcap-firebase"
+          npm install --prefix "$RUNNER_TEMP/mcap-firebase" --no-save --no-audit --no-fund \
+            firebase-tools@15.32.1 firebase@12.16.0 @firebase/rules-unit-testing@5.0.0
+          echo "NODE_PATH=$RUNNER_TEMP/mcap-firebase/node_modules" >> "$GITHUB_ENV"
+      - name: Real Firestore rules emulator tests (demo project ONLY)
+        run: |
+          test "$GCLOUD_PROJECT" = "demo-mcap-security"
+          "$RUNNER_TEMP/mcap-firebase/node_modules/.bin/firebase" emulators:exec \
+            --only firestore --project demo-mcap-security \
+            --config mcap-firestore-emulator.json \
+            'node --test --test-concurrency=1 tests/mcap-firestore-cutover.emulator.cjs tests/mcap-sharded-backend.emulator.cjs'
+
+  browser-smoke:
+    name: Disposable website startup and save/reload smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install isolated Playwright (no repo package.json)
+        run: |
+          mkdir -p "$RUNNER_TEMP/mcap-browser"
+          npm install --prefix "$RUNNER_TEMP/mcap-browser" --no-save --no-audit --no-fund playwright@1.56.1
+          echo "NODE_PATH=$RUNNER_TEMP/mcap-browser/node_modules" >> "$GITHUB_ENV"
+      - name: Provision disposable headless Chromium
+        run: "$RUNNER_TEMP/mcap-browser/node_modules/.bin/playwright install chromium"
+      - name: Run isolated OMAXDevSafe browser smoke (no Firebase traffic)
+        run: |
+          node --check tests/mcap-browser-smoke.browser.cjs
+          node --check tests/mcap-active-browser-readonly.browser.cjs
+          node --check tests/mcap-active-browser-save.browser.cjs
+          node --check tests/mcap-specialized-browser.browser.cjs
+          node --check tests/mcap-recovery-browser.browser.cjs
+          node --check tests/fixtures/mcap-active-browser.cjs
+          node --check tests/fixtures/mcap-firebase-browser-write-mock.js
+          node --check tests/fixtures/mcap-firebase-browser-mock.js
+          node --test --test-concurrency=1 tests/mcap-browser-smoke.browser.cjs tests/mcap-active-browser-readonly.browser.cjs tests/mcap-active-browser-save.browser.cjs tests/mcap-specialized-browser.browser.cjs tests/mcap-recovery-browser.browser.cjs tests/purchase-orders.browser.cjs
+
+  real-firebase-browser:
+    name: Actual Firebase SDK browser (${{ matrix.suite }}) with Auth, Firestore and Storage emulators
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [core, receipts, recovery, backup]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install isolated emulator and exact application SDK dependencies
+        run: |
+          mkdir -p "$RUNNER_TEMP/mcap-real-browser"
+          npm install --prefix "$RUNNER_TEMP/mcap-real-browser" --no-save --no-audit --no-fund \
+            firebase-tools@15.32.1 firebase@8.10.1 playwright@1.56.1
+          echo "NODE_PATH=$RUNNER_TEMP/mcap-real-browser/node_modules" >> "$GITHUB_ENV"
+      - name: Provision disposable headless Chromium
+        run: "$RUNNER_TEMP/mcap-real-browser/node_modules/.bin/playwright install chromium"
+      - name: Real browser and all three local Firebase services (demo project ONLY)
+        run: |
+          node --check scripts/mcap-emulator-browser.cjs
+          node --check tests/mcap-real-firebase.browser.cjs
+          node --check tests/mcap-real-firebase-receipts.browser.cjs
+          node --check tests/mcap-real-firebase-recovery.browser.cjs
+          node --check tests/mcap-real-firebase-backup.browser.cjs
+          node --check tests/fixtures/mcap-receipts.cjs
+          node --check tests/fixtures/mcap-recovery-phases.cjs
+          node --check tests/fixtures/mcap-database-backup.cjs
+          node --check tests/fixtures/mcap-backup-inventory.cjs
+          node --check tests/fixtures/mcap-emulator-identity.cjs
+          node --check tests/fixtures/mcap-cutting-files.cjs
+          node --check tests/fixtures/mcap-job-import-ui.cjs
+          node scripts/mcap-emulator-browser.cjs ${{ matrix.suite }}
+      - name: Retain synthetic emulator diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcap-demo-browser-emulator-logs-${{ matrix.suite }}
+          path: |
+            firebase-debug.log
+            firestore-debug.log
+            storage-debug.log
+            artifacts/mcap-database-backup-*/
+          if-no-files-found: ignore
