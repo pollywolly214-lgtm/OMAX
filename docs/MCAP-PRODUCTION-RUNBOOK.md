@@ -2,6 +2,18 @@
 
 Status: **preparation only; production cutover is not authorized**. PR #532 remains Draft and `MCAP_SHARDED_WRITES_ACTIVE` remains false. Use [MCAP-CUTOVER-ACCEPTANCE.md](MCAP-CUTOVER-ACCEPTANCE.md) for verified checkpoint results and [mcap-real-firebase-browser-tests.md](mcap-real-firebase-browser-tests.md) to reproduce engineering acceptance. This document defines the concrete evidence and sequence an operator must review; it performs no deployment or migration.
 
+## Verified preparation checkpoint — November 25, 2026
+
+Read-only production evidence and independent backup verification have advanced since the application-source checkpoint at `6ac823f04049b867a6d33123a04ad519a93d7746`. The complete legacy source matched the existing immutable Storage candidate. The separate logical JSON reconstructed exactly offline; the actual managed Firestore export and captured live Storage objects restored into isolated local emulators. Native SDK reads verified restored attachment access and complete state equality. No new candidate was staged and no authority index was created.
+
+The user supplied authenticated configuration captures without reported API gaps. Released Firestore and Storage policies match the reviewed proposal and supplied Storage baseline token-for-token. Account records, returned password hashes/salts and SCRYPT configuration, sign-in/provider settings and Firestore index/field/TTL configuration are retained privately. Local account import preserved identity, flags, provider identity, claims and credential bytes, and emulator-only custom-token sign-in verified owner membership and exact restored state access.
+
+**Credential-verification limit:** production SCRYPT password sign-in was not replayed. The pinned Auth emulator uses a synthetic password hash implementation. The local result proves account-record and credential-byte preservation, not production password authentication. Original account/session metadata remains retained; local import intentionally advances session cutoff and password-update time. The service captures also occurred at different times and are not a single stopped-writer snapshot. These limits remain inputs to the final cutover decision.
+
+Original backups, raw configuration, private identities, digests and restore reports remain outside the disposable worktree and excluded from Git. The repository contains only this sanitized checkpoint. Backup checks and browser-console probes prepared locally did not change application source and did not themselves create Vercel deployments.
+
+The user confirmed GitHub Pages as the intended live site. Read-only deployment checks found that it still serves the existing `main` baseline and does not load MCAP authority modules; Pages publishes the repository root from `main`. A fresh Vercel preview is requested for testing before any merge. Record its actual deployment URL, commit, creation time and successful CI result rather than treating the prior preview as a new deployment. This documentation refresh does not enable sharded writes, change Firebase configuration, authorize production deployment or relax the release gates below.
+
 ## 1. Freeze the reviewed release
 
 Record the exact PR head, all seven CI job conclusions, preview URL/deployment SHA, and SHA-256 of the reviewed app/rule artifacts. All four actual-SDK suites (core, receipts, recovery, backup) must run unfiltered. A previous green revision does not approve a changed head. Preserve the legacy/DevSafe test results with the active-backend results.
